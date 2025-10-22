@@ -1,0 +1,39 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Main gradient for the flame/droplet shape -->
+    <linearGradient id="flameGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#00FFFF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#0080FF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8000FF;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge> 
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background circle for glow effect -->
+  <circle cx="100" cy="100" r="90" fill="url(#flameGradient)" opacity="0.3" filter="url(#glow)"/>
+  
+  <!-- Main flame/droplet shape -->
+  <path d="M100 30 
+           C120 30, 140 50, 140 80
+           C140 100, 130 120, 120 130
+           C115 140, 110 150, 100 160
+           C90 150, 85 140, 80 130
+           C70 120, 60 100, 60 80
+           C60 50, 80 30, 100 30 Z" 
+        fill="url(#flameGradient)" 
+        filter="url(#glow)"/>
+  
+  <!-- Left eye -->
+  <ellipse cx="85" cy="90" rx="8" ry="12" fill="#F0F0F0"/>
+  
+  <!-- Right eye -->
+  <ellipse cx="115" cy="90" rx="8" ry="12" fill="#F0F0F0"/>
+</svg>

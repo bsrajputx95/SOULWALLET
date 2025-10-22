@@ -1,0 +1,28 @@
+<svg width="108" height="108" viewBox="0 0 108 108" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Adaptive gradient -->
+    <linearGradient id="adaptiveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#00FFFF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#0080FF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8000FF;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Adaptive icon background -->
+  <rect width="108" height="108" rx="24" fill="url(#adaptiveGradient)"/>
+  
+  <!-- Centered flame/droplet shape -->
+  <path d="M54 20 
+           C65 20, 75 30, 75 45
+           C75 55, 70 65, 65 70
+           C62 75, 58 80, 54 85
+           C50 80, 46 75, 43 70
+           C38 65, 33 55, 33 45
+           C33 30, 43 20, 54 20 Z" 
+        fill="white" 
+        opacity="0.9"/>
+  
+  <!-- Eyes -->
+  <ellipse cx="47" cy="50" rx="3" ry="5" fill="#0080FF"/>
+  <ellipse cx="61" cy="50" rx="3" ry="5" fill="#0080FF"/>
+</svg>

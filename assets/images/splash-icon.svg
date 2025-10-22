@@ -1,0 +1,49 @@
+<svg width="300" height="300" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Main gradient for the flame/droplet shape -->
+    <radialGradient id="splashGradient" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#00FFFF;stop-opacity:1" />
+      <stop offset="40%" style="stop-color:#0080FF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8000FF;stop-opacity:1" />
+    </radialGradient>
+    
+    <!-- Enhanced glow effect for splash -->
+    <filter id="splashGlow">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge> 
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Background glow -->
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#0080FF;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#000000;stop-opacity:1" />
+    </radialGradient>
+  </defs>
+  
+  <!-- Dark background with glow -->
+  <rect width="300" height="300" fill="url(#bgGlow)"/>
+  
+  <!-- Background glow circles -->
+  <circle cx="150" cy="150" r="120" fill="url(#splashGradient)" opacity="0.2" filter="url(#splashGlow)"/>
+  <circle cx="150" cy="150" r="100" fill="url(#splashGradient)" opacity="0.3" filter="url(#splashGlow)"/>
+  
+  <!-- Main flame/droplet shape - larger for splash -->
+  <path d="M150 60 
+           C180 60, 210 90, 210 130
+           C210 160, 195 190, 180 205
+           C170 220, 160 235, 150 250
+           C140 235, 130 220, 120 205
+           C105 190, 90 160, 90 130
+           C90 90, 120 60, 150 60 Z" 
+        fill="url(#splashGradient)" 
+        filter="url(#splashGlow)"/>
+  
+  <!-- Left eye -->
+  <ellipse cx="130" cy="140" rx="12" ry="18" fill="#F0F0F0"/>
+  
+  <!-- Right eye -->
+  <ellipse cx="170" cy="140" rx="12" ry="18" fill="#F0F0F0"/>
+</svg>

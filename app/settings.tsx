@@ -1,0 +1,432 @@
+import React, { useState } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  Share,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Stack, useRouter } from 'expo-router';
+import {
+  ArrowLeft,
+  Wallet,
+  Key,
+  Eye,
+  EyeOff,
+  Copy,
+  Mail,
+  Phone,
+  HelpCircle,
+  ExternalLink,
+  Share2,
+  Link,
+} from 'lucide-react-native';
+
+import { COLORS } from '../constants/colors';
+import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
+import { NeonCard } from '../components/NeonCard';
+import { NeonButton } from '../components/NeonButton';
+import { useAuth } from '../hooks/auth-store';
+
+export default function SettingsScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [showMnemonic, setShowMnemonic] = useState(false);
+
+  // Get wallet data from user or use fallback
+  const walletData = user?.walletData || {
+    publicKey: user?.walletAddress || 'No wallet connected',
+    privateKey: 'No wallet connected',
+    mnemonic: 'No wallet connected',
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      // In a real app, you'd use Clipboard.setString(text)
+      Alert.alert('Copied!', `${label} copied to clipboard`);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to copy to clipboard');
+    }
+  };
+
+  const shareWallet = async () => {
+    try {
+      await Share.share({
+        message: `My Solana wallet address: ${walletData.publicKey}`,
+        title: 'My Wallet Address',
+      });
+    } catch (error) {
+      if (__DEV__) console.error('Error sharing:', error);
+    }
+  };
+
+  const openSupport = () => {
+    Alert.alert(
+      'Support',
+      'Choose your preferred support method:',
+      [
+        { text: 'Email Support', onPress: () => { if (__DEV__) console.log('Email support'); } },
+        { text: 'Live Chat', onPress: () => { if (__DEV__) console.log('Live chat'); } },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const linkGmail = () => {
+    Alert.alert(
+      'Link Gmail',
+      'Enter your Gmail address to link your account:',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Link',
+          onPress: () => {
+            // In a real app, this would open a text input or OAuth flow
+            Alert.alert('Success', 'Gmail account linked successfully!');
+          },
+        },
+      ]
+    );
+  };
+
+  const linkMobile = () => {
+    Alert.alert(
+      'Link Mobile Number',
+      'Enter your mobile number to link your account:',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Link',
+          onPress: () => {
+            // In a real app, this would open a text input or SMS verification
+            Alert.alert('Success', 'Mobile number linked successfully!');
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <Stack.Screen
+        options={{
+          title: 'Settings',
+          headerStyle: { backgroundColor: COLORS.background },
+          headerTintColor: COLORS.textPrimary,
+          headerTitleStyle: {
+            ...FONTS.phantomBold,
+            fontSize: 18,
+          },
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backButton}
+            >
+              <ArrowLeft size={24} color={COLORS.textPrimary} />
+            </TouchableOpacity>
+          ),
+          headerBackVisible: false,
+        }}
+      />
+
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* User Info */}
+        <NeonCard style={styles.userCard}>
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>@{user?.username || 'user'}</Text>
+            <Text style={styles.userEmail}>{user?.email || 'user@example.com'}</Text>
+          </View>
+        </NeonCard>
+
+        {/* Wallet Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Wallet Information</Text>
+          
+          <NeonCard style={styles.walletCard}>
+            <View style={styles.walletItem}>
+              <View style={styles.walletItemHeader}>
+                <Wallet size={20} color={COLORS.solana} />
+                <Text style={styles.walletItemTitle}>Public Key</Text>
+                <TouchableOpacity
+                  onPress={() => copyToClipboard(walletData.publicKey, 'Public key')}
+                  style={styles.copyButton}
+                >
+                  <Copy size={16} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.walletAddress}>
+                {walletData.publicKey.length > 16 
+                  ? `${walletData.publicKey.slice(0, 8)}...${walletData.publicKey.slice(-8)}`
+                  : walletData.publicKey}
+              </Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.walletItem}>
+              <View style={styles.walletItemHeader}>
+                <Key size={20} color={COLORS.error} />
+                <Text style={styles.walletItemTitle}>Private Key</Text>
+                <View style={styles.walletActions}>
+                  <TouchableOpacity
+                    onPress={() => setShowPrivateKey(!showPrivateKey)}
+                    style={styles.eyeButton}
+                  >
+                    {showPrivateKey ? (
+                      <EyeOff size={16} color={COLORS.textSecondary} />
+                    ) : (
+                      <Eye size={16} color={COLORS.textSecondary} />
+                    )}
+                  </TouchableOpacity>
+                  {showPrivateKey && (
+                    <TouchableOpacity
+                      onPress={() => copyToClipboard(walletData.privateKey, 'Private key')}
+                      style={styles.copyButton}
+                    >
+                      <Copy size={16} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+              <Text style={styles.walletAddress}>
+                {showPrivateKey
+                  ? (walletData.privateKey.length > 16 
+                      ? `${walletData.privateKey.slice(0, 8)}...${walletData.privateKey.slice(-8)}`
+                      : walletData.privateKey)
+                  : '•••••••••••••••••••••••••••••••••••••••••••••••••••••'}
+              </Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.walletItem}>
+              <View style={styles.walletItemHeader}>
+                <Key size={20} color={COLORS.binance} />
+                <Text style={styles.walletItemTitle}>Recovery Phrase</Text>
+                <View style={styles.walletActions}>
+                  <TouchableOpacity
+                    onPress={() => setShowMnemonic(!showMnemonic)}
+                    style={styles.eyeButton}
+                  >
+                    {showMnemonic ? (
+                      <EyeOff size={16} color={COLORS.textSecondary} />
+                    ) : (
+                      <Eye size={16} color={COLORS.textSecondary} />
+                    )}
+                  </TouchableOpacity>
+                  {showMnemonic && (
+                    <TouchableOpacity
+                      onPress={() => copyToClipboard(walletData.mnemonic, 'Recovery phrase')}
+                      style={styles.copyButton}
+                    >
+                      <Copy size={16} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+              <Text style={styles.walletAddress}>
+                {showMnemonic
+                  ? walletData.mnemonic
+                  : '•••• •••• •••• •••• •••• •••• •••• •••• •••• •••• •••• ••••'}
+              </Text>
+            </View>
+          </NeonCard>
+
+          <NeonButton
+            title="Share Wallet Address"
+            onPress={shareWallet}
+            style={styles.shareButton}
+            icon={<Share2 size={20} color={COLORS.textPrimary} />}
+          />
+        </View>
+
+        {/* Account Linking Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Account Linking</Text>
+          
+          <TouchableOpacity style={styles.supportItem} onPress={linkGmail}>
+            <Mail size={20} color={COLORS.textSecondary} />
+            <Text style={styles.supportText}>Link Gmail Account</Text>
+            <Link size={16} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.supportItem} onPress={linkMobile}>
+            <Phone size={20} color={COLORS.textSecondary} />
+            <Text style={styles.supportText}>Link Mobile Number</Text>
+            <Link size={16} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Support Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Support & Help</Text>
+          
+          <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
+            <Mail size={20} color={COLORS.textSecondary} />
+            <Text style={styles.supportText}>Email Support</Text>
+            <ExternalLink size={16} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
+            <Phone size={20} color={COLORS.textSecondary} />
+            <Text style={styles.supportText}>Phone Support</Text>
+            <ExternalLink size={16} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
+            <HelpCircle size={20} color={COLORS.textSecondary} />
+            <Text style={styles.supportText}>Help Center</Text>
+            <ExternalLink size={16} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Warning */}
+        <NeonCard style={styles.warningCard}>
+          <Text style={styles.warningTitle}>⚠️ Security Warning</Text>
+          <Text style={styles.warningText}>
+            Never share your private key or recovery phrase with anyone. Soul Wallet will never ask for this information.
+          </Text>
+        </NeonCard>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.cardBackground,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: SPACING.s,
+  },
+  content: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingHorizontal: SPACING.l,
+    paddingBottom: 20,
+  },
+  userCard: {
+    marginBottom: SPACING.l,
+  },
+  userInfo: {
+    padding: SPACING.m,
+    alignItems: 'center',
+  },
+  userName: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 20,
+    marginBottom: SPACING.xs,
+  },
+  userEmail: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  section: {
+    marginBottom: SPACING.xl,
+  },
+  sectionTitle: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    marginBottom: SPACING.m,
+  },
+  walletCard: {
+    marginBottom: SPACING.m,
+  },
+  walletItem: {
+    padding: SPACING.m,
+  },
+  walletItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.s,
+  },
+  walletItemTitle: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    marginLeft: SPACING.s,
+    flex: 1,
+  },
+  walletActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  eyeButton: {
+    padding: SPACING.xs,
+    marginRight: SPACING.xs,
+  },
+  copyButton: {
+    padding: SPACING.xs,
+  },
+  walletAddress: {
+    ...FONTS.monospace,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: COLORS.cardBackground,
+    marginVertical: SPACING.xs,
+  },
+  shareButton: {
+    marginTop: SPACING.s,
+  },
+  supportItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.m,
+    marginBottom: SPACING.s,
+  },
+  supportText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    marginLeft: SPACING.s,
+    flex: 1,
+  },
+  warningCard: {
+    backgroundColor: COLORS.error + '10',
+    borderColor: COLORS.error + '30',
+    borderWidth: 1,
+  },
+  warningTitle: {
+    ...FONTS.phantomBold,
+    color: COLORS.error,
+    fontSize: 16,
+    marginBottom: SPACING.s,
+  },
+  warningText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+});
