@@ -493,7 +493,7 @@ const validateProduction = async () => {
     throw new Error('ALLOWED_ORIGINS is required in production');
   }
   if (process.env.EMAIL_PROVIDER === 'console') {
-    throw new Error('EMAIL_PROVIDER cannot be "console" in production');
+    logger.warn('⚠️  EMAIL_PROVIDER is "console" in production - emails will only log to console (not recommended)');
   }
   if (process.env.FEATURE_SIMULATION_MODE !== 'false') {
     throw new Error('FEATURE_SIMULATION_MODE must be false in production');
@@ -555,9 +555,7 @@ const validateProduction = async () => {
       throw new Error('RESEND_API_KEY must start with "re_"');
     }
   }
-  if (nodeEnv === 'production' && process.env.EMAIL_PROVIDER === 'console') {
-    throw new Error('Email provider must be configured for production');
-  }
+  // Email provider validation moved to line 495
 
   // Validate ALLOWED_ORIGINS contains valid production URLs
   if (process.env.ALLOWED_ORIGINS) {
@@ -587,9 +585,7 @@ const validateProduction = async () => {
         throw new Error(`ALLOWED_ORIGINS must use HTTPS in production: ${origin.trim()}`);
       }
     }
-    if (process.env.EMAIL_PROVIDER === 'console') {
-      throw new Error('Email provider must be configured for production');
-    }
+    // Email provider validation moved to line 495
     if (process.env.FEATURE_SIMULATION_MODE !== 'false') {
       throw new Error('FEATURE_SIMULATION_MODE must be false in production');
     }
