@@ -481,11 +481,11 @@ const validateProduction = async () => {
     throw new Error('REDIS_URL is required in production for distributed rate limiting\nInstall Redis or set REDIS_URL environment variable');
   }
 
-  // 2. Sentry Validation
+  // 2. Sentry Validation (optional for beta)
   if (process.env.EXPO_PUBLIC_SENTRY_DSN) {
     logger.info('✅ Sentry DSN configured');
   } else {
-    throw new Error('EXPO_PUBLIC_SENTRY_DSN is required in production for error tracking\nGet DSN from https://sentry.io/settings/projects/YOUR_PROJECT/keys/');
+    logger.warn('⚠️  EXPO_PUBLIC_SENTRY_DSN not configured - error tracking disabled (recommended for production)');
   }
 
   // 3. Production-Only Checks
