@@ -33,6 +33,8 @@
     "dist",
     "**/*.test.ts",
     "**/*.spec.ts",
+    "**/*.native.ts",
+    "**/*.native.tsx",
     "src/app/**/*",
     "src/components/**/*",
     "src/hooks/**/*",

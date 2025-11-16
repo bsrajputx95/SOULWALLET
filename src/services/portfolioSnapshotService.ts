@@ -90,7 +90,7 @@ async function createSnapshotForUser(userId: string, walletAddress: string) {
     const recentSnapshot = await prisma.portfolioSnapshot.findFirst({
       where: {
         userId,
-        createdAt: { gte: new Date(Date.now() - 55 * 60 * 1000) }
+        timestamp: { gte: new Date(Date.now() - 55 * 60 * 1000) }
       },
     });
 

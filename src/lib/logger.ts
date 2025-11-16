@@ -69,7 +69,8 @@ if (isReactNative || !pino) {
         ...(data && { data: sanitize(data) })
       };
       
-      if (__DEV__) {
+      const isDev = typeof process !== 'undefined' ? process.env.NODE_ENV !== 'production' : false;
+      if (isDev) {
         // In development, use formatted console output
         const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
         const contextStr = requestId ? ` [${requestId}]` : '';
@@ -98,7 +99,8 @@ if (isReactNative || !pino) {
     }
     
     debug(message: string, data?: any) {
-      if (__DEV__) {
+      const isDev = typeof process !== 'undefined' ? process.env.NODE_ENV !== 'production' : false;
+      if (isDev) {
         this.formatMessage('debug', message, data);
       }
     }
@@ -108,7 +110,8 @@ if (isReactNative || !pino) {
     }
     
     trace(message: string, data?: any) {
-      if (__DEV__) {
+      const isDev = typeof process !== 'undefined' ? process.env.NODE_ENV !== 'production' : false;
+      if (isDev) {
         this.formatMessage('trace', message, data);
       }
     }

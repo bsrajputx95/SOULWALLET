@@ -797,8 +797,8 @@ export const socialRouter = router({
       if (!resp.ok) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to get swap transaction' })
       }
-      const swapData = await resp.json()
-      if (!swapData.swapTransaction) {
+      const swapData = (await resp.json()) as { swapTransaction?: string }
+      if (!swapData?.swapTransaction) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to get swap transaction' })
       }
       return { success: true, swapTransaction: swapData.swapTransaction }

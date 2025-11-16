@@ -90,9 +90,9 @@ export const portfolioRouter = router({
           const oldSnapshot = await prisma.portfolioSnapshot.findFirst({
             where: {
               userId: ctx.user.id,
-              createdAt: { gte: oneDayAgo },
+              timestamp: { gte: oneDayAgo },
             },
-            orderBy: { createdAt: 'asc' },
+            orderBy: { timestamp: 'asc' },
           });
 
           if (oldSnapshot && oldSnapshot.totalValueUSD > 0) {
