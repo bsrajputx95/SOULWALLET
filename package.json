@@ -179,7 +179,9 @@
     "typescript": "~5.8.3"
   },
   "overrides": {
-    "copy-anything": "^3.0.5"
+    "copy-anything": "^3.0.5",
+    "parse5": "^7.1.2",
+    "jsdom": "^22.1.0"
   },
   "private": true
 }
