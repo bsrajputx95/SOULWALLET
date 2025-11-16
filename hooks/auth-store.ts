@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import createContextHook from '@/lib/create-context-hook';
-import { trpcClient } from '@/lib/trpc';
+import createContextHook from '../lib/create-context-hook';
+import { trpcClient } from '../lib/trpc';
+import { SecureStorage } from '../lib/secure-storage';
 
 export interface User {
   id: string;
@@ -36,21 +36,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const loadUser = async () => {
     try {
       setIsLoading(true);
-      const storedUser = await AsyncStorage.getItem('user');
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
+      const token = await SecureStorage.getToken();
+      const storedUser = await SecureStorage.getUserData();
+      
+      if (token && storedUser) {
+        setUser(storedUser);
       } else {
-        // For testing purposes, create a default user if none exists
-        const defaultUser: User = {
-          id: '1',
-          username: 'testuser',
-          email: 'test@example.com',
-          isVerified: true,
-          walletAddress: 'sol1234...5678',
-        };
-        await AsyncStorage.setItem('user', JSON.stringify(defaultUser));
-        await AsyncStorage.setItem('userId', defaultUser.id);
-        setUser(defaultUser);
+        // Clear any partial data if token or user is missing
+        await SecureStorage.clearAll();
       }
     } catch (err) {
       setError('Failed to load user data');
@@ -60,24 +53,30 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   };
 
-  const login = async (username: string, password: string) => {
+  const login = async (identifier: string, password: string, rememberMe: boolean = false) => {
     try {
       setIsLoading(true);
       setError(null);
       
       // Use tRPC client for login
-      const result = await trpcClient.auth.login.mutate({ username, password });
+      const result = await trpcClient.auth.login.mutate({ identifier, password });
       
       const loggedInUser: User = {
-        id: result.id,
-        username: result.username,
-        email: result.email,
-        isVerified: true,
-        walletAddress: 'sol1234...5678', // This would come from wallet creation
+        id: result.user.id,
+        username: result.user.username,
+        email: result.user.email,
+        isVerified: result.user.isVerified ?? false,
+        walletAddress: result.user.walletAddress,
       };
       
-      await AsyncStorage.setItem('user', JSON.stringify(loggedInUser));
-      await AsyncStorage.setItem('userId', result.id);
+      // Store tokens securely and user data
+      await SecureStorage.setToken(result.token);
+      if (result.refreshToken) {
+        await SecureStorage.setRefreshToken(result.refreshToken);
+      }
+      await SecureStorage.setUserData(loggedInUser);
+      await SecureStorage.setRememberMe(rememberMe);
+      
       setUser(loggedInUser);
       return true;
     } catch (err) {
@@ -90,23 +89,29 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   };
 
-  const signup = async (username: string, email: string, password: string) => {
+  const signup = async (username: string, email: string, password: string, confirmPassword: string) => {
     try {
       setIsLoading(true);
       setError(null);
       
       // Use tRPC client for signup
-      const result = await trpcClient.auth.signup.mutate({ username, email, password });
+      const result = await trpcClient.auth.signup.mutate({ username, email, password, confirmPassword });
       
       const newUser: User = {
-        id: result.id,
-        username: result.username,
-        email: result.email,
-        isVerified: false,
+        id: result.user.id,
+        username: result.user.username,
+        email: result.user.email,
+        isVerified: result.user.isVerified ?? false,
+        walletAddress: result.user.walletAddress,
       };
       
-      await AsyncStorage.setItem('user', JSON.stringify(newUser));
-      await AsyncStorage.setItem('userId', result.id);
+      // Store tokens securely and user data
+      await SecureStorage.setToken(result.token);
+      if (result.refreshToken) {
+        await SecureStorage.setRefreshToken(result.refreshToken);
+      }
+      await SecureStorage.setUserData(newUser);
+      
       setUser(newUser);
       return true;
     } catch (err) {
@@ -124,7 +129,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (!user) return;
       
       const updatedUser = { ...user, ...updates };
-      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      await SecureStorage.setUserData(updatedUser);
       setUser(updatedUser);
     } catch (err) {
       console.error('Update user error:', err);
@@ -134,8 +139,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const logout = async () => {
     try {
-      await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('userId');
+      try {
+        await trpcClient.auth.logout.mutate();
+      } catch {}
+      await SecureStorage.clearAll();
       setUser(null);
     } catch (err) {
       console.error('Logout error:', err);
@@ -150,6 +157,5 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signup,
     updateUser,
     logout,
-    isAuthenticated: !!user,
-  };
+    isAuthenticated: !!user };
 });

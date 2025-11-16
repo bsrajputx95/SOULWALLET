@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -9,6 +9,8 @@ import {
   Image,
   Switch,
   Alert,
+  Modal,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -18,7 +20,6 @@ import {
   Mail,
   Phone,
   Calendar,
-  Shield,
   Lock,
   Users,
   Camera,
@@ -26,10 +27,8 @@ import {
   Languages,
   ShieldCheck,
   DollarSign,
-  Settings,
-  Copy,
-  Eye,
-  EyeOff,
+  X,
+  Check,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -69,11 +68,31 @@ export default function AccountScreen() {
   const [defaultCurrency, setDefaultCurrency] = useState(profile?.defaultCurrency || 'USD');
   const [language, setLanguage] = useState(profile?.language || 'English');
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(profile?.twoFactorEnabled || false);
-  const [ibuyAmount, setIbuyAmount] = useState('100');
-  const [ibuySlippage, setIbuySlippage] = useState('1');
 
-  const [showPrivateKey, setShowPrivateKey] = useState(false);
-  const [showRecoveryPhrase, setShowRecoveryPhrase] = useState(false);
+  // Password Reset Modal States
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
+  const [passwordResetStep, setPasswordResetStep] = useState(1); // 1: email/phone, 2: OTP, 3: new password
+  const [resetContactMethod, setResetContactMethod] = useState('email'); // 'email' or 'phone'
+  const [resetContactValue, setResetContactValue] = useState('');
+  const [resetOtp, setResetOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Two-Factor Authentication Modal States
+  const [showTwoFactorModal, setShowTwoFactorModal] = useState(false);
+  const [twoFactorStep, setTwoFactorStep] = useState(1); // 1: current verification, 2: new method setup, 3: confirmation
+  const [currentVerificationMethod, setCurrentVerificationMethod] = useState('email'); // 'email' or 'phone'
+  const [currentVerificationValue, setCurrentVerificationValue] = useState('');
+  const [currentVerificationOtp, setCurrentVerificationOtp] = useState('');
+  const [newTwoFactorMethod, setNewTwoFactorMethod] = useState('email'); // 'email' or 'phone'
+  const [newTwoFactorValue, setNewTwoFactorValue] = useState('');
+  const [newTwoFactorOtp, setNewTwoFactorOtp] = useState('');
+
+  // Scroll tracking for header animation
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const lastScrollY = useRef(0);
+  const headerTranslateY = useRef(new Animated.Value(0)).current;
+  const HEADER_HEIGHT = 60; // Approximate header height
 
   const handleSave = async () => {
     try {
@@ -104,26 +123,45 @@ export default function AccountScreen() {
     }
   };
 
-  const handleResetPassword = () => {
-    Alert.alert(
-      'Reset Password',
-      'Enter your current password and new password.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Reset', 
-          onPress: async () => {
-            try {
-              // In a real app, you'd show a modal to get current and new passwords
-              await resetUserPassword('currentPassword', 'newPassword');
-              Alert.alert('Success', 'Password updated successfully!');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to reset password.');
-            }
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: false,
+      listener: (event) => {
+        const currentScrollY = event.nativeEvent.contentOffset.y;
+        const scrollDirection = currentScrollY > lastScrollY.current ? 'down' : 'up';
+        
+        // Only animate if scroll direction changed or significant scroll distance
+        if (Math.abs(currentScrollY - lastScrollY.current) > 5) {
+          if (scrollDirection === 'down' && currentScrollY > HEADER_HEIGHT) {
+            // Hide header when scrolling down
+            Animated.timing(headerTranslateY, {
+              toValue: -HEADER_HEIGHT,
+              duration: 200,
+              useNativeDriver: true,
+            }).start();
+          } else if (scrollDirection === 'up') {
+            // Show header when scrolling up
+            Animated.timing(headerTranslateY, {
+              toValue: 0,
+              duration: 200,
+              useNativeDriver: true,
+            }).start();
           }
-        },
-      ]
-    );
+        }
+        
+        lastScrollY.current = currentScrollY;
+      },
+    }
+  );
+
+  const handleResetPassword = () => {
+    setShowPasswordResetModal(true);
+    setPasswordResetStep(1);
+    setResetContactValue('');
+    setResetOtp('');
+    setNewPassword('');
+    setConfirmPassword('');
   };
 
   const handleInviteFriends = () => {
@@ -159,25 +197,12 @@ export default function AccountScreen() {
         ]
       );
     } else {
-      Alert.alert(
-        'Setup 2FA',
-        'Two-factor authentication will be set up using your authenticator app.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Setup', 
-            onPress: async () => {
-              try {
-                await updateSecurity({ twoFactorEnabled: true });
-                setTwoFactorEnabled(true);
-                Alert.alert('Success', '2FA enabled successfully!');
-              } catch (error) {
-                Alert.alert('Error', 'Failed to enable 2FA.');
-              }
-            }
-          },
-        ]
-      );
+      setShowTwoFactorModal(true);
+      setTwoFactorStep(1);
+      setCurrentVerificationValue('');
+      setCurrentVerificationOtp('');
+      setNewTwoFactorValue('');
+      setNewTwoFactorOtp('');
     }
   };
 
@@ -186,9 +211,100 @@ export default function AccountScreen() {
     Alert.alert('Copied', `${label} copied to clipboard`);
   };
 
+  // Password Reset Modal Handlers
+  const handlePasswordResetNext = () => {
+    if (passwordResetStep === 1) {
+      if (!resetContactValue.trim()) {
+        Alert.alert('Error', `Please enter your ${resetContactMethod}`);
+        return;
+      }
+      // Simulate sending OTP
+      Alert.alert('OTP Sent', `Verification code sent to your ${resetContactMethod}`);
+      setPasswordResetStep(2);
+    } else if (passwordResetStep === 2) {
+      if (!resetOtp.trim() || resetOtp.length !== 6) {
+        Alert.alert('Error', 'Please enter a valid 6-digit OTP');
+        return;
+      }
+      setPasswordResetStep(3);
+    } else if (passwordResetStep === 3) {
+      if (!newPassword.trim() || newPassword.length < 6) {
+        Alert.alert('Error', 'Password must be at least 6 characters');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        Alert.alert('Error', 'Passwords do not match');
+        return;
+      }
+      // Simulate password reset
+      Alert.alert('Success', 'Password reset successfully!');
+      setShowPasswordResetModal(false);
+    }
+  };
+
+  const handlePasswordResetBack = () => {
+    if (passwordResetStep > 1) {
+      setPasswordResetStep(passwordResetStep - 1);
+    }
+  };
+
+  // Two-Factor Authentication Modal Handlers
+  const handleTwoFactorNext = () => {
+    if (twoFactorStep === 1) {
+      if (!currentVerificationValue.trim()) {
+        Alert.alert('Error', `Please enter your ${currentVerificationMethod}`);
+        return;
+      }
+      // Simulate sending OTP
+      Alert.alert('OTP Sent', `Verification code sent to your ${currentVerificationMethod}`);
+      setTwoFactorStep(2);
+    } else if (twoFactorStep === 2) {
+      if (!currentVerificationOtp.trim() || currentVerificationOtp.length !== 6) {
+        Alert.alert('Error', 'Please enter a valid 6-digit OTP');
+        return;
+      }
+      setTwoFactorStep(3);
+    } else if (twoFactorStep === 3) {
+      if (!newTwoFactorValue.trim()) {
+        Alert.alert('Error', `Please enter your ${newTwoFactorMethod} for 2FA`);
+        return;
+      }
+      // Simulate sending OTP for new method
+      Alert.alert('OTP Sent', `Verification code sent to your new ${newTwoFactorMethod}`);
+      setTwoFactorStep(4);
+    } else if (twoFactorStep === 4) {
+      if (!newTwoFactorOtp.trim() || newTwoFactorOtp.length !== 6) {
+        Alert.alert('Error', 'Please enter a valid 6-digit OTP');
+        return;
+      }
+      // Simulate enabling 2FA
+      setTwoFactorEnabled(true);
+      Alert.alert('Success', 'Two-Factor Authentication activated successfully!');
+      setShowTwoFactorModal(false);
+    }
+  };
+
+  const handleTwoFactorBack = () => {
+    if (twoFactorStep > 1) {
+      setTwoFactorStep(twoFactorStep - 1);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
+      <Animated.View 
+        style={[
+          styles.header, 
+          {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 1000,
+            transform: [{ translateY: headerTranslateY }],
+          }
+        ]}
+      >
         <Text style={styles.headerTitle}>Account Settings</Text>
         <TouchableOpacity 
           onPress={handleSave} 
@@ -199,9 +315,14 @@ export default function AccountScreen() {
             {isAccountUpdating ? 'Saving...' : 'Save'}
           </Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={[styles.scrollView, { paddingTop: HEADER_HEIGHT }]} 
+        showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+      >
         {/* Profile Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Profile Information</Text>
@@ -298,98 +419,7 @@ export default function AccountScreen() {
           </View>
         </View>
 
-        {/* Wallet Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Wallet Information</Text>
-          
-          <View style={styles.walletInfoCard}>
-            <View style={styles.walletInfoRow}>
-              <View style={styles.walletInfoLabel}>
-                <Shield size={20} color={COLORS.solana} />
-                <Text style={styles.walletInfoText}>Public Key</Text>
-              </View>
-              <TouchableOpacity 
-                onPress={() => copyToClipboard(profile?.walletAddress || walletInfo?.publicKey || '', 'Public Key')}
-                style={styles.copyButton}
-              >
-                <Copy size={16} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.walletAddress}>{profile?.walletAddress || walletInfo?.publicKey || 'Not connected'}</Text>
-          </View>
 
-          <View style={styles.walletInfoCard}>
-            <View style={styles.walletInfoRow}>
-              <View style={styles.walletInfoLabel}>
-                <Lock size={20} color={COLORS.error} />
-                <Text style={styles.walletInfoText}>Private Key</Text>
-              </View>
-              <View style={styles.walletActions}>
-                <TouchableOpacity 
-                  onPress={() => setShowPrivateKey(!showPrivateKey)}
-                  style={styles.eyeButton}
-                >
-                  {showPrivateKey ? (
-                    <EyeOff size={16} color={COLORS.textSecondary} />
-                  ) : (
-                    <Eye size={16} color={COLORS.textSecondary} />
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={() => copyToClipboard('••••••••••••••••', 'Private Key')}
-                  style={styles.copyButton}
-                >
-                  <Copy size={16} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-            <Text style={styles.walletAddress}>
-              {showPrivateKey ? 'H97G48qL...HHE4YMFH' : '••••••••••••••••••••••••••••••••'}
-            </Text>
-          </View>
-
-          <View style={styles.walletInfoCard}>
-            <View style={styles.walletInfoRow}>
-              <View style={styles.walletInfoLabel}>
-                <Settings size={20} color={COLORS.warning} />
-                <Text style={styles.walletInfoText}>Recovery Phrase</Text>
-              </View>
-              <View style={styles.walletActions}>
-                <TouchableOpacity 
-                  onPress={() => setShowRecoveryPhrase(!showRecoveryPhrase)}
-                  style={styles.eyeButton}
-                >
-                  {showRecoveryPhrase ? (
-                    <EyeOff size={16} color={COLORS.textSecondary} />
-                  ) : (
-                    <Eye size={16} color={COLORS.textSecondary} />
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={() => copyToClipboard('word1 word2 word3...', 'Recovery Phrase')}
-                  style={styles.copyButton}
-                >
-                  <Copy size={16} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-            <Text style={styles.recoveryPhrase}>
-              {showRecoveryPhrase 
-                ? 'abandon ability able about above absent absorb abstract absurd abuse access accident'
-                : '••• ••• ••• ••• ••• ••• ••• ••• ••• ••• ••• •••'
-              }
-            </Text>
-          </View>
-
-          <TouchableOpacity style={styles.shareWalletButton}>
-            <LinearGradient
-              colors={[COLORS.solana, COLORS.solana + '80']}
-              style={styles.shareWalletGradient}
-            >
-              <Text style={styles.shareWalletText}>SHARE WALLET ADDRESS</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
 
         {/* Security & Privacy */}
         <View style={styles.section}>
@@ -450,45 +480,7 @@ export default function AccountScreen() {
           </View>
         </View>
 
-        {/* IBuy Settings */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>IBuy Trade Settings</Text>
-          <Text style={styles.sectionDescription}>
-            Configure default settings for IBuy trades that appear below posts
-          </Text>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Default Amount (USDC)</Text>
-            <View style={styles.inputContainer}>
-              <DollarSign size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="100"
-                placeholderTextColor={COLORS.textSecondary}
-                value={ibuyAmount}
-                onChangeText={setIbuyAmount}
-                keyboardType="numeric"
-              />
-            </View>
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Slippage (%)</Text>
-            <View style={styles.inputContainer}>
-              <Text style={styles.percentSymbol}>%</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="1"
-                placeholderTextColor={COLORS.textSecondary}
-                value={ibuySlippage}
-                onChangeText={setIbuySlippage}
-                keyboardType="numeric"
-              />
-            </View>
-          </View>
-
-
-        </View>
 
         {/* Social */}
         <View style={styles.section}>
@@ -505,6 +497,337 @@ export default function AccountScreen() {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+
+      {/* Password Reset Modal */}
+      <Modal
+        visible={showPasswordResetModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowPasswordResetModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowPasswordResetModal(false)}>
+              <X size={24} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Reset Password</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <View style={styles.modalContent}>
+            {passwordResetStep === 1 && (
+              <>
+                <Text style={styles.modalDescription}>
+                  Enter your email or mobile number to receive a verification code
+                </Text>
+                
+                <View style={styles.methodSelector}>
+                  <TouchableOpacity
+                    style={[styles.methodButton, resetContactMethod === 'email' && styles.methodButtonActive]}
+                    onPress={() => setResetContactMethod('email')}
+                  >
+                    <Mail size={20} color={resetContactMethod === 'email' ? COLORS.textPrimary : COLORS.textSecondary} />
+                    <Text style={[styles.methodText, resetContactMethod === 'email' && styles.methodTextActive]}>Email</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.methodButton, resetContactMethod === 'phone' && styles.methodButtonActive]}
+                    onPress={() => setResetContactMethod('phone')}
+                  >
+                    <Phone size={20} color={resetContactMethod === 'phone' ? COLORS.textPrimary : COLORS.textSecondary} />
+                    <Text style={[styles.methodText, resetContactMethod === 'phone' && styles.methodTextActive]}>Phone</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>
+                    {resetContactMethod === 'email' ? 'Email Address' : 'Phone Number'}
+                  </Text>
+                  <View style={styles.inputContainer}>
+                    {resetContactMethod === 'email' ? (
+                      <Mail size={20} color={COLORS.textSecondary} />
+                    ) : (
+                      <Phone size={20} color={COLORS.textSecondary} />
+                    )}
+                    <TextInput
+                      style={styles.input}
+                      value={resetContactValue}
+                      onChangeText={setResetContactValue}
+                      placeholder={resetContactMethod === 'email' ? 'Enter your email' : 'Enter your phone number'}
+                      placeholderTextColor={COLORS.textSecondary}
+                      keyboardType={resetContactMethod === 'email' ? 'email-address' : 'phone-pad'}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+
+            {passwordResetStep === 2 && (
+              <>
+                <Text style={styles.modalDescription}>
+                  Enter the 6-digit verification code sent to your {resetContactMethod}
+                </Text>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Verification Code</Text>
+                  <View style={styles.inputContainer}>
+                    <Lock size={20} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.input}
+                      value={resetOtp}
+                      onChangeText={setResetOtp}
+                      placeholder="Enter 6-digit code"
+                      placeholderTextColor={COLORS.textSecondary}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+
+            {passwordResetStep === 3 && (
+              <>
+                <Text style={styles.modalDescription}>
+                  Create a new password for your account
+                </Text>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>New Password</Text>
+                  <View style={styles.inputContainer}>
+                    <Lock size={20} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.input}
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      placeholder="Enter new password"
+                      placeholderTextColor={COLORS.textSecondary}
+                      secureTextEntry
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Confirm Password</Text>
+                  <View style={styles.inputContainer}>
+                    <Lock size={20} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.input}
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      placeholder="Confirm new password"
+                      placeholderTextColor={COLORS.textSecondary}
+                      secureTextEntry
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+          </View>
+
+          <View style={styles.modalFooter}>
+            {passwordResetStep > 1 && (
+              <TouchableOpacity style={styles.backButton} onPress={handlePasswordResetBack}>
+                <Text style={styles.backButtonText}>Back</Text>
+              </TouchableOpacity>
+            )}
+            
+            <TouchableOpacity style={styles.nextButton} onPress={handlePasswordResetNext}>
+              <Text style={styles.nextButtonText}>
+                {passwordResetStep === 1 ? 'Send Code' : passwordResetStep === 2 ? 'Verify' : 'Reset Password'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Two-Factor Authentication Modal */}
+      <Modal
+        visible={showTwoFactorModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowTwoFactorModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowTwoFactorModal(false)}>
+              <X size={24} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Setup 2FA</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <View style={styles.modalContent}>
+            {twoFactorStep === 1 && (
+              <>
+                <Text style={styles.modalDescription}>
+                  First, verify your current email or phone number
+                </Text>
+                
+                <View style={styles.methodSelector}>
+                  <TouchableOpacity
+                    style={[styles.methodButton, currentVerificationMethod === 'email' && styles.methodButtonActive]}
+                    onPress={() => setCurrentVerificationMethod('email')}
+                  >
+                    <Mail size={20} color={currentVerificationMethod === 'email' ? COLORS.textPrimary : COLORS.textSecondary} />
+                    <Text style={[styles.methodText, currentVerificationMethod === 'email' && styles.methodTextActive]}>Email</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.methodButton, currentVerificationMethod === 'phone' && styles.methodButtonActive]}
+                    onPress={() => setCurrentVerificationMethod('phone')}
+                  >
+                    <Phone size={20} color={currentVerificationMethod === 'phone' ? COLORS.textPrimary : COLORS.textSecondary} />
+                    <Text style={[styles.methodText, currentVerificationMethod === 'phone' && styles.methodTextActive]}>Phone</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>
+                    {currentVerificationMethod === 'email' ? 'Email Address' : 'Phone Number'}
+                  </Text>
+                  <View style={styles.inputContainer}>
+                    {currentVerificationMethod === 'email' ? (
+                      <Mail size={20} color={COLORS.textSecondary} />
+                    ) : (
+                      <Phone size={20} color={COLORS.textSecondary} />
+                    )}
+                    <TextInput
+                      style={styles.input}
+                      value={currentVerificationValue}
+                      onChangeText={setCurrentVerificationValue}
+                      placeholder={currentVerificationMethod === 'email' ? 'Enter your email' : 'Enter your phone number'}
+                      placeholderTextColor={COLORS.textSecondary}
+                      keyboardType={currentVerificationMethod === 'email' ? 'email-address' : 'phone-pad'}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+
+            {twoFactorStep === 2 && (
+              <>
+                <Text style={styles.modalDescription}>
+                  Enter the verification code sent to your {currentVerificationMethod}
+                </Text>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Verification Code</Text>
+                  <View style={styles.inputContainer}>
+                    <Lock size={20} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.input}
+                      value={currentVerificationOtp}
+                      onChangeText={setCurrentVerificationOtp}
+                      placeholder="Enter 6-digit code"
+                      placeholderTextColor={COLORS.textSecondary}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+
+            {twoFactorStep === 3 && (
+              <>
+                <Text style={styles.modalDescription}>
+                  Choose your preferred method for two-factor authentication
+                </Text>
+                
+                <View style={styles.methodSelector}>
+                  <TouchableOpacity
+                    style={[styles.methodButton, newTwoFactorMethod === 'email' && styles.methodButtonActive]}
+                    onPress={() => setNewTwoFactorMethod('email')}
+                  >
+                    <Mail size={20} color={newTwoFactorMethod === 'email' ? COLORS.textPrimary : COLORS.textSecondary} />
+                    <Text style={[styles.methodText, newTwoFactorMethod === 'email' && styles.methodTextActive]}>Email</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.methodButton, newTwoFactorMethod === 'phone' && styles.methodButtonActive]}
+                    onPress={() => setNewTwoFactorMethod('phone')}
+                  >
+                    <Phone size={20} color={newTwoFactorMethod === 'phone' ? COLORS.textPrimary : COLORS.textSecondary} />
+                    <Text style={[styles.methodText, newTwoFactorMethod === 'phone' && styles.methodTextActive]}>Phone</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>
+                    {newTwoFactorMethod === 'email' ? 'Email for 2FA' : 'Phone for 2FA'}
+                  </Text>
+                  <View style={styles.inputContainer}>
+                    {newTwoFactorMethod === 'email' ? (
+                      <Mail size={20} color={COLORS.textSecondary} />
+                    ) : (
+                      <Phone size={20} color={COLORS.textSecondary} />
+                    )}
+                    <TextInput
+                      style={styles.input}
+                      value={newTwoFactorValue}
+                      onChangeText={setNewTwoFactorValue}
+                      placeholder={newTwoFactorMethod === 'email' ? 'Enter email for 2FA' : 'Enter phone for 2FA'}
+                      placeholderTextColor={COLORS.textSecondary}
+                      keyboardType={newTwoFactorMethod === 'email' ? 'email-address' : 'phone-pad'}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+
+            {twoFactorStep === 4 && (
+              <>
+                <Text style={styles.modalDescription}>
+                  Enter the verification code sent to your new {newTwoFactorMethod}
+                </Text>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Verification Code</Text>
+                  <View style={styles.inputContainer}>
+                    <Lock size={20} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.input}
+                      value={newTwoFactorOtp}
+                      onChangeText={setNewTwoFactorOtp}
+                      placeholder="Enter 6-digit code"
+                      placeholderTextColor={COLORS.textSecondary}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.successMessage}>
+                  <Check size={24} color={COLORS.solana} />
+                  <Text style={styles.successText}>
+                    Almost done! Verify this code to activate 2FA
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
+
+          <View style={styles.modalFooter}>
+            {twoFactorStep > 1 && (
+              <TouchableOpacity style={styles.backButton} onPress={handleTwoFactorBack}>
+                <Text style={styles.backButtonText}>Back</Text>
+              </TouchableOpacity>
+            )}
+            
+            <TouchableOpacity style={styles.nextButton} onPress={handleTwoFactorNext}>
+              <Text style={styles.nextButtonText}>
+                {twoFactorStep === 1 ? 'Send Code' : 
+                 twoFactorStep === 2 ? 'Verify' : 
+                 twoFactorStep === 3 ? 'Send Code' : 'Activate 2FA'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -522,6 +845,8 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.m,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.cardBackground,
+    backgroundColor: COLORS.background,
+    height: 60,
   },
 
   headerTitle: {
@@ -638,68 +963,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 16,
   },
-  walletInfoCard: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-  },
-  walletInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.s,
-  },
-  walletInfoLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  walletInfoText: {
-    ...FONTS.phantomSemiBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginLeft: SPACING.s,
-  },
-  walletActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  eyeButton: {
-    padding: SPACING.xs,
-    marginRight: SPACING.s,
-  },
-  copyButton: {
-    padding: SPACING.xs,
-  },
-  walletAddress: {
-    ...FONTS.monospace,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  recoveryPhrase: {
-    ...FONTS.monospace,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
-    flexWrap: 'wrap',
-  },
-  shareWalletButton: {
-    borderRadius: BORDER_RADIUS.medium,
-    overflow: 'hidden',
-    marginTop: SPACING.m,
-  },
-  shareWalletGradient: {
-    paddingVertical: SPACING.m,
-    alignItems: 'center',
-  },
-  shareWalletText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-  },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -725,5 +988,113 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.l,
+    paddingVertical: SPACING.m,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.cardBackground,
+  },
+  modalTitle: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 18,
+  },
+  modalContent: {
+    flex: 1,
+    paddingHorizontal: SPACING.l,
+    paddingTop: SPACING.l,
+  },
+  modalDescription: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: SPACING.l,
+    textAlign: 'center',
+  },
+  methodSelector: {
+    flexDirection: 'row',
+    marginBottom: SPACING.l,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: 4,
+  },
+  methodButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.s,
+    borderRadius: BORDER_RADIUS.small,
+  },
+  methodButtonActive: {
+    backgroundColor: COLORS.solana + '20',
+  },
+  methodText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginLeft: SPACING.xs,
+  },
+  methodTextActive: {
+    color: COLORS.textPrimary,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: SPACING.l,
+    paddingVertical: SPACING.l,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.cardBackground,
+    gap: SPACING.m,
+  },
+  backButton: {
+    flex: 1,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.medium,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '40',
+    alignItems: 'center',
+  },
+  backButtonText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 16,
+  },
+  nextButton: {
+    flex: 2,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.solana,
+    alignItems: 'center',
+  },
+  nextButtonText: {
+    ...FONTS.phantomSemiBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+  },
+  successMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.solana + '10',
+    padding: SPACING.m,
+    borderRadius: BORDER_RADIUS.medium,
+    marginTop: SPACING.m,
+  },
+  successText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.solana,
+    fontSize: 14,
+    marginLeft: SPACING.s,
+    flex: 1,
   },
 });

@@ -7,15 +7,14 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Image,
-} from 'react-native';
+  Image } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Mail, Lock, LogIn } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
 import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+import { FONTS } from '../../constants/theme';
 import { NeonInput } from '../../components/NeonInput';
 import { NeonButton } from '../../components/NeonButton';
 import { NeonDivider } from '../../components/NeonDivider';
@@ -36,9 +35,12 @@ export default function LoginScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
     
-    const success = await login(email, password);
+    const success = await login(email, password, rememberMe);
     if (success) {
       router.replace('/(tabs)');
+    } else {
+      // Clear password on login error for security
+      setPassword('');
     }
   };
 
@@ -68,6 +70,13 @@ export default function LoginScreen() {
           <Text style={styles.subtitle}>Log in to continue</Text>
 
           {error && <Text style={styles.errorText}>{error}</Text>}
+
+          {__DEV__ && (
+            <View style={styles.devHintContainer}>
+              <Text style={styles.devHintTitle}>🧪 Dev Test Account</Text>
+              <Text style={styles.devHintText}>test@soulwallet.dev / Test123!@#</Text>
+            </View>
+          )}
 
           <NeonInput
             label="Username/Email"
@@ -102,9 +111,11 @@ export default function LoginScreen() {
               <Text style={styles.rememberMeText}>Remember Me</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity>
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </TouchableOpacity>
+            <Link href="/(auth)/forgot-password" asChild>
+              <TouchableOpacity>
+                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
 
           <NeonButton
@@ -131,17 +142,6 @@ export default function LoginScreen() {
             />
           </View>
 
-          <TouchableOpacity 
-            style={styles.guestLoginContainer}
-            onPress={() => {
-              if (Platform.OS !== 'web') {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }
-              router.replace('/(tabs)');
-            }}
-          >
-            <Text style={styles.guestLoginText}>Guest Login</Text>
-          </TouchableOpacity>
 
           <View style={styles.signupContainer}>
             <Text style={styles.signupText}>Don't have an account?</Text>
@@ -167,53 +167,43 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
+    backgroundColor: COLORS.background },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20,
-  },
+    paddingBottom: 20 },
   logoContainer: {
     alignItems: 'center',
     marginTop: 60,
-    marginBottom: 20,
-  },
+    marginBottom: 20 },
   logoImage: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    marginBottom: 24,
-  },
+    marginBottom: 24 },
   formContainer: {
-    paddingHorizontal: 24,
-  },
+    paddingHorizontal: 24 },
   title: {
     textAlign: 'center',
-    marginBottom: 8,
-  },
+    marginBottom: 8 },
   subtitle: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 16,
     textAlign: 'center',
-    marginBottom: 32,
-  },
+    marginBottom: 32 },
   errorText: {
     ...FONTS.sfProMedium,
     color: COLORS.error,
     textAlign: 'center',
-    marginBottom: 16,
-  },
+    marginBottom: 16 },
   rememberContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
-  },
+    marginBottom: 24 },
   rememberMeContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-  },
+    alignItems: 'center' },
   checkbox: {
     width: 20,
     height: 20,
@@ -222,72 +212,65 @@ const styles = StyleSheet.create({
     borderColor: COLORS.textSecondary,
     marginRight: 8,
     justifyContent: 'center',
-    alignItems: 'center',
-  },
+    alignItems: 'center' },
   checkboxChecked: {
     backgroundColor: COLORS.solana,
-    borderColor: COLORS.solana,
-  },
+    borderColor: COLORS.solana },
   checkmark: {
     color: COLORS.textPrimary,
-    fontSize: 12,
-  },
+    fontSize: 12 },
   rememberMeText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
-    fontSize: 14,
-  },
+    fontSize: 14 },
   forgotPasswordText: {
     ...FONTS.sfProMedium,
     color: COLORS.solana,
-    fontSize: 14,
-  },
+    fontSize: 14 },
   loginButton: {
-    marginBottom: 24,
-  },
+    marginBottom: 24 },
   socialButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
-  },
+    marginBottom: 16 },
   socialButton: {
     flex: 1,
-    marginHorizontal: 8,
-  },
+    marginHorizontal: 8 },
   socialIcon: {
     ...FONTS.sfProBold,
     fontSize: 16,
-    color: COLORS.textPrimary,
-  },
-  guestLoginContainer: {
-    alignItems: 'center',
-    marginVertical: 16,
-  },
-  guestLoginText: {
-    ...FONTS.sfProMedium,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-  },
+    color: COLORS.textPrimary },
   signupContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16,
-  },
+    marginTop: 16 },
   signupText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginRight: 4,
-  },
+    marginRight: 4 },
   signupLink: {
     ...FONTS.sfProMedium,
     color: COLORS.solana,
-    fontSize: 14,
-  },
+    fontSize: 14 },
+  devHintContainer: {
+    backgroundColor: COLORS.warning + '15',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.warning + '30' },
+  devHintTitle: {
+    ...FONTS.sfProMedium,
+    color: COLORS.warning,
+    fontSize: 12,
+    marginBottom: 4 },
+  devHintText: {
+    ...FONTS.monospace,
+    color: COLORS.textSecondary,
+    fontSize: 11 },
   bottomGlow: {
     height: 4,
     width: '100%',
     position: 'absolute',
-    bottom: 0,
-  },
-});
+    bottom: 0 } });

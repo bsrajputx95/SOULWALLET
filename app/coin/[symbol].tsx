@@ -9,7 +9,11 @@ import {
   RefreshControl,
   Alert,
   Linking,
+  Modal,
+  TextInput,
+  useWindowDimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import {
   ArrowLeft,
@@ -26,6 +30,9 @@ import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
 import { NeonButton } from '../../components/NeonButton';
 import { GlowingText } from '../../components/GlowingText';
+
+type Timeframe = '1h' | '1d' | '1w' | '1m' | '1y';
+const TF_ORDER: Timeframe[] = ['1h', '1d', '1w', '1m', '1y'];
 
 
 
@@ -77,6 +84,133 @@ export default function CoinDetailsScreen() {
   const [activeTab, setActiveTab] = useState<'chart' | 'trades' | 'holders'>('chart');
   const [refreshing, setRefreshing] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
+  const [sentimentTimeframe, setSentimentTimeframe] = useState<'1h' | '1d' | '1w' | '1m' | '1y'>('1d');
+  const { width, height } = useWindowDimensions();
+  const isSmallScreen = width < 640;
+
+  const getMockSentiment = useCallback((tf: '1h' | '1d' | '1w' | '1m' | '1y') => {
+    // Simple deterministic mock based on timeframe for consistent UI
+    switch (tf) {
+      case '1h':
+        return { holding: 40, selling: 10, buying: 50 };
+      case '1d':
+        return { holding: 45, selling: 15, buying: 40 };
+      case '1w':
+        return { holding: 52, selling: 18, buying: 30 };
+      case '1m':
+        return { holding: 48, selling: 22, buying: 30 };
+      case '1y':
+        return { holding: 35, selling: 25, buying: 40 };
+      default:
+        return { holding: 40, selling: 10, buying: 50 };
+    }
+  }, []);
+
+  const sentiment = getMockSentiment(sentimentTimeframe);
+
+  const getMockStatChanges = useCallback((tf: Timeframe) => {
+    // Deterministic mock deltas per timeframe; positive/negative for realism
+    switch (tf) {
+      case '1h':
+        return { marketCap: 0.6, volume: 1.2, liquidity: 0.3, holders: 0.1 };
+      case '1d':
+        return { marketCap: 2.4, volume: 3.1, liquidity: 1.0, holders: 0.6 };
+      case '1w':
+        return { marketCap: 6.8, volume: 9.2, liquidity: 3.5, holders: 2.1 };
+      case '1m':
+        return { marketCap: 14.2, volume: 18.5, liquidity: 7.4, holders: 5.0 };
+      case '1y':
+        return { marketCap: 65.0, volume: 80.0, liquidity: 35.0, holders: 28.0 };
+      default:
+        return { marketCap: 0, volume: 0, liquidity: 0, holders: 0 };
+    }
+  }, []);
+
+  const statChanges = getMockStatChanges(sentimentTimeframe);
+
+  const cycleTimeframe = useCallback(() => {
+    const idx = TF_ORDER.indexOf(sentimentTimeframe);
+    const next = TF_ORDER[(idx + 1) % TF_ORDER.length];
+    setSentimentTimeframe(next);
+  }, [sentimentTimeframe]);
+
+  const handleTimeframePress = useCallback(
+    (tf: Timeframe) => {
+      if (tf === sentimentTimeframe) {
+        const idx = TF_ORDER.indexOf(sentimentTimeframe);
+        const next = TF_ORDER[(idx + 1) % TF_ORDER.length];
+        setSentimentTimeframe(next);
+      } else {
+        setSentimentTimeframe(tf);
+      }
+    },
+    [sentimentTimeframe]
+  );
+
+  // Watchlist persistence
+  useEffect(() => {
+    const loadWatchlist = async () => {
+      try {
+        const raw = await AsyncStorage.getItem('watchlist_tokens');
+        const arr: string[] = raw ? JSON.parse(raw) : [];
+        setWatchlisted(arr.includes((symbol as string)?.toUpperCase() || ''));
+      } catch (e) {
+        // noop
+      }
+    };
+    loadWatchlist();
+  }, [symbol]);
+
+  const toggleWatchlist = async () => {
+    try {
+      const token = (symbol as string)?.toUpperCase() || '';
+      const raw = await AsyncStorage.getItem('watchlist_tokens');
+      const arr: string[] = raw ? JSON.parse(raw) : [];
+      let next: string[];
+      if (arr.includes(token)) {
+        next = arr.filter(s => s !== token);
+        setWatchlisted(false);
+        await AsyncStorage.setItem('watchlist_tokens', JSON.stringify(next));
+        Alert.alert('Removed from watchlist');
+      } else {
+        next = [...arr, token];
+        setWatchlisted(true);
+        await AsyncStorage.setItem('watchlist_tokens', JSON.stringify(next));
+        Alert.alert('Added to watchlist');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not update watchlist');
+    }
+  };
+
+  // Top bar removed
+
+  // Trade modal state
+  const [tradeModalVisible, setTradeModalVisible] = useState(false);
+  const [tradeMode, setTradeMode] = useState<'buy' | 'sell' | null>(null);
+  const [tradeAmount, setTradeAmount] = useState<string>('');
+  const [tradePriceType, setTradePriceType] = useState<'market' | 'target'>('market');
+  const [tradeTargetPrice, setTradeTargetPrice] = useState<string>('');
+  const [tradeSlippage, setTradeSlippage] = useState<string>('0.5');
+
+  const openTradeModal = (mode: 'buy' | 'sell') => {
+    setTradeMode(mode);
+    setTradeAmount('');
+    setTradePriceType('market');
+    setTradeTargetPrice('');
+    setTradeSlippage('0.5');
+    setTradeModalVisible(true);
+  };
+
+  const closeTradeModal = () => {
+    setTradeModalVisible(false);
+  };
+
+  const confirmTrade = () => {
+    const summary = `${tradeMode === 'buy' ? 'Buy' : 'Sell'} ${tradeAmount || '0'} ${coinData?.symbol} at ${tradePriceType === 'market' ? 'market price' : `target $${tradeTargetPrice || '0'}`}`;
+    Alert.alert('Confirm', summary);
+    setTradeModalVisible(false);
+  };
 
   const loadCoinData = useCallback(async () => {
     // Mock data - replace with actual API calls
@@ -180,32 +314,18 @@ export default function CoinDetailsScreen() {
     <>
       <Stack.Screen
         options={{
-          headerShown: true,
+          headerShown: false,
           headerStyle: { backgroundColor: COLORS.background },
           headerTintColor: COLORS.textPrimary,
           headerTitle: '',
-          headerLeft: () => (
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <ArrowLeft color={COLORS.textPrimary} size={24} />
-            </TouchableOpacity>
-          ),
-          headerRight: () => (
-            <TouchableOpacity
-              onPress={() => setWatchlisted(!watchlisted)}
-              style={styles.watchlistButton}
-            >
-              <Star
-                color={watchlisted ? COLORS.solana : COLORS.textSecondary}
-                size={24}
-                fill={watchlisted ? COLORS.solana : 'transparent'}
-              />
-            </TouchableOpacity>
-          ),
+          // Custom top bar rendered inside screen
         }}
       />
+      {/* Top bar removed as requested */}
       
       <ScrollView
         style={styles.container}
+        showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Header */}
@@ -251,25 +371,170 @@ export default function CoinDetailsScreen() {
           </View>
         </NeonCard>
 
-        {/* Stats */}
+        {/* Stats + Sentiment (responsive order) */}
         <NeonCard style={styles.statsCard}>
-          <View style={styles.statsGrid}>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Market Cap</Text>
-              <Text style={styles.statValue}>${formatLargeNumber(coinData.marketCap)}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>24h Volume</Text>
-              <Text style={styles.statValue}>${formatLargeNumber(coinData.volume24h)}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Liquidity</Text>
-              <Text style={styles.statValue}>${formatLargeNumber(coinData.liquidity)}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Holders</Text>
-              <Text style={styles.statValue}>{formatLargeNumber(coinData.holders)}</Text>
-            </View>
+          <View style={[styles.statsRow, isSmallScreen && styles.statsRowSmall]}>
+            {isSmallScreen ? (
+              <>
+                <View style={[styles.sentimentContainer, styles.sentimentContainerSmall]}>
+                  <View style={styles.sentimentHeader}>
+                    <TouchableOpacity onPress={cycleTimeframe} activeOpacity={0.7}>
+                      <Text style={styles.sentimentTitle}>Sentiment</Text>
+                    </TouchableOpacity>
+                    <View style={styles.timeframeRow}>
+                      {(['1h','1d','1w','1m','1y'] as const).map(tf => (
+                        <TouchableOpacity
+                          key={tf}
+                          style={[styles.timeframePill, sentimentTimeframe === tf && styles.timeframePillActive]}
+                          onPress={() => handleTimeframePress(tf)}
+                        >
+                          <Text style={[styles.timeframeText, sentimentTimeframe === tf && styles.timeframeTextActive]}>
+                            {tf}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.sentimentItemRow}>
+                    <Text style={styles.sentimentLabel}>Holding</Text>
+                    <View style={styles.sentimentBarTrack}>
+                      <View style={[styles.sentimentBarFill, { width: `${sentiment.holding}%`, backgroundColor: COLORS.textPrimary + '99' }]} />
+                    </View>
+                    <Text style={styles.sentimentValue}>{sentiment.holding}%</Text>
+                  </View>
+                  <View style={styles.sentimentItemRow}>
+                    <Text style={styles.sentimentLabel}>Selling</Text>
+                    <View style={styles.sentimentBarTrack}>
+                      <View style={[styles.sentimentBarFill, { width: `${sentiment.selling}%`, backgroundColor: COLORS.error + '99' }]} />
+                    </View>
+                    <Text style={styles.sentimentValue}>{sentiment.selling}%</Text>
+                  </View>
+                  <View style={styles.sentimentItemRow}>
+                    <Text style={styles.sentimentLabel}>Buying</Text>
+                    <View style={styles.sentimentBarTrack}>
+                      <View style={[styles.sentimentBarFill, { width: `${sentiment.buying}%`, backgroundColor: COLORS.success + '99' }]} />
+                    </View>
+                    <Text style={styles.sentimentValue}>{sentiment.buying}%</Text>
+                  </View>
+                </View>
+
+                <View style={styles.statsGrid}>
+                  <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Market Cap</Text>
+                <View style={styles.statValueRow}>
+                  <Text style={styles.statValue}>${formatLargeNumber(coinData.marketCap)}</Text>
+                  <Text style={[
+                    styles.statDelta,
+                    { color: statChanges.marketCap >= 0 ? COLORS.success : COLORS.error },
+                  ]}>
+                    {statChanges.marketCap >= 0 ? '+' : ''}{statChanges.marketCap.toFixed(1)}%
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Volume</Text>
+                <View style={styles.statValueRow}>
+                  <Text style={styles.statValue}>${formatLargeNumber(coinData.volume24h)}</Text>
+                  <Text style={[
+                    styles.statDelta,
+                    { color: statChanges.volume >= 0 ? COLORS.success : COLORS.error },
+                  ]}>
+                    {statChanges.volume >= 0 ? '+' : ''}{statChanges.volume.toFixed(1)}%
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Liquidity</Text>
+                <View style={styles.statValueRow}>
+                  <Text style={styles.statValue}>${formatLargeNumber(coinData.liquidity)}</Text>
+                  <Text style={[
+                    styles.statDelta,
+                    { color: statChanges.liquidity >= 0 ? COLORS.success : COLORS.error },
+                  ]}>
+                    {statChanges.liquidity >= 0 ? '+' : ''}{statChanges.liquidity.toFixed(1)}%
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Holders</Text>
+                <View style={styles.statValueRow}>
+                  <Text style={styles.statValue}>{formatLargeNumber(coinData.holders)}</Text>
+                  <Text style={[
+                    styles.statDelta,
+                    { color: statChanges.holders >= 0 ? COLORS.success : COLORS.error },
+                  ]}>
+                    {statChanges.holders >= 0 ? '+' : ''}{statChanges.holders.toFixed(1)}%
+                  </Text>
+                </View>
+              </View>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.statsGrid}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Market Cap</Text>
+                    <Text style={styles.statValue}>${formatLargeNumber(coinData.marketCap)}</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Volume</Text>
+                    <Text style={styles.statValue}>${formatLargeNumber(coinData.volume24h)}</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Liquidity</Text>
+                    <Text style={styles.statValue}>${formatLargeNumber(coinData.liquidity)}</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Holders</Text>
+                    <Text style={styles.statValue}>{formatLargeNumber(coinData.holders)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.sentimentContainer}>
+                  <View style={styles.sentimentHeader}>
+                    <TouchableOpacity onPress={cycleTimeframe} activeOpacity={0.7}>
+                      <Text style={styles.sentimentTitle}>Sentiment</Text>
+                    </TouchableOpacity>
+                    <View style={styles.timeframeRow}>
+                      {(['1h','1d','1w','1m','1y'] as const).map(tf => (
+                        <TouchableOpacity
+                          key={tf}
+                          style={[styles.timeframePill, sentimentTimeframe === tf && styles.timeframePillActive]}
+                          onPress={() => handleTimeframePress(tf)}
+                        >
+                          <Text style={[styles.timeframeText, sentimentTimeframe === tf && styles.timeframeTextActive]}>
+                            {tf}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.sentimentItemRow}>
+                    <Text style={styles.sentimentLabel}>Holding</Text>
+                    <View style={styles.sentimentBarTrack}>
+                      <View style={[styles.sentimentBarFill, { width: `${sentiment.holding}%`, backgroundColor: COLORS.textPrimary + '99' }]} />
+                    </View>
+                    <Text style={styles.sentimentValue}>{sentiment.holding}%</Text>
+                  </View>
+                  <View style={styles.sentimentItemRow}>
+                    <Text style={styles.sentimentLabel}>Selling</Text>
+                    <View style={styles.sentimentBarTrack}>
+                      <View style={[styles.sentimentBarFill, { width: `${sentiment.selling}%`, backgroundColor: COLORS.error + '99' }]} />
+                    </View>
+                    <Text style={styles.sentimentValue}>{sentiment.selling}%</Text>
+                  </View>
+                  <View style={styles.sentimentItemRow}>
+                    <Text style={styles.sentimentLabel}>Buying</Text>
+                    <View style={styles.sentimentBarTrack}>
+                      <View style={[styles.sentimentBarFill, { width: `${sentiment.buying}%`, backgroundColor: COLORS.success + '99' }]} />
+                    </View>
+                    <Text style={styles.sentimentValue}>{sentiment.buying}%</Text>
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         </NeonCard>
 
@@ -403,12 +668,12 @@ export default function CoinDetailsScreen() {
         <View style={styles.actionButtonsContainer}>
           <NeonButton
             title="Buy"
-            onPress={() => Alert.alert('Buy', `Buy ${coinData.symbol}`)}
+            onPress={() => openTradeModal('buy')}
             style={styles.actionButtonPrimary}
           />
           <NeonButton
             title="Sell"
-            onPress={() => Alert.alert('Sell', `Sell ${coinData.symbol}`)}
+            onPress={() => openTradeModal('sell')}
             variant="secondary"
             style={styles.actionButtonSecondary}
           />
@@ -449,7 +714,97 @@ export default function CoinDetailsScreen() {
             </View>
           </NeonCard>
         )}
+
+        {/* More Info */}
+        <View style={styles.moreInfoContainer}>
+          <NeonButton
+            title="More Info"
+            variant="secondary"
+            onPress={() => {}}
+          />
+        </View>
       </ScrollView>
+
+      {/* Floating watchlist toggle */}
+      <TouchableOpacity
+        style={[styles.floatingWatchlist, { top: Math.round(height * 0.6) }]}
+        onPress={toggleWatchlist}
+        activeOpacity={0.8}
+      >
+        <Star color={watchlisted ? COLORS.solana : COLORS.textPrimary} size={22} />
+      </TouchableOpacity>
+
+      {/* Buy/Sell Modal (single page) */}
+      <Modal
+        visible={tradeModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeTradeModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{tradeMode === 'buy' ? 'Buy' : 'Sell'} {coinData.symbol}</Text>
+
+            {/* Single-page trade form */}
+            <View style={styles.modalSection}>
+              <Text style={styles.modalLabel}>Amount</Text>
+              <TextInput
+                value={tradeAmount}
+                onChangeText={setTradeAmount}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor={COLORS.textSecondary}
+                style={styles.modalInput}
+              />
+
+              <Text style={styles.modalLabel}>Price Type</Text>
+              <View style={styles.segmentedRow}>
+                <TouchableOpacity
+                  style={[styles.segmentedItem, tradePriceType === 'market' && styles.segmentedItemActive]}
+                  onPress={() => setTradePriceType('market')}
+                >
+                  <Text style={[styles.segmentedText, tradePriceType === 'market' && styles.segmentedTextActive]}>Market</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.segmentedItem, tradePriceType === 'target' && styles.segmentedItemActive]}
+                  onPress={() => setTradePriceType('target')}
+                >
+                  <Text style={[styles.segmentedText, tradePriceType === 'target' && styles.segmentedTextActive]}>Target</Text>
+                </TouchableOpacity>
+              </View>
+
+              {tradePriceType === 'target' && (
+                <View style={styles.targetRow}>
+                  <Text style={styles.modalLabel}>Target Price (USD)</Text>
+                  <TextInput
+                    value={tradeTargetPrice}
+                    onChangeText={setTradeTargetPrice}
+                    keyboardType="decimal-pad"
+                    placeholder={formatPrice(coinData.price)}
+                    placeholderTextColor={COLORS.textSecondary}
+                    style={styles.modalInput}
+                  />
+                </View>
+              )}
+
+              <View style={styles.targetRow}>
+                <Text style={styles.modalLabel}>Slippage (%)</Text>
+                <TextInput
+                  value={tradeSlippage}
+                  onChangeText={setTradeSlippage}
+                  keyboardType="decimal-pad"
+                  placeholder="0.5"
+                  placeholderTextColor={COLORS.textSecondary}
+                  style={styles.modalInput}
+                />
+              </View>
+
+              <NeonButton title={tradeMode === 'buy' ? 'Buy' : 'Sell'} onPress={confirmTrade} style={styles.modalPrimary} />
+              <NeonButton title="Cancel" variant="secondary" onPress={closeTradeModal} style={styles.modalSecondary} />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -480,6 +835,7 @@ const generateMockAddress = () => {
 };
 
 const styles = StyleSheet.create({
+  // topBar removed
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -580,13 +936,40 @@ const styles = StyleSheet.create({
     marginTop: 0,
     marginBottom: SPACING.s,
   },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  statsRowSmall: {
+    flexDirection: 'column',
+  },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    flex: 1,
   },
   statItem: {
     width: '50%',
     paddingVertical: SPACING.s,
+  },
+  
+  floatingWatchlist: {
+    position: 'absolute',
+    right: SPACING.l,
+    top: SPACING.l,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.cardBackground,
+    borderWidth: 1,
+    borderColor: COLORS.border + '40',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+    zIndex: 20,
   },
   statLabel: {
     ...FONTS.phantomRegular,
@@ -597,13 +980,107 @@ const styles = StyleSheet.create({
   statValue: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  statValueRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: SPACING.xs,
+  },
+  statDelta: {
+    ...FONTS.monospace,
+    fontSize: 12,
     fontWeight: '600',
   },
   contractCard: {
     margin: SPACING.m,
     marginTop: 0,
     marginBottom: SPACING.s,
+  },
+  sentimentContainer: {
+    width: 260,
+    marginLeft: SPACING.s,
+    borderLeftWidth: 1,
+    borderLeftColor: COLORS.border + '30',
+    paddingLeft: SPACING.m,
+  },
+  sentimentContainerSmall: {
+    width: '100%',
+    marginLeft: 0,
+    borderLeftWidth: 0,
+    paddingLeft: 0,
+    marginTop: SPACING.m,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border + '30',
+    paddingTop: SPACING.m,
+  },
+  sentimentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.s,
+  },
+  sentimentTitle: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+  },
+  timeframeRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+  },
+  timeframePill: {
+    paddingHorizontal: SPACING.s,
+    paddingVertical: 6,
+    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border + '40',
+  },
+  timeframePillActive: {
+    backgroundColor: COLORS.solana + '20',
+    borderColor: COLORS.solana + '60',
+  },
+  timeframeText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  timeframeTextActive: {
+    color: COLORS.solana,
+  },
+  sentimentItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.s,
+    marginTop: SPACING.xs,
+  },
+  sentimentLabel: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    width: 70,
+  },
+  sentimentBarTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 8,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border + '30',
+    overflow: 'hidden',
+  },
+  sentimentBarFill: {
+    height: '100%',
+    borderRadius: 8,
+  },
+  sentimentValue: {
+    ...FONTS.monospace,
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    width: 44,
+    textAlign: 'right',
   },
   contractHeader: {
     flexDirection: 'row',
@@ -819,10 +1296,105 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.s,
     borderRadius: BORDER_RADIUS.medium,
   },
-  linkText: {
+   linkText: {
+     ...FONTS.phantomMedium,
+     color: COLORS.textPrimary,
+     fontSize: 14,
+     marginLeft: SPACING.s,
+   },
+   moreInfoContainer: {
+     margin: SPACING.m,
+   },
+  // Modal styles
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCard: {
+    width: '80%',
+    maxWidth: 460,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.large,
+    padding: SPACING.l,
+    borderWidth: 1,
+    borderColor: COLORS.border + '40',
+    minHeight: 480,
+    maxHeight: '90%',
+  },
+  modalTitle: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    marginBottom: SPACING.m,
+    textAlign: 'center',
+  },
+  modalSection: {
+    marginTop: SPACING.s,
+  },
+  modalLabel: {
     ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginBottom: SPACING.xs,
+  },
+  modalInput: {
+    ...FONTS.monospace,
+    color: COLORS.textPrimary,
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.medium,
+    borderWidth: 1,
+    borderColor: COLORS.border + '40',
+    paddingVertical: SPACING.s,
+    paddingHorizontal: SPACING.m,
+    fontSize: 16,
+    marginBottom: SPACING.m,
+  },
+  segmentedRow: {
+    flexDirection: 'row',
+    gap: SPACING.s,
+    marginBottom: SPACING.m,
+  },
+  segmentedItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border + '40',
+  },
+  segmentedItemActive: {
+    backgroundColor: COLORS.solana + '20',
+    borderColor: COLORS.solana + '60',
+  },
+  segmentedText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  segmentedTextActive: {
+    color: COLORS.solana,
+  },
+  targetRow: {
+    marginTop: SPACING.s,
+  },
+  modalPrimary: {
+    marginTop: SPACING.s,
+  },
+  modalSecondary: {
+    marginTop: SPACING.s,
+  },
+  modalSummary: {
+    ...FONTS.phantomRegular,
     color: COLORS.textPrimary,
     fontSize: 14,
-    marginLeft: SPACING.s,
+    marginBottom: SPACING.m,
+    textAlign: 'center',
   },
 });

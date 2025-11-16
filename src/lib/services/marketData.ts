@@ -1,0 +1,189 @@
+import axios from 'axios';
+import NodeCache from 'node-cache';
+import { z } from 'zod';
+
+class MarketDataService {
+  private cache = new NodeCache({ stdTTL: 30 }); // 30 seconds default TTL
+  private base = 'https://api.dexscreener.com/latest';
+  private failureCount = 0;
+  private static MAX_FAILURES = 3;
+
+  private DexPairsSchema = z.object({ pairs: z.array(z.any()).optional() });
+  private DexTokenSchema = z.object({ baseToken: z.object({ address: z.string().optional(), symbol: z.string().optional(), name: z.string().optional() }).optional(), priceUsd: z.string().optional() }).partial();
+  private DexPairSchema = z.object({ baseToken: z.object({ address: z.string().optional(), symbol: z.string().optional(), name: z.string().optional() }).optional(), pairAddress: z.string().optional(), chainId: z.string().optional(), priceUsd: z.string().optional() }).partial();
+
+  async getToken(address: string) {
+    const key = `token:${address}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    const { data } = await axios.get(`${this.base}/dex/tokens/${address}`)
+    const validated = this.DexTokenSchema.safeParse(data)
+    const result = validated.success ? data : { baseToken: { address }, priceUsd: '0' }
+    this.cache.set(key, result)
+    return result
+  }
+
+  async search(q: string) {
+    const key = `search:${q}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    const { data } = await axios.get(`${this.base}/dex/search`, { params: { q } });
+    const validated = this.DexPairsSchema.safeParse(data);
+    const result = validated.success ? data : { pairs: [] };
+    this.cache.set(key, result);
+    return result;
+  }
+
+  async getPair(chain: string, pairAddress: string) {
+    const key = `pair:${chain}:${pairAddress}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    const { data } = await axios.get(`${this.base}/dex/pairs/${chain}/${pairAddress}`)
+    const validated = this.DexPairSchema.safeParse(data)
+    const result = validated.success ? data : { baseToken: {}, pairAddress, chainId: chain, priceUsd: '0' }
+    this.cache.set(key, result)
+    return result
+  }
+
+  /**
+   * Get SoulMarket curated tokens with quality filters
+   * Filters: Liquidity 100k+, Pair age 4h+, Volume, Transactions
+   */
+  async getSoulMarket() {
+    const key = 'soulmarket';
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    try {
+      // Search for popular Solana ecosystem tokens + broader market
+      const searchTerms = [
+        'SOL', 'BONK', 'WIF', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY',
+        'ORCA', 'STEP', 'SAMO', 'FIDA', 'MNGO', 'COPE'
+      ];
+      
+      const results = await Promise.all(
+        searchTerms.map(async (token) => {
+          try {
+            return await this.search(token);
+          } catch (error) {
+            return { pairs: [] };
+          }
+        })
+      );
+
+      // Combine all pairs
+      const allPairs = results.flatMap(r => r.pairs || []);
+
+      // Current time for age calculation
+      const now = Date.now();
+      const MIN_PAIR_AGE_HOURS = 4;
+      const MIN_PAIR_AGE_MS = MIN_PAIR_AGE_HOURS * 60 * 60 * 1000;
+
+      // Apply quality filters
+      const filteredPairs = allPairs.filter((pair: any) => {
+        // Filter 1: Minimum liquidity $100,000
+        const liquidity = parseFloat(pair.liquidity?.usd || '0');
+        if (liquidity < 100000) return false;
+
+        // Filter 2: Minimum pair age 4 hours
+        const pairCreatedAt = pair.pairCreatedAt;
+        if (pairCreatedAt) {
+          const pairAge = now - pairCreatedAt;
+          if (pairAge < MIN_PAIR_AGE_MS) return false;
+        }
+
+        // Filter 3: Minimum 24h volume $10,000
+        const volume24h = parseFloat(pair.volume?.h24 || '0');
+        if (volume24h < 10000) return false;
+
+        // Filter 4: Minimum 24h transactions (50+)
+        const txns24h = (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0);
+        if (txns24h < 50) return false;
+
+        // Filter 5: Must have valid price
+        const price = parseFloat(pair.priceUsd || '0');
+        if (price <= 0) return false;
+
+        // Filter 6: Solana chain only
+        if (pair.chainId !== 'solana') return false;
+
+        // Filter 7: Minimum FDV $50k (if available)
+        if (pair.fdv && parseFloat(pair.fdv) < 50000) return false;
+
+        return true;
+      });
+
+      // Sort by liquidity (descending) for quality
+      const sortedByLiquidity = filteredPairs.sort((a: any, b: any) => {
+        const liquidityA = parseFloat(a.liquidity?.usd || '0');
+        const liquidityB = parseFloat(b.liquidity?.usd || '0');
+        return liquidityB - liquidityA;
+      });
+
+      // Remove duplicates based on base token address
+      const uniquePairs = sortedByLiquidity.filter((pair: any, index: number, self: any[]) =>
+        index === self.findIndex((p: any) => p.baseToken?.address === pair.baseToken?.address)
+      );
+
+      const soulMarket = { pairs: uniquePairs.slice(0, 50) };
+      this.cache.set(key, soulMarket, 300);
+      return soulMarket;
+    } catch (error) {
+      this.failureCount += 1;
+      if (this.failureCount >= MarketDataService.MAX_FAILURES) {
+        this.failureCount = 0;
+        const fallback = this.cache.get('soulmarket');
+        if (fallback) return fallback as any;
+      }
+      return { pairs: [] };
+    }
+  }
+
+  async trending() {
+    const key = 'trending';
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    try {
+      // Search for popular Solana ecosystem tokens
+      const popularTokens = ['SOL', 'USDC', 'BONK', 'WIF', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY'];
+      
+      const results = await Promise.all(
+        popularTokens.map(async (token) => {
+          try {
+            return await this.search(token);
+          } catch (error) {
+            return { pairs: [] };
+          }
+        })
+      );
+
+      // Combine all pairs
+      const allPairs = results.flatMap(r => r.pairs || []);
+
+      // Sort by 24h volume (descending)
+      const sortedByVolume = allPairs.sort((a: any, b: any) => {
+        const volumeA = parseFloat(a.volume?.h24 || '0');
+        const volumeB = parseFloat(b.volume?.h24 || '0');
+        return volumeB - volumeA;
+      });
+
+      // Remove duplicates based on base token address
+      const uniquePairs = sortedByVolume.filter((pair: any, index: number, self: any[]) =>
+        index === self.findIndex((p: any) => p.baseToken?.address === pair.baseToken?.address)
+      );
+
+      const trending = { pairs: uniquePairs.slice(0, 50) };
+      this.cache.set(key, trending, 300); // Cache for 5 minutes
+      return trending;
+    } catch (error) {
+      // Fallback to simple solana search
+      return this.search('solana');
+    }
+  }
+}
+
+export const marketData = new MarketDataService();

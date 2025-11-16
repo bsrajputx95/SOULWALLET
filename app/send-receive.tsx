@@ -11,31 +11,36 @@ import {
   useWindowDimensions,
   Platform,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { Stack } from 'expo-router';
+ import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import {
-  ArrowLeft,
   Send,
   ArrowDown,
   Copy,
   QrCode,
   ChevronDown,
   Search,
-  Scan,
   Wallet,
   CheckCircle,
   AlertCircle,
-  Camera,
+  X,
+  ChevronRight,
+  Users,
+  Clipboard as ClipboardIcon,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
+import QRCode from 'react-native-qrcode-svg';
+// Removed react-native-share as it's not web-compatible
+import * as Haptics from 'expo-haptics';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 import { useAuth } from '../hooks/auth-store';
+import { trpc } from '../lib/trpc';
 
 type TabType = 'send' | 'receive';
 
@@ -50,6 +55,9 @@ interface TokenOption {
 
 export default function SendReceiveScreen() {
   const router = useRouter();
+  const { flow } = useLocalSearchParams();
+  const initialFlow = Array.isArray(flow) ? flow[0] : flow;
+  const initialTab: TabType = initialFlow === 'receive' ? 'receive' : 'send';
   const { width } = useWindowDimensions();
   const { user } = useAuth();
   const {
@@ -65,7 +73,7 @@ export default function SendReceiveScreen() {
   } = useSolanaWallet();
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<TabType>('send');
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
 
   // Send form state
   const [sendAddress, setSendAddress] = useState('');
@@ -76,12 +84,27 @@ export default function SendReceiveScreen() {
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState('');
   const [sendSuccess, setSendSuccess] = useState('');
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showContacts, setShowContacts] = useState(false);
+  const [addressValidation, setAddressValidation] = useState<{
+    isValid: boolean;
+    message: string;
+  }>({ isValid: false, message: '' });
 
   // Receive state
-  const [showQRCode, setShowQRCode] = useState(false);
+  const [showQRCode, setShowQRCode] = useState(true);
+  const [selectedReceiveToken, setSelectedReceiveToken] = useState('SOL');
 
   // Available tokens
   const availableTokens = getAvailableTokens();
+
+  // Get recent incoming transactions
+  const { data: recentTransactions, isLoading: loadingTransactions } = trpc.wallet.getRecentIncoming.useQuery(
+    { limit: 5 },
+    { enabled: !!publicKey }
+  );
+  const { data: flags } = trpc.system.getFeatureFlags.useQuery();
+  const recordTransactionMutation = trpc.wallet.recordTransaction.useMutation();
 
   // Set default token to SOL
   useEffect(() => {
@@ -135,6 +158,14 @@ export default function SendReceiveScreen() {
 
   // Handle send transaction
   const handleSend = async () => {
+    if (!flags?.sendEnabled) {
+      Alert.alert('Send Disabled', 'Sending is disabled in this environment.');
+      return;
+    }
+    if (!flags?.simulationMode) {
+      Alert.alert('Not Available', 'On-chain send is not enabled in this environment.');
+      return;
+    }
     if (!validateSendForm() || !wallet || !selectedToken) return;
 
     try {
@@ -156,6 +187,23 @@ export default function SendReceiveScreen() {
         );
       }
 
+      // Record transaction in backend database
+      try {
+        await recordTransactionMutation.mutateAsync({
+          signature,
+          type: 'SEND',
+          amount: parseFloat(sendAmount),
+          token: selectedToken.mint,
+          tokenSymbol: selectedToken.symbol,
+          to: sendAddress,
+          from: publicKey || undefined,
+        });
+        if (__DEV__) console.log('Transaction recorded in database:', signature);
+      } catch (recordError) {
+        // Don't fail the whole operation if recording fails
+        if (__DEV__) console.error('Failed to record transaction:', recordError);
+      }
+
       setSendSuccess(`Transaction successful! Signature: ${signature.slice(0, 8)}...${signature.slice(-8)}`);
       setSendAddress('');
       setSendAmount('');
@@ -171,17 +219,407 @@ export default function SendReceiveScreen() {
     }
   };
 
-  // Handle copy address
-  const handleCopyAddress = async () => {
-    if (!publicKey) return;
+
+
+  // Handle address change with validation
+  const handleAddressChange = (text: string) => {
+    setSendAddress(text);
     
-    try {
-      await Clipboard.setStringAsync(publicKey);
-      Alert.alert('Copied!', 'Wallet address copied to clipboard');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to copy address');
+    if (!text.trim()) {
+      setAddressValidation({ isValid: false, message: '' });
+      return;
+    }
+
+    // Basic Solana address validation
+    if (text.length < 32 || text.length > 44) {
+      setAddressValidation({ 
+        isValid: false, 
+        message: 'Invalid address length' 
+      });
+    } else if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(text)) {
+      setAddressValidation({ 
+        isValid: false, 
+        message: 'Invalid characters in address' 
+      });
+    } else {
+      setAddressValidation({ 
+        isValid: true, 
+        message: 'Valid Solana address' 
+      });
     }
   };
+
+  // Validate amount
+  const validateAmount = (amount: string) => {
+    if (!amount || !selectedToken) return;
+    
+    const numAmount = parseFloat(amount);
+    if (numAmount > selectedToken.balance) {
+      setSendError(`Insufficient balance. Available: ${selectedToken.balance.toFixed(6)} ${selectedToken.symbol}`);
+    } else {
+      setSendError('');
+    }
+  };
+
+  // Handle send confirmation
+  const handleSendConfirm = async () => {
+    setShowConfirmation(false);
+    await handleSend();
+  };
+
+  // Handle contact select
+  const handleContactSelect = (contact: any) => {
+    setSendAddress(contact.address);
+    setShowContacts(false);
+    handleAddressChange(contact.address);
+  };
+
+  // Fee estimation (placeholder)
+  const feeEstimate = selectedToken ? { fee: 0.000005 } : null;
+
+  // Contacts data (placeholder)
+  const contacts: any[] = [];
+  const loadingContacts = false;
+
+
+
+  // Render token selector
+
+
+  // Render send tab
+  const renderSendTab = () => {
+    return (
+      <View style={styles.tabContent}>
+        <Text style={styles.sendDescription}>
+          Send SOL and Solana tokens to any address
+        </Text>
+
+        {/* Form Container */}
+        <LinearGradient
+          colors={[COLORS.cardBackground, COLORS.cardBackground + 'E0']}
+          style={styles.formContainer}
+        >
+          {/* Token Selector */}
+          {renderTokenSelector()}
+
+          {/* Recipient Address */}
+          <View style={styles.inputSection}>
+            <Text style={styles.inputLabel}>Recipient Address</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[
+                  styles.input,
+                  styles.addressInput,
+                  sendAddress && (addressValidation.isValid ? styles.inputValid : styles.inputError)
+                ]}
+                placeholder="Enter Solana address..."
+                placeholderTextColor={COLORS.textSecondary}
+                value={sendAddress}
+                onChangeText={handleAddressChange}
+                multiline
+                numberOfLines={2}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <View style={styles.addressActions}>
+                <TouchableOpacity
+                  style={styles.addressActionButton}
+                  onPress={handlePasteAddress}
+                >
+                  <ClipboardIcon size={16} color={COLORS.solana} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.addressActionButton}
+                  onPress={() => setShowContacts(true)}
+                >
+                  <Users size={16} color={COLORS.solana} />
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            {/* Address Validation Feedback */}
+            {sendAddress && (
+              <Text style={[
+                styles.validationText,
+                addressValidation.isValid ? styles.validText : styles.errorText
+              ]}>
+                {addressValidation.message}
+              </Text>
+            )}
+          </View>
+
+          {/* Amount Input */}
+          <View style={styles.inputSection}>
+            <Text style={styles.inputLabel}>Amount</Text>
+            <View style={styles.amountInputContainer}>
+              <TextInput
+                style={styles.amountInput}
+                placeholder="0.00"
+                placeholderTextColor={COLORS.textSecondary}
+                value={sendAmount}
+                onChangeText={(text) => {
+                  setSendAmount(text);
+                  validateAmount(text);
+                }}
+                keyboardType="decimal-pad"
+              />
+              <Text style={styles.amountSuffix}>
+                {selectedToken?.symbol || 'SOL'}
+              </Text>
+            </View>
+            
+            {selectedToken && (
+              <TouchableOpacity
+                style={styles.maxButton}
+                onPress={() => {
+                  const maxAmount = selectedToken.balance.toString();
+                  setSendAmount(maxAmount);
+                  validateAmount(maxAmount);
+                }}
+              >
+                <Text style={styles.maxButtonText}>MAX</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Transaction Fee */}
+          {feeEstimate && (
+            <View style={styles.feeInfo}>
+              <Text style={styles.feeText}>
+                Network Fee: {feeEstimate.fee} SOL
+              </Text>
+              <Text style={styles.feeSubtext}>
+                Estimated confirmation time: ~30 seconds
+              </Text>
+            </View>
+          )}
+
+          {/* Error Display */}
+          {sendError && (
+            <View style={styles.errorContainer}>
+              <AlertCircle size={16} color={COLORS.error} />
+              <Text style={styles.errorText}>{sendError}</Text>
+            </View>
+          )}
+
+          {/* Success Display */}
+          {sendSuccess && (
+            <View style={styles.successContainer}>
+              <CheckCircle size={16} color={COLORS.success} />
+              <Text style={styles.successText}>{sendSuccess}</Text>
+            </View>
+          )}
+
+          {/* Send Button */}
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              (!addressValidation.isValid || !sendAmount || !selectedToken || isSending || !flags?.sendEnabled || !flags?.simulationMode) && styles.sendButtonDisabled
+            ]}
+            onPress={() => setShowConfirmation(true)}
+            disabled={!addressValidation.isValid || !sendAmount || !selectedToken || isSending || !flags?.sendEnabled || !flags?.simulationMode}
+          >
+            <LinearGradient
+              colors={[COLORS.solana, COLORS.solana + '80']}
+              style={styles.sendGradient}
+            >
+              {isSending ? (
+                <ActivityIndicator size="small" color={COLORS.textPrimary} />
+              ) : (
+                <Send size={20} color={COLORS.textPrimary} />
+              )}
+              <Text style={styles.sendButtonText}>
+                {isSending ? 'SENDING...' : (!flags?.sendEnabled || !flags?.simulationMode) ? 'Disabled' : 'REVIEW TRANSACTION'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {!wallet && (
+            <View style={styles.walletWarning}>
+              <Wallet size={16} color={COLORS.warning} />
+              <Text style={styles.walletWarningText}>
+                Connect or create a wallet to send transactions
+              </Text>
+            </View>
+          )}
+        </LinearGradient>
+
+        {/* Contacts Modal */}
+        <Modal
+          visible={showContacts}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowContacts(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Contact</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowContacts(false)}
+              >
+                <X size={24} color={COLORS.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.contactsList}>
+              {loadingContacts ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={COLORS.solana} />
+                  <Text style={styles.loadingText}>Loading contacts...</Text>
+                </View>
+              ) : contacts && contacts.length > 0 ? (
+                contacts.map((contact) => (
+                  <TouchableOpacity
+                    key={contact.id}
+                    style={styles.contactItem}
+                    onPress={() => handleContactSelect(contact)}
+                  >
+                    <View style={styles.contactInfo}>
+                      <Text style={styles.contactName}>{contact.name}</Text>
+                      <Text style={styles.contactAddress}>
+                        {contact.address.slice(0, 8)}...{contact.address.slice(-8)}
+                      </Text>
+                    </View>
+                    <ChevronRight size={20} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={styles.emptyContacts}>
+                  <Text style={styles.emptyContactsText}>
+                    No contacts found. Add contacts from your transaction history.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </Modal>
+
+        {/* Confirmation Modal */}
+        <Modal
+          visible={showConfirmation}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowConfirmation(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Confirm Transaction</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowConfirmation(false)}
+              >
+                <X size={24} color={COLORS.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.confirmationContent}>
+              <View style={styles.confirmationSection}>
+                <Text style={styles.confirmationLabel}>Sending</Text>
+                <Text style={styles.confirmationValue}>
+                  {sendAmount} {selectedToken?.symbol}
+                </Text>
+              </View>
+              
+              <View style={styles.confirmationSection}>
+                <Text style={styles.confirmationLabel}>To</Text>
+                <Text style={styles.confirmationAddress}>
+                  {sendAddress}
+                </Text>
+              </View>
+              
+              {feeEstimate && (
+                <View style={styles.confirmationSection}>
+                  <Text style={styles.confirmationLabel}>Network Fee</Text>
+                  <Text style={styles.confirmationValue}>
+                    {feeEstimate.fee} SOL
+                  </Text>
+                </View>
+              )}
+              
+              <View style={styles.confirmationButtons}>
+                <TouchableOpacity
+                  style={[styles.confirmationButton, styles.cancelButton]}
+                  onPress={() => setShowConfirmation(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.confirmationButton, styles.confirmButton, (!flags?.sendEnabled || !flags?.simulationMode) && { opacity: 0.6 }]}
+                  onPress={handleSendConfirm}
+                  disabled={isSending || !flags?.sendEnabled || !flags?.simulationMode}
+                >
+                  <LinearGradient
+                    colors={[COLORS.solana, COLORS.solana + '80']}
+                    style={styles.confirmGradient}
+                  >
+                    {isSending ? (
+                      <ActivityIndicator size="small" color={COLORS.textPrimary} />
+                    ) : (
+                      <Send size={18} color={COLORS.textPrimary} />
+                    )}
+                    <Text style={styles.confirmButtonText}>
+                      {isSending ? 'Sending...' : (!flags?.sendEnabled || !flags?.simulationMode) ? 'Disabled' : 'Confirm Send'}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    );
+  };
+
+  // Handle share address (web-compatible implementation)
+  const handleShareAddress = async () => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    const walletAddress = publicKey || user?.walletAddress;
+    if (!walletAddress) {
+      Alert.alert('Error', 'No wallet address available');
+      return;
+    }
+
+    try {
+      const shareData = {
+        title: 'My Solana Wallet Address',
+        text: `Send SOL and SPL tokens to this address:\n\n${walletAddress}`,
+        url: `solana:${walletAddress}`,
+      };
+
+      // Use Web Share API if available, otherwise fallback to clipboard
+      if (Platform.OS === 'web' && navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        // Fallback: copy to clipboard and show alert
+        await Clipboard.setStringAsync(`${shareData.title}\n${shareData.text}`);
+        Alert.alert(
+          'Address Copied',
+          'Your wallet address has been copied to clipboard',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.log('Share cancelled or failed:', error);
+      // Fallback: copy to clipboard
+      try {
+        await Clipboard.setStringAsync(walletAddress);
+        Alert.alert(
+          'Address Copied',
+          'Your wallet address has been copied to clipboard',
+          [{ text: 'OK' }]
+        );
+      } catch (clipboardError) {
+        console.error('Failed to copy to clipboard:', clipboardError);
+      }
+    }
+  };
+
+
 
   // Handle paste address
   const handlePasteAddress = async () => {
@@ -192,6 +630,20 @@ export default function SendReceiveScreen() {
       }
     } catch (error) {
       if (__DEV__) console.error('Failed to paste:', error);
+    }
+  };
+
+  // Handle copy address
+  const handleCopyAddress = async () => {
+    try {
+      if (publicKey) {
+        await Clipboard.setStringAsync(publicKey);
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Success', 'Address copied to clipboard');
+      }
+    } catch (error) {
+      if (__DEV__) console.error('Failed to copy address:', error);
+      Alert.alert('Error', 'Failed to copy address');
     }
   };
 
@@ -266,127 +718,6 @@ export default function SendReceiveScreen() {
     );
   };
 
-  // Render send tab
-  const renderSendTab = () => {
-    return (
-      <View style={styles.tabContent}>
-        {/* Form Container */}
-        <LinearGradient
-          colors={[COLORS.cardBackground, COLORS.cardBackground + 'E0']}
-          style={styles.formContainer}
-        >
-          {/* Token Selector */}
-          {renderTokenSelector()}
-
-          {/* Recipient Address */}
-          <View style={styles.inputSection}>
-            <Text style={styles.inputLabel}>Recipient Address</Text>
-            <View style={styles.addressInputContainer}>
-              <TextInput
-                style={styles.addressInput}
-                placeholder="Enter Solana address..."
-                placeholderTextColor={COLORS.textSecondary}
-                value={sendAddress}
-                onChangeText={setSendAddress}
-                multiline
-                numberOfLines={2}
-              />
-              <View style={styles.addressActions}>
-                <TouchableOpacity
-                  style={styles.addressActionButton}
-                  onPress={handlePasteAddress}
-                >
-                  <Copy size={16} color={COLORS.solana} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.addressActionButton}
-                  onPress={() => Alert.alert('QR Scanner', 'QR code scanner would open here')}
-                >
-                  <Scan size={16} color={COLORS.solana} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-
-          {/* Amount */}
-          <View style={styles.inputSection}>
-            <Text style={styles.inputLabel}>Amount</Text>
-            <View style={styles.amountInputContainer}>
-              <TextInput
-                style={styles.amountInput}
-                placeholder="0.00"
-                placeholderTextColor={COLORS.textSecondary}
-                value={sendAmount}
-                onChangeText={setSendAmount}
-                keyboardType="numeric"
-              />
-              <Text style={styles.amountSuffix}>{selectedToken?.symbol || ''}</Text>
-            </View>
-            {selectedToken && (
-              <TouchableOpacity
-                style={styles.maxButton}
-                onPress={() => setSendAmount(selectedToken.balance.toString())}
-              >
-                <Text style={styles.maxButtonText}>MAX</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Transaction Fee Info */}
-          <View style={styles.feeInfo}>
-            <Text style={styles.feeText}>Network Fee: ~0.000005 SOL</Text>
-            <Text style={styles.feeSubtext}>Solana Network</Text>
-          </View>
-
-          {/* Error/Success Messages */}
-          {sendError ? (
-            <View style={styles.errorContainer}>
-              <AlertCircle size={16} color={COLORS.error} />
-              <Text style={styles.errorText}>{sendError}</Text>
-            </View>
-          ) : null}
-
-          {sendSuccess ? (
-            <View style={styles.successContainer}>
-              <CheckCircle size={16} color={COLORS.success} />
-              <Text style={styles.successText}>{sendSuccess}</Text>
-            </View>
-          ) : null}
-
-          {/* Send Button */}
-          <TouchableOpacity
-            style={[styles.actionButton, (!wallet || isSending) && styles.disabledButton]}
-            onPress={handleSend}
-            disabled={!wallet || isSending}
-          >
-            <LinearGradient
-              colors={[COLORS.solana, COLORS.solana + '80']}
-              style={styles.actionGradient}
-            >
-              {isSending ? (
-                <ActivityIndicator size="small" color={COLORS.textPrimary} />
-              ) : (
-                <Send size={20} color={COLORS.textPrimary} />
-              )}
-              <Text style={styles.actionText}>
-                {isSending ? 'SENDING...' : 'SEND'}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {!wallet && (
-            <View style={styles.walletWarning}>
-              <Wallet size={16} color={COLORS.warning} />
-              <Text style={styles.walletWarningText}>
-                Connect or create a wallet to send transactions
-              </Text>
-            </View>
-          )}
-        </LinearGradient>
-      </View>
-    );
-  };
-
   // Render receive tab
   const renderReceiveTab = () => {
     const walletAddress = publicKey || user?.walletAddress || 'No wallet connected';
@@ -402,15 +733,54 @@ export default function SendReceiveScreen() {
           colors={[COLORS.cardBackground, COLORS.cardBackground + 'E0']}
           style={styles.formContainer}
         >
+          {/* Token Selector for Receive */}
+          <View style={styles.inputSection}>
+            <Text style={styles.inputLabel}>Receiving Token</Text>
+            <View style={styles.tokenSelectorContainer}>
+              <TouchableOpacity
+                style={[styles.tokenSelectorButton, selectedReceiveToken === 'SOL' && styles.selectedTokenButton]}
+                onPress={() => setSelectedReceiveToken('SOL')}
+              >
+                <Text style={[styles.tokenSelectorText, selectedReceiveToken === 'SOL' && styles.selectedTokenText]}>
+                  SOL
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tokenSelectorButton, selectedReceiveToken === 'SPL' && styles.selectedTokenButton]}
+                onPress={() => setSelectedReceiveToken('SPL')}
+              >
+                <Text style={[styles.tokenSelectorText, selectedReceiveToken === 'SPL' && styles.selectedTokenText]}>
+                  SPL Tokens
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* QR Code */}
           <View style={styles.qrContainer}>
-            <TouchableOpacity
-              style={styles.qrPlaceholder}
-              onPress={() => setShowQRCode(!showQRCode)}
-            >
-              <QrCode size={120} color={COLORS.solana} />
-              <Text style={styles.qrText}>Tap to {showQRCode ? 'hide' : 'show'} QR</Text>
-            </TouchableOpacity>
+            {showQRCode && walletAddress !== 'No wallet connected' ? (
+              <View style={styles.qrCodeWrapper}>
+                <QRCode
+                  value={walletAddress}
+                  size={200}
+                  color={COLORS.textPrimary}
+                  backgroundColor={COLORS.cardBackground}
+                  logo={require('../assets/icon.png')}
+                  logoSize={40}
+                  logoBackgroundColor={COLORS.cardBackground}
+                  logoMargin={2}
+                  logoBorderRadius={20}
+                />
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.qrPlaceholder}
+                onPress={() => setShowQRCode(!showQRCode)}
+              >
+                <QrCode size={120} color={COLORS.solana} />
+                <Text style={styles.qrText}>Tap to {showQRCode ? 'hide' : 'show'} QR</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Address */}
@@ -423,20 +793,74 @@ export default function SendReceiveScreen() {
             </View>
           </View>
 
-          {/* Copy Button */}
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleCopyAddress}
-            disabled={!publicKey}
-          >
-            <LinearGradient
-              colors={[COLORS.solana, COLORS.solana + '80']}
-              style={styles.actionGradient}
+          {/* Action Buttons */}
+          <View style={styles.actionButtonsContainer}>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.halfButton]}
+              onPress={handleCopyAddress}
+              disabled={!publicKey}
             >
-              <Copy size={20} color={COLORS.textPrimary} />
-              <Text style={styles.actionText}>COPY ADDRESS</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={[COLORS.solana, COLORS.solana + '80']}
+                style={styles.actionGradient}
+              >
+                <Copy size={18} color={COLORS.textPrimary} />
+                <Text style={styles.actionText}>COPY</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionButton, styles.halfButton]}
+              onPress={handleShareAddress}
+              disabled={!publicKey}
+            >
+              <LinearGradient
+                colors={[COLORS.gradientPurple[0], COLORS.gradientPurple[0] + '80']}
+                style={styles.actionGradient}
+              >
+                <Send size={18} color={COLORS.textPrimary} />
+                <Text style={styles.actionText}>SHARE</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          {/* Recent Incoming Transactions */}
+          <View style={styles.recentTransactionsContainer}>
+            <Text style={styles.sectionTitle}>Recent Incoming</Text>
+            {loadingTransactions ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color={COLORS.solana} />
+                <Text style={styles.loadingText}>Loading transactions...</Text>
+              </View>
+            ) : recentTransactions && recentTransactions.transactions && recentTransactions.transactions.length > 0 ? (
+              <ScrollView style={styles.transactionsList} showsVerticalScrollIndicator={false}>
+                {recentTransactions.transactions.map((tx, index) => (
+                  <View key={index} style={styles.transactionItem}>
+                    <View style={styles.transactionIcon}>
+                      <ArrowDown size={16} color={COLORS.success} />
+                    </View>
+                    <View style={styles.transactionDetails}>
+                      <Text style={styles.transactionAmount}>
+                        +{tx.amount} {tx.tokenSymbol || 'SOL'}
+                      </Text>
+                      <Text style={styles.transactionTime}>
+                        {new Date(tx.createdAt).toLocaleDateString()}
+                      </Text>
+                    </View>
+                    <Text style={styles.transactionStatus}>
+                      {tx.status === 'CONFIRMED' ? '✓' : '⏳'}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.emptyTransactions}>
+                <Text style={styles.emptyTransactionsText}>
+                  No recent incoming transactions
+                </Text>
+              </View>
+            )}
+          </View>
 
           {/* Wallet Info */}
           <View style={styles.walletInfo}>
@@ -475,48 +899,11 @@ export default function SendReceiveScreen() {
         }}
       />
 
-      {/* Custom Header */}
+      {/* Custom Header: single flow title, no tabs or back */}
       <View style={styles.customHeader}>
-        {/* Tab Header */}
-        <View style={styles.tabsHeader}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'send' && styles.activeTab]}
-            onPress={() => setActiveTab('send')}
-          >
-            <Send size={20} color={activeTab === 'send' ? COLORS.solana : COLORS.textSecondary} />
-            <Text
-              style={[
-                styles.tabText,
-                activeTab === 'send' && styles.activeTabText,
-              ]}
-            >
-              SEND
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'receive' && styles.activeTab]}
-            onPress={() => setActiveTab('receive')}
-          >
-            <ArrowDown size={20} color={activeTab === 'receive' ? COLORS.solana : COLORS.textSecondary} />
-            <Text
-              style={[
-                styles.tabText,
-                activeTab === 'receive' && styles.activeTabText,
-              ]}
-            >
-              LOAD
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Back Button */}
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
-          <ArrowLeft size={24} color={COLORS.solana} />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>
+          {activeTab === 'send' ? 'SEND' : 'RECEIVE'}
+        </Text>
       </View>
 
       <ScrollView
@@ -536,364 +923,672 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  customHeader: {
-    paddingHorizontal: SPACING.l,
-    paddingTop: SPACING.l,
-    paddingBottom: SPACING.m,
-    backgroundColor: COLORS.background,
-    position: 'relative',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.xl,
+    paddingBottom: SPACING.md,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontFamily: FONTS.bold,
+    color: COLORS.textPrimary,
   },
   backButton: {
-    position: 'absolute',
-    right: SPACING.l,
-    top: SPACING.l,
-    padding: SPACING.s,
-    backgroundColor: COLORS.solana + '20',
-    borderRadius: BORDER_RADIUS.small,
-    zIndex: 10,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: SPACING.l,
-    paddingBottom: SPACING.xl,
-  },
-  tabsHeader: {
-    flexDirection: 'row',
+    padding: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
     backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.lg,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.lg,
     padding: 4,
-    marginRight: 60,
   },
   tab: {
     flex: 1,
-    flexDirection: 'row',
+    paddingVertical: SPACING.md,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.m,
-    borderRadius: BORDER_RADIUS.small,
-    gap: SPACING.s,
+    borderRadius: BORDER_RADIUS.md,
   },
   activeTab: {
-    backgroundColor: COLORS.solana + '20',
+    backgroundColor: COLORS.solana,
   },
   tabText: {
-    ...FONTS.phantomMedium,
+    fontSize: 16,
+    fontFamily: FONTS.medium,
     color: COLORS.textSecondary,
-    fontSize: 14,
   },
   activeTabText: {
-    color: COLORS.solana,
+    color: COLORS.textPrimary,
   },
   tabContent: {
     flex: 1,
+    paddingHorizontal: SPACING.lg,
+  },
+  sendDescription: {
+    fontSize: 16,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
+  },
+  receiveDescription: {
+    fontSize: 16,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
+  },
+  formContainer: {
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
   },
   inputSection: {
-    marginBottom: SPACING.l,
+    marginBottom: SPACING.lg,
   },
   inputLabel: {
-    ...FONTS.phantomSemiBold,
+    fontSize: 14,
+    fontFamily: FONTS.medium,
     color: COLORS.textPrimary,
+    marginBottom: SPACING.sm,
+  },
+  input: {
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
     fontSize: 16,
-    marginBottom: SPACING.s,
+    fontFamily: FONTS.regular,
+    color: COLORS.textPrimary,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  inputFocused: {
+    borderColor: COLORS.solana,
+  },
+  inputError: {
+    borderColor: COLORS.error,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  pasteButton: {
+    backgroundColor: COLORS.solana + '20',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  pasteButtonText: {
+    fontSize: 12,
+    fontFamily: FONTS.medium,
+    color: COLORS.solana,
   },
   dropdownButton: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20',
+    borderColor: COLORS.border,
   },
   dropdownButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.m,
+  },
+  tokenInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  tokenLogo: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  tokenSymbol: {
+    fontSize: 16,
+    fontFamily: FONTS.medium,
+    color: COLORS.textPrimary,
+  },
+  tokenName: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+  },
+  tokenBalance: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
   },
   dropdownContainer: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    marginTop: SPACING.s,
+    borderRadius: BORDER_RADIUS.lg,
+    marginTop: SPACING.sm,
     maxHeight: 200,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
+    padding: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10',
+    borderBottomColor: COLORS.border,
+    gap: SPACING.sm,
   },
   searchInput: {
-    ...FONTS.phantomRegular,
     flex: 1,
-    color: COLORS.textPrimary,
     fontSize: 14,
-    marginLeft: SPACING.s,
-    paddingVertical: SPACING.xs,
+    fontFamily: FONTS.regular,
+    color: COLORS.textPrimary,
   },
   dropdownList: {
     maxHeight: 150,
   },
   dropdownItem: {
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
+    padding: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10',
-  },
-  tokenInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  tokenLogo: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: SPACING.s,
+    borderBottomColor: COLORS.border + '30',
   },
   tokenDetails: {
     flex: 1,
   },
-  tokenSymbol: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
-    fontSize: 16,
+  maxButton: {
+    backgroundColor: COLORS.solana + '20',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
   },
-  tokenName: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
+  maxButtonText: {
     fontSize: 12,
+    fontFamily: FONTS.medium,
+    color: COLORS.solana,
   },
-  tokenBalance: {
-    ...FONTS.monospace,
-    color: COLORS.textSecondary,
-    fontSize: 12,
+  sendButton: {
+    marginTop: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
   },
-  addressInputContainer: {
+  sendButtonDisabled: {
+    opacity: 0.5,
+  },
+  sendGradient: {
+    paddingVertical: SPACING.lg,
+    alignItems: 'center',
     flexDirection: 'row',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
+    justifyContent: 'center',
+    gap: SPACING.sm,
   },
-  addressInput: {
-    ...FONTS.monospace,
-    flex: 1,
+  sendButtonText: {
+    fontSize: 16,
+    fontFamily: FONTS.bold,
     color: COLORS.textPrimary,
+  },
+  errorText: {
     fontSize: 14,
-    minHeight: 40,
+    fontFamily: FONTS.regular,
+    color: COLORS.error,
+    marginTop: SPACING.sm,
+    textAlign: 'center',
+  },
+  successText: {
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+    color: COLORS.success,
+    marginTop: SPACING.sm,
+    textAlign: 'center',
+  },
+  // Receive styles
+  tokenSelectorContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  tokenSelectorButton: {
+    flex: 1,
+    paddingVertical: SPACING.sm,
+    alignItems: 'center',
+    borderRadius: BORDER_RADIUS.md,
+  },
+  selectedTokenButton: {
+    backgroundColor: COLORS.solana,
+  },
+  tokenSelectorText: {
+    fontSize: 14,
+    fontFamily: FONTS.medium,
+    color: COLORS.textSecondary,
+  },
+  selectedTokenText: {
+    color: COLORS.textPrimary,
+  },
+  qrContainer: {
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  qrCodeWrapper: {
+    backgroundColor: COLORS.background,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qrPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.xl,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+  },
+  qrText: {
+    fontSize: 14,
+    fontFamily: FONTS.medium,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.sm,
+  },
+  addressContainer: {
+    marginBottom: SPACING.lg,
+  },
+  addressLabel: {
+    fontSize: 14,
+    fontFamily: FONTS.medium,
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.sm,
+  },
+  addressBox: {
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  addressText: {
+    fontSize: 14,
+    fontFamily: FONTS.mono,
+    color: COLORS.textPrimary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  actionButton: {
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
+  halfButton: {
+    flex: 1,
+  },
+  actionGradient: {
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+  },
+  actionText: {
+    fontSize: 14,
+    fontFamily: FONTS.bold,
+    color: COLORS.textPrimary,
+  },
+  recentTransactionsContainer: {
+    marginBottom: SPACING.lg,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontFamily: FONTS.bold,
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.md,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.lg,
+    gap: SPACING.sm,
+  },
+  loadingText: {
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+  },
+  transactionsList: {
+    maxHeight: 200,
+  },
+  transactionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    marginBottom: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  transactionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.success + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transactionDetails: {
+    flex: 1,
+  },
+  transactionAmount: {
+    fontSize: 14,
+    fontFamily: FONTS.bold,
+    color: COLORS.success,
+  },
+  transactionTime: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  transactionStatus: {
+    fontSize: 16,
+    color: COLORS.success,
+  },
+  emptyTransactions: {
+    alignItems: 'center',
+    padding: SPACING.lg,
+  },
+  emptyTransactionsText: {
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  walletInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  walletInfoItem: {
+    alignItems: 'center',
+  },
+  walletInfoLabel: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
+  },
+  walletInfoValue: {
+    fontSize: 14,
+    fontFamily: FONTS.bold,
+    color: COLORS.textPrimary,
+  },
+  walletWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.warning + '20',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    gap: SPACING.sm,
+  },
+  walletWarningText: {
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+    color: COLORS.warning,
+    textAlign: 'center',
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.xl,
+    paddingBottom: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: FONTS.bold,
+    color: COLORS.textPrimary,
+  },
+  modalCloseButton: {
+    padding: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.cardBackground,
+  },
+  // Contact styles
+  contactsList: {
+    flex: 1,
+    paddingHorizontal: SPACING.lg,
+  },
+  contactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: SPACING.md,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    marginBottom: SPACING.sm,
+  },
+  contactInfo: {
+    flex: 1,
+  },
+  contactName: {
+    fontSize: 16,
+    fontFamily: FONTS.medium,
+    color: COLORS.textPrimary,
+    marginBottom: 4,
+  },
+  contactAddress: {
+    fontSize: 12,
+    fontFamily: FONTS.mono,
+    color: COLORS.textSecondary,
+  },
+  emptyContacts: {
+    alignItems: 'center',
+    padding: SPACING.xl,
+  },
+  emptyContactsText: {
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  // Confirmation styles
+  confirmationContent: {
+    flex: 1,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.lg,
+  },
+  confirmationSection: {
+    marginBottom: SPACING.lg,
+    padding: SPACING.md,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  confirmationLabel: {
+    fontSize: 14,
+    fontFamily: FONTS.medium,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+  },
+  confirmationValue: {
+    fontSize: 18,
+    fontFamily: FONTS.bold,
+    color: COLORS.textPrimary,
+  },
+  confirmationAddress: {
+    fontSize: 14,
+    fontFamily: FONTS.mono,
+    color: COLORS.textPrimary,
+    lineHeight: 20,
+  },
+  confirmationButtons: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginTop: 'auto',
+    paddingBottom: SPACING.xl,
+  },
+  confirmationButton: {
+    flex: 1,
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
+  cancelButton: {
+    backgroundColor: COLORS.cardBackground,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontFamily: FONTS.medium,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    paddingVertical: SPACING.md,
+  },
+  confirmButton: {
+    // Gradient handled by LinearGradient
+  },
+  confirmGradient: {
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+  },
+  confirmButtonText: {
+    fontSize: 16,
+    fontFamily: FONTS.bold,
+    color: COLORS.textPrimary,
+  },
+  // Validation styles
+  validationText: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    marginTop: SPACING.sm,
+  },
+  validText: {
+    color: COLORS.success,
+  },
+  inputValid: {
+    borderColor: COLORS.success,
+  },
+  // Address input styles
+  addressInput: {
+    flex: 1,
+    minHeight: 60,
     textAlignVertical: 'top',
   },
   addressActions: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: SPACING.s,
+    flexDirection: 'column',
+    gap: SPACING.sm,
   },
   addressActionButton: {
-    padding: SPACING.s,
+    padding: SPACING.sm,
     backgroundColor: COLORS.solana + '20',
-    borderRadius: BORDER_RADIUS.small,
+    borderRadius: BORDER_RADIUS.md,
   },
+  // Amount input styles
   amountInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    paddingHorizontal: SPACING.m,
+    borderColor: COLORS.border,
   },
   amountInput: {
-    ...FONTS.phantomRegular,
     flex: 1,
-    color: COLORS.textPrimary,
     fontSize: 18,
-    paddingVertical: SPACING.m,
+    fontFamily: FONTS.regular,
+    color: COLORS.textPrimary,
   },
   amountSuffix: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
     fontSize: 16,
+    fontFamily: FONTS.medium,
+    color: COLORS.textSecondary,
   },
-  maxButton: {
-    alignSelf: 'flex-end',
-    backgroundColor: COLORS.solana + '20',
-    borderRadius: BORDER_RADIUS.small,
-    paddingHorizontal: SPACING.s,
-    paddingVertical: SPACING.xs,
-    marginTop: SPACING.s,
-  },
-  maxButtonText: {
-    ...FONTS.phantomBold,
-    color: COLORS.solana,
-    fontSize: 12,
-  },
+  // Fee info styles
   feeInfo: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.l,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
   },
   feeText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
     fontSize: 14,
+    fontFamily: FONTS.medium,
+    color: COLORS.textPrimary,
     marginBottom: SPACING.xs,
   },
   feeSubtext: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
     fontSize: 12,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
   },
+  // Error/Success containers
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.error + '20',
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.l,
-    gap: SPACING.s,
-  },
-  errorText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.error,
-    fontSize: 14,
-    flex: 1,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    gap: SPACING.sm,
   },
   successContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.success + '20',
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.l,
-    gap: SPACING.s,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    gap: SPACING.sm,
   },
-  successText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.success,
-    fontSize: 14,
-    flex: 1,
-  },
-  actionButton: {
-    borderRadius: BORDER_RADIUS.medium,
-    overflow: 'hidden',
-    marginBottom: SPACING.l,
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  actionGradient: {
+  customHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.m,
-    gap: SPACING.s,
-  },
-  actionText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-  },
-  walletWarning: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.warning + '20',
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    gap: SPACING.s,
-  },
-  walletWarningText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.warning,
-    fontSize: 14,
-    flex: 1,
-  },
-  receiveDescription: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: SPACING.l,
-    lineHeight: 24,
-  },
-  qrContainer: {
-    alignItems: 'center',
-    marginBottom: SPACING.l,
-  },
-  qrPlaceholder: {
-    width: 200,
-    height: 200,
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.solana + '30',
-  },
-  qrText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: SPACING.s,
-  },
-  addressContainer: {
-    marginBottom: SPACING.l,
-  },
-  addressLabel: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    marginBottom: SPACING.s,
-  },
-  addressBox: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-  },
-  addressText: {
-    ...FONTS.monospace,
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  walletInfo: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.l,
-  },
-  walletInfoItem: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: SPACING.s,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10',
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.xl,
+    paddingBottom: SPACING.md,
+    backgroundColor: COLORS.background,
   },
-  walletInfoLabel: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 14,
+  tabsHeader: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: 4,
+    flex: 1,
+    marginRight: SPACING.md,
   },
-  walletInfoValue: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
-    fontSize: 14,
+  scrollView: {
+    flex: 1,
   },
-  formContainer: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '40',
-    padding: 16,
-    marginTop: SPACING.m,
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xl,
   },
 });

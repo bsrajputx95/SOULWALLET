@@ -1,0 +1,97 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build outputs
+dist
+build
+.expo
+.next
+out
+android/build
+ios/build
+*.map
+*.tsbuildinfo
+.turbo/
+.parcel-cache/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Development databases
+dev.db
+dev.db-journal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.history/
+.vscode-test/
+
+# IDE
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Tests and coverage
+__tests__/**/*.test.ts
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+**/__mocks__/**
+**/test-*.js
+coverage
+.nyc_output
+
+# Documentation (keep README.md)
+CONTRIBUTING.md
+DEPLOYMENT.md
+CHANGELOG.md
+SECURITY.md
+docs
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci/
+azure-pipelines.yml
+.travis.yml
+
+# Security-sensitive files
+*.pem
+*.key
+*.cert
+google-service-account.json
+.npmrc
+
+# Misc
+.cache
+tmp
+temp
+*.txt
+warp.txt
+*.backup
+*.bak
+*.tmp
+backups/
+dumps/

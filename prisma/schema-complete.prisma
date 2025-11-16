@@ -1,0 +1,466 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// USER & AUTH
+// ==========================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  username        String?   @unique
+  passwordHash    String
+  
+  // Profile
+  profileImage         String?
+  coverImage           String?
+  bio                  String?
+  publicWalletAddress  String?
+  
+  // Social counts
+  followersCount       Int @default(0)
+  followingCount       Int @default(0)
+  vipFollowersCount    Int @default(0)
+  copyTradersCount     Int @default(0)
+  
+  // VIP
+  isVerified           Boolean @default(false)
+  vipEnabled           Boolean @default(false)
+  vipPrice             Float?
+  vipPriceType         VIPPriceType?
+  vipDescription       String?
+  verificationStatus   VerificationStatus @default(NONE)
+  verificationAppliedAt DateTime?
+  
+  // Trading stats (cached)
+  roi30d          Float?
+  pnl24h          Float?
+  pnl1w           Float?
+  pnl1m           Float?
+  pnl90d          Float?
+  maxDrawdown     Float?
+  winRate         Float?
+  totalTrades     Int @default(0)
+  statsUpdatedAt  DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  wallets              Wallet[]
+  posts                Post[]
+  likes                PostLike[]
+  comments             PostComment[]
+  reposts              Repost[]
+  following            Follow[] @relation("UserFollowing")
+  followers            Follow[] @relation("UserFollowers")
+  copyTradeSettings    CopyTradeSetting[]
+  copyTrades           CopyTrade[]
+  iBuySettings         IBuySettings?
+  iBuyPurchases        IBuyPurchase[] @relation("IBuyPurchases")
+  iBuyCreatorEarnings  IBuyPurchase[] @relation("IBuyCreatorEarnings")
+  iBuyPortfolio        IBuyPortfolio[]
+  iBuySellTransactions IBuySellTransaction[]
+  notifications        Notification[]
+  vipSubscriptions     VIPSubscription[] @relation("VIPSubscriber")
+  vipSubscribers       VIPSubscription[] @relation("VIPCreator")
+}
+
+enum VIPPriceType {
+  MONTHLY
+  LIFETIME
+}
+
+enum VerificationStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ==========================================
+// WALLET
+// ==========================================
+
+model Wallet {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publicKey   String   @unique
+  privateKey  String   // Encrypted
+  isPrimary   Boolean  @default(false)
+  balance     Float    @default(0)
+  network     String   @default("mainnet-beta")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  holdings     TokenHolding[]
+  transactions Transaction[]
+  
+  @@index([userId])
+  @@index([publicKey])
+}
+
+model TokenHolding {
+  id          String   @id @default(cuid())
+  walletId    String
+  wallet      Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  mint        String
+  symbol      String
+  name        String
+  amount      Float
+  decimals    Int
+  priceUSD    Float?
+  valueUSD    Float?
+  logo        String?
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([walletId, mint])
+  @@index([walletId])
+}
+
+model Transaction {
+  id              String   @id @default(cuid())
+  walletId        String
+  wallet          Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  signature       String   @unique
+  type            TransactionType
+  status          TransactionStatus
+  fromAddress     String?
+  toAddress       String?
+  amount          Float?
+  tokenMint       String?
+  tokenSymbol     String?
+  fee             Float?
+  blockTime       DateTime?
+  createdAt       DateTime @default(now())
+  
+  @@index([walletId])
+  @@index([signature])
+}
+
+enum TransactionType {
+  SEND
+  RECEIVE
+  SWAP
+  STAKE
+  UNSTAKE
+}
+
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+// ==========================================
+// COPY TRADING
+// ==========================================
+
+model CopyTradeSetting {
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetWalletAddress  String
+  totalAmount          Float
+  amountPerTrade       Float
+  stopLoss             Float?
+  takeProfit           Float?
+  maxSlippage          Float    @default(0.5)
+  exitWithTrader       Boolean  @default(true)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  
+  trades               CopyTrade[]
+  
+  @@index([userId])
+  @@index([targetWalletAddress])
+}
+
+model CopyTrade {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  settingId       String
+  setting         CopyTradeSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  originalTxHash  String
+  copyTxHash      String?
+  tokenIn         String
+  tokenOut        String
+  amountIn        Float
+  amountOut       Float
+  status          CopyTradeStatus
+  executedAt      DateTime @default(now())
+  
+  @@index([userId])
+  @@index([settingId])
+}
+
+enum CopyTradeStatus {
+  PENDING
+  EXECUTED
+  FAILED
+  CANCELLED
+}
+
+// ==========================================
+// MARKET
+// ==========================================
+
+model Token {
+  id          String @id @default(cuid())
+  mint        String @unique
+  symbol      String
+  name        String
+  logo        String?
+  price       Float
+  change24h   Float
+  volume24h   Float?
+  liquidity   Float?
+  marketCap   Float?
+  fdv         Float?
+  supply      Float?
+  holders     Int?
+  createdAt   DateTime?
+  updatedAt   DateTime @updatedAt
+  
+  @@index([mint])
+  @@index([symbol])
+}
+
+// ==========================================
+// SOCIAL (SOSIO)
+// ==========================================
+
+model Post {
+  id             String   @id @default(cuid())
+  authorId       String
+  author         User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content        String   @db.Text
+  visibility     PostVisibility
+  likesCount     Int      @default(0)
+  commentsCount  Int      @default(0)
+  repostsCount   Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  tokenMention   TokenMention?
+  likes          PostLike[]
+  comments       PostComment[]
+  reposts        Repost[]
+  iBuyPurchases  IBuyPurchase[]
+  
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+enum PostVisibility {
+  PUBLIC
+  FOLLOWERS
+  VIP
+}
+
+model TokenMention {
+  id       String @id @default(cuid())
+  postId   String @unique
+  post     Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mint     String
+  symbol   String
+  name     String
+}
+
+model PostLike {
+  id        String @id @default(cuid())
+  postId    String
+  post      Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model PostComment {
+  id        String @id @default(cuid())
+  postId    String
+  post      Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String @db.Text
+  createdAt DateTime @default(now())
+  
+  @@index([postId])
+  @@index([userId])
+}
+
+model Repost {
+  id        String @id @default(cuid())
+  postId    String
+  post      Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model Follow {
+  id          String @id @default(cuid())
+  followerId  String
+  follower    User   @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId String
+  following   User   @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model VIPSubscription {
+  id          String   @id @default(cuid())
+  subscriberId String
+  subscriber   User    @relation("VIPSubscriber", fields: [subscriberId], references: [id], onDelete: Cascade)
+  creatorId    String
+  creator      User    @relation("VIPCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  amount       Float
+  priceType    VIPPriceType
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  
+  @@unique([subscriberId, creatorId])
+  @@index([subscriberId])
+  @@index([creatorId])
+}
+
+// ==========================================
+// IBUY
+// ==========================================
+
+model IBuySettings {
+  id              String @id @default(cuid())
+  userId          String @unique
+  user            User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountPerTrade  Float
+  slippage        Float  @default(1.0)
+  isEnabled       Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model IBuyPurchase {
+  id                    String @id @default(cuid())
+  buyerId               String
+  buyer                 User   @relation("IBuyPurchases", fields: [buyerId], references: [id], onDelete: Cascade)
+  postId                String
+  post                  Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  creatorId             String
+  creator               User   @relation("IBuyCreatorEarnings", fields: [creatorId], references: [id], onDelete: Cascade)
+  tokenMint             String
+  tokenSymbol           String
+  tokenName             String
+  solAmount             Float
+  tokenAmount           Float
+  pricePerToken         Float
+  slippage              Float
+  transactionSignature  String @unique
+  status                TransactionStatus @default(PENDING)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  sellTransactions      IBuySellTransaction[]
+  
+  @@index([buyerId])
+  @@index([postId])
+  @@index([creatorId])
+  @@index([tokenMint])
+}
+
+model IBuyPortfolio {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenMint         String
+  tokenSymbol       String
+  tokenName         String
+  totalTokens       Float
+  totalInvested     Float
+  averageBuyPrice   Float
+  currentValue      Float?
+  unrealizedPnL     Float?
+  unrealizedPnLPct  Float?
+  firstPurchaseAt   DateTime
+  lastPurchaseAt    DateTime
+  purchaseCount     Int      @default(0)
+  updatedAt         DateTime @updatedAt
+  
+  @@unique([userId, tokenMint])
+  @@index([userId])
+  @@index([tokenMint])
+}
+
+model IBuySellTransaction {
+  id                    String   @id @default(cuid())
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenMint             String
+  tokenSymbol           String
+  tokensSold            Float
+  solReceived           Float
+  sellPercentage        Int
+  grossProfit           Float?
+  profitSharePaid       Float?
+  netProfit             Float?
+  originalPurchaseId    String?
+  originalPurchase      IBuyPurchase? @relation(fields: [originalPurchaseId], references: [id])
+  transactionSignature  String   @unique
+  profitShareTxSig      String?
+  status                TransactionStatus @default(PENDING)
+  createdAt             DateTime @default(now())
+  
+  @@index([userId])
+  @@index([tokenMint])
+}
+
+// ==========================================
+// NOTIFICATIONS
+// ==========================================
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String   @db.Text
+  metadata  Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([isRead])
+}
+
+enum NotificationType {
+  POST_LIKE
+  POST_COMMENT
+  POST_REPOST
+  NEW_FOLLOWER
+  IBUY_PURCHASE
+  PROFIT_SHARE_RECEIVED
+  VIP_SUBSCRIPTION
+  COPY_TRADE_EXECUTED
+  VERIFICATION_APPROVED
+  VERIFICATION_REJECTED
+}

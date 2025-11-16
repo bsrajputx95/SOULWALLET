@@ -1,9 +1,10 @@
 import React from 'react';
+import type { 
+  TouchableOpacityProps} from 'react-native';
 import { 
   StyleSheet, 
   Text, 
-  TouchableOpacity, 
-  TouchableOpacityProps,
+  TouchableOpacity,
   ActivityIndicator,
   View 
 } from 'react-native';
@@ -39,7 +40,7 @@ export const NeonButton: React.FC<NeonButtonProps> = ({
       case 'danger':
         return COLORS.gradientPink;
       case 'outline':
-        return [COLORS.background, COLORS.background];
+        return [COLORS.background, COLORS.background] as const;
       default:
         return COLORS.gradientPurple;
     }

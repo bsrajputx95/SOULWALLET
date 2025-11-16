@@ -27,6 +27,12 @@ export const FONTS = {
     fontFamily: "System",
     fontWeight: "400" as const,
   },
+  // Aliases for common font weights
+  bold: "System",
+  semiBold: "System", 
+  medium: "System",
+  regular: "System",
+  mono: "monospace", // Added missing mono alias
   // Keep monospace for numbers
   monospace: {
     fontFamily: "monospace",
@@ -66,6 +72,10 @@ export const SPACING = {
   l: 24,
   xl: 32,
   xxl: 48,
+  // Aliases for consistency
+  sm: 8,  // Alias for s
+  md: 16, // Alias for m
+  lg: 24, // Alias for l
 };
 
 export const BORDER_RADIUS = {
@@ -74,6 +84,10 @@ export const BORDER_RADIUS = {
   large: 16,
   extraLarge: 24,
   full: 9999,
+  // Aliases for consistency
+  lg: 16, // Alias for large
+  xl: 24, // Alias for extraLarge
+  md: 12, // Alias for medium
 };
 
 export default { COLORS, SIZES, FONTS, SHADOWS, SPACING, BORDER_RADIUS };

@@ -3,21 +3,14 @@ import 'react-native-get-random-values';
 import 'react-native-url-polyfill/auto';
 import { Buffer } from 'buffer';
 
-// Setup Buffer global for Solana
-if (typeof global !== 'undefined') {
-  global.Buffer = Buffer;
-}
-if (typeof window !== 'undefined') {
-  window.Buffer = Buffer;
-}
-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useState, useCallback } from "react";
+import React from "react";
+import { useEffect, useState, useCallback } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts, Orbitron_400Regular, Orbitron_500Medium, Orbitron_700Bold } from '@expo-google-fonts/orbitron';
-import { View, StyleSheet } from "react-native";
+import { View, StyleSheet, Platform } from "react-native";
 import { COLORS } from "../constants/colors";
 import { trpc, trpcClient } from "../lib/trpc";
 
@@ -28,13 +21,28 @@ import { AuthProvider } from "../hooks/auth-store";
 import { WalletProvider } from "../hooks/wallet-store";
 import { SocialProvider } from "../hooks/social-store";
 import { SolanaWalletProvider } from "../hooks/solana-wallet-store";
-
 import { AccountProvider } from "../hooks/account-store";
 import { MarketProvider } from "../hooks/market-store";
+import { NotificationBadgeProvider } from "../hooks/notification-provider";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { performanceMonitor, trackBundleSize } from "../utils/performance";
 
 // Validate environment variables at app startup
 import { validateEnvironmentOrThrow } from "../lib/validate-env";
+
+// Setup Buffer global for Solana (guarded)
+if (typeof global !== 'undefined' && !(global as any).Buffer) {
+  (global as any).Buffer = Buffer;
+}
+if (typeof window !== 'undefined' && !(window as any).Buffer) {
+  (window as any).Buffer = Buffer;
+}
+
+// Initialize performance monitoring
+if (__DEV__) {
+  performanceMonitor.startTiming('app-startup');
+  trackBundleSize();
+}
 if (__DEV__) {
   try {
     validateEnvironmentOrThrow();
@@ -82,9 +90,31 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
+  // Hide browser scrollbar globally (web only)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const style = document.createElement('style');
+    style.id = 'hide-scrollbar-style';
+    style.innerHTML = `
+      html, body { scrollbar-width: none; }
+      ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      const existing = document.getElementById('hide-scrollbar-style');
+      if (existing) existing.remove();
+    };
+  }, []);
+
   const onLayoutRootView = useCallback(async () => {
     if (appIsReady) {
       await SplashScreen.hideAsync();
+      
+      // Complete app startup performance monitoring
+      if (__DEV__) {
+        performanceMonitor.endTiming('app-startup');
+        performanceMonitor.logSummary();
+      }
     }
   }, [appIsReady]);
 
@@ -103,11 +133,13 @@ export default function RootLayout() {
                 <SocialProvider>
                   <AccountProvider>
                     <MarketProvider>
-                      <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
-                        <View style={styles.container}>
-                          <RootLayoutNav />
-                        </View>
-                      </GestureHandlerRootView>
+                      <NotificationBadgeProvider>
+                        <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
+                          <View style={styles.container}>
+                            <RootLayoutNav />
+                          </View>
+                        </GestureHandlerRootView>
+                      </NotificationBadgeProvider>
                     </MarketProvider>
                   </AccountProvider>
                 </SocialProvider>

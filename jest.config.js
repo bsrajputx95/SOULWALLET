@@ -19,4 +19,12 @@ module.exports = {
     '**/__tests__/**/*.(test|spec).(ts|tsx|js)',
     '**/*.(test|spec).(ts|tsx|js)',
   ],
+  coverageThreshold: {
+    global: {
+      branches: 80,
+      functions: 85,
+      lines: 85,
+      statements: 85,
+    },
+  },
 };

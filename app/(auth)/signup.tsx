@@ -7,15 +7,14 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Image,
-} from 'react-native';
+  Image } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { User, Mail, Lock, UserPlus } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
 import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING } from '../../constants/theme';
+import { FONTS } from '../../constants/theme';
 import { NeonInput } from '../../components/NeonInput';
 import { NeonButton } from '../../components/NeonButton';
 import { NeonDivider } from '../../components/NeonDivider';
@@ -44,8 +43,15 @@ export default function SignupScreen() {
       return false;
     }
     
-    if (password.length < 6) {
-      setValidationError('Password must be at least 6 characters');
+    if (password.length < 8) {
+      setValidationError('Password must be at least 8 characters');
+      return false;
+    }
+
+    // Add password complexity check
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
+    if (!passwordRegex.test(password)) {
+      setValidationError('Password must contain uppercase, lowercase, number, and special character');
       return false;
     }
     
@@ -60,7 +66,7 @@ export default function SignupScreen() {
     
     if (!validateForm()) return;
     
-    const success = await signup(username, email, password);
+    const success = await signup(username, email, password, confirmPassword);
     if (success) {
       router.replace('/(tabs)');
     }
@@ -123,6 +129,13 @@ export default function SignupScreen() {
             leftIcon={<Lock size={20} color={COLORS.textSecondary} />}
           />
 
+          <Text style={styles.passwordHint}>
+            • At least 8 characters{'\n'}
+            • Uppercase & lowercase letters{'\n'}
+            • At least one number{'\n'}
+            • At least one special character (@$!%*?&)
+          </Text>
+
           <NeonInput
             label="Confirm Password"
             placeholder="Confirm your password"
@@ -180,80 +193,70 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
+    backgroundColor: COLORS.background },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20,
-  },
+    paddingBottom: 20 },
   logoContainer: {
     alignItems: 'center',
     marginTop: 40,
-    marginBottom: 20,
-  },
+    marginBottom: 20 },
   logoImage: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    marginBottom: 24,
-  },
+    marginBottom: 24 },
   formContainer: {
-    paddingHorizontal: 24,
-  },
+    paddingHorizontal: 24 },
   title: {
     textAlign: 'center',
-    marginBottom: 8,
-  },
+    marginBottom: 8 },
   subtitle: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 16,
     textAlign: 'center',
-    marginBottom: 24,
-  },
+    marginBottom: 24 },
   errorText: {
     ...FONTS.sfProMedium,
     color: COLORS.error,
     textAlign: 'center',
+    marginBottom: 16 },
+  passwordHint: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 8,
     marginBottom: 16,
-  },
+    lineHeight: 16 },
   signupButton: {
-    marginVertical: 24,
-  },
+    marginVertical: 24 },
   socialButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
-  },
+    marginBottom: 16 },
   socialButton: {
     flex: 1,
-    marginHorizontal: 8,
-  },
+    marginHorizontal: 8 },
   socialIcon: {
     ...FONTS.sfProBold,
     fontSize: 16,
-    color: COLORS.textPrimary,
-  },
+    color: COLORS.textPrimary },
   loginContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16,
-  },
+    marginTop: 16 },
   loginText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginRight: 4,
-  },
+    marginRight: 4 },
   loginLink: {
     ...FONTS.sfProMedium,
     color: COLORS.solana,
-    fontSize: 14,
-  },
+    fontSize: 14 },
   bottomGlow: {
     height: 4,
     width: '100%',
     position: 'absolute',
-    bottom: 0,
-  },
-});
+    bottom: 0 } });

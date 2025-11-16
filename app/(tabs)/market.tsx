@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -7,19 +7,21 @@ import {
   ScrollView, 
   RefreshControl,
   TextInput,
-  Modal,
   useWindowDimensions,
+  Modal,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Settings, Search, X, Plus } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Search, X, Settings, Plus } from 'lucide-react-native';
 
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { TokenCard } from '../../components/TokenCard';
-import { NeonButton } from '../../components/NeonButton';
-import { NeonInput } from '../../components/NeonInput';
 import { useMarket } from '../../hooks/market-store';
+
+// Import TokenCard
+import { TokenCard } from '../../components/TokenCard';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 type MarketTab = 'soulmarket' | 'raydium' | 'pumpfun' | 'bullx' | 'dexscreener';
 
@@ -27,7 +29,7 @@ export default function MarketScreen() {
   const { width } = useWindowDimensions();
   const { 
     tokens, 
-    isLoading, 
+    isLoading,
     activeFilters, 
     toggleFilter, 
     searchQuery, 
@@ -43,7 +45,9 @@ export default function MarketScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<MarketTab>('soulmarket');
   const [showFilters, setShowFilters] = useState(false);
+  const [showSearchBar, setShowSearchBar] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
   
   // Advanced filter states
   const [minLiquidity, setMinLiquidity] = useState('');
@@ -60,27 +64,117 @@ export default function MarketScreen() {
   const [min24hSells, setMin24hSells] = useState('');
   const [min24hVolume, setMin24hVolume] = useState('');
 
-  const onRefresh = React.useCallback(async () => {
+  // Header animation constants and state
+  const HEADER_HEIGHT = 100; // Optimized height for both header and tabs
+  const SCROLL_THRESHOLD = 50; // Minimum scroll distance before hiding header
+  const SCROLL_UP_THRESHOLD = 30; // Minimum upward scroll before showing header
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const lastScrollY = useRef(0);
+  const headerTranslateY = useRef(new Animated.Value(0)).current;
+  const scrollDirection = useRef<'up' | 'down' | null>(null);
+  const headerHidden = useRef(false);
+  
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
   }, [refetch]);
 
+  // Compute visible tokens based on search query
+  const query = searchQuery.trim().toLowerCase();
+  const visibleTokens = tokens.filter(token => {
+    if (!query) return true;
+    return (
+      token.symbol.toLowerCase().includes(query) ||
+      token.name.toLowerCase().includes(query)
+    );
+  });
+
+  // Handle scroll for header animation with improved behavior
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: false,
+      listener: (event: any) => {
+        const currentScrollY = event.nativeEvent.contentOffset.y;
+        const scrollDiff = currentScrollY - lastScrollY.current;
+        const currentDirection = scrollDiff > 0 ? 'down' : 'up';
+        
+        // Only trigger animation if scroll direction changed or significant scroll distance
+        if (currentDirection !== scrollDirection.current || Math.abs(scrollDiff) > 5) {
+          scrollDirection.current = currentDirection;
+          
+          if (currentDirection === 'down' && currentScrollY > SCROLL_THRESHOLD) {
+            // Hide header when scrolling down past threshold (only if not already hidden)
+            if (!headerHidden.current) {
+              Animated.timing(headerTranslateY, {
+                toValue: -HEADER_HEIGHT,
+                duration: 220,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: true,
+              }).start(() => { headerHidden.current = true; setIsHeaderHidden(true); });
+            }
+          } else if (currentDirection === 'up' && scrollDiff < -SCROLL_UP_THRESHOLD) {
+            // Show header only when scrolling up with sufficient momentum (only if hidden)
+            if (headerHidden.current) {
+              Animated.timing(headerTranslateY, {
+                toValue: 0,
+                duration: 220,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: true,
+              }).start(() => { headerHidden.current = false; setIsHeaderHidden(false); });
+            }
+
+            // Auto-close search bar when user scrolls up to reclaim space
+            if (showSearchBar) {
+              setShowSearchBar(false);
+            }
+          }
+        }
+        
+        lastScrollY.current = currentScrollY;
+      },
+    }
+  );
   const renderTabContent = () => {
     switch (activeTab) {
       case 'soulmarket':
         return (
           <View style={styles.tabContent}>
-            {tokens.map(token => (
+            {/* Loading State */}
+            {isLoading && tokens.length === 0 && (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Loading SoulMarket tokens...</Text>
+                <Text style={styles.loadingSubtext}>Filtering quality pairs with 100k+ liquidity</Text>
+              </View>
+            )}
+
+            {/* Empty State */}
+            {!isLoading && visibleTokens.length === 0 && (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyTitle}>
+                  {searchQuery ? 'No tokens found' : 'No tokens available'}
+                </Text>
+                <Text style={styles.emptySubtitle}>
+                  {searchQuery 
+                    ? 'Try a different search term' 
+                    : 'Quality tokens will appear here'}
+                </Text>
+              </View>
+            )}
+
+            {/* Tokens List */}
+            {visibleTokens.map(token => (
               <TokenCard
                 key={token.id}
                 symbol={token.symbol}
                 name={token.name}
                 price={token.price}
                 change={token.change24h}
-                liquidity={token.liquidity}
-                volume={token.volume}
-                age={token.age}
+                {...(token.liquidity !== undefined ? { liquidity: token.liquidity } : {})}
+                {...(token.volume !== undefined ? { volume: token.volume } : {})}
+                {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
+                {...(token.logo ? { logo: token.logo } : {})}
               />
             ))}
           </View>
@@ -108,34 +202,168 @@ export default function MarketScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={[styles.header, { paddingHorizontal: responsivePadding }]}>
-        <View style={styles.dropdown}>
-          <Pressable 
-            style={styles.dropdownButton}
-            onPress={() => { if (__DEV__) console.log('Open dropdown'); }}
-          >
-            <Text style={styles.dropdownText}>
-              {activeTab === 'soulmarket' && 'SoulMarket'}
-              {activeTab === 'raydium' && 'Raydium'}
-              {activeTab === 'pumpfun' && 'Pump.fun'}
-              {activeTab === 'bullx' && 'BullX'}
-              {activeTab === 'dexscreener' && 'Dexscreener'}
-            </Text>
-            <Text style={styles.dropdownIcon}>▼</Text>
-          </Pressable>
+    <SafeAreaView style={styles.container} edges={[]}>
+      <Animated.View 
+        style={[
+          styles.combinedHeader, 
+          { 
+            paddingHorizontal: responsivePadding,
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 1000,
+            transform: [{ translateY: headerTranslateY }]
+          }
+        ]}
+      >
+        {/* Top Header Section */}
+        <View style={styles.header}>
+          <View style={styles.dropdown}>
+            <Pressable 
+              style={styles.dropdownButton}
+              onPress={() => { if (__DEV__) console.log('Open dropdown'); }}
+            >
+              <Text style={styles.dropdownText}>
+                {activeTab === 'soulmarket' && 'SoulMarket'}
+                {activeTab === 'raydium' && 'Raydium'}
+                {activeTab === 'pumpfun' && 'Pump.fun'}
+                {activeTab === 'bullx' && 'BullX'}
+                {activeTab === 'dexscreener' && 'Dexscreener'}
+              </Text>
+              <Text style={styles.dropdownIcon}>▼</Text>
+            </Pressable>
+          </View>
+          
+          <View style={styles.headerButtons}>
+            <Pressable 
+              style={styles.filterButton}
+              onPress={() => setShowSearchBar(!showSearchBar)}
+            >
+              <Search size={24} color={COLORS.solana} />
+            </Pressable>
+            <Pressable 
+              style={styles.filterButton}
+              onPress={() => setShowFilters(!showFilters)}
+            >
+              <Settings size={24} color={COLORS.solana} />
+            </Pressable>
+          </View>
         </View>
-        
-        <Pressable 
-          style={styles.filterButton}
-          onPress={() => setShowFilters(!showFilters)}
-        >
-          <Settings size={24} color={COLORS.solana} />
-        </Pressable>
-      </View>
+
+        {/* Tabs Section */}
+        <View style={styles.tabsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabsScroll}
+          >
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab === 'soulmarket' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('soulmarket')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'soulmarket' && styles.activeTabText,
+              ]}>
+                SoulMarket
+              </Text>
+            </Pressable>
+            
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab === 'raydium' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('raydium')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'raydium' && styles.activeTabText,
+              ]}>
+                Raydium
+              </Text>
+            </Pressable>
+            
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab === 'pumpfun' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('pumpfun')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'pumpfun' && styles.activeTabText,
+              ]}>
+                Pump.fun
+              </Text>
+            </Pressable>
+            
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab === 'bullx' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('bullx')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'bullx' && styles.activeTabText,
+              ]}>
+                BullX
+              </Text>
+            </Pressable>
+            
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab === 'dexscreener' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('dexscreener')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'dexscreener' && styles.activeTabText,
+              ]}>
+                Dexscreener
+              </Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Animated.View>
+      {showSearchBar && (
+        <View style={[
+          styles.filtersContainer, 
+          { 
+            paddingHorizontal: responsivePadding, 
+            marginTop: isHeaderHidden ? 0 : HEADER_HEIGHT,
+            marginBottom: SPACING.s,
+          }
+        ]}> 
+          <View style={styles.searchContainer}>
+            <Search size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search tokens..."
+              placeholderTextColor={COLORS.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <Pressable onPress={() => setSearchQuery('')}>
+                <X size={20} color={COLORS.textSecondary} />
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
       
       {showFilters && (
-        <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding }]}>
+        <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding, marginTop: showSearchBar ? 0 : (isHeaderHidden ? 0 : HEADER_HEIGHT) }]}>
           <View style={styles.searchContainer}>
             <Search size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
             <TextInput
@@ -245,99 +473,26 @@ export default function MarketScreen() {
         </View>
       )}
       
-      <View style={styles.tabsContainer}>
+      <ErrorBoundary>
         <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={[styles.tabsScroll, { paddingHorizontal: responsivePadding }]}
+          style={styles.content}
+          contentContainerStyle={[
+            styles.contentContainer, 
+            { 
+              paddingHorizontal: responsivePadding,
+              paddingTop: (showSearchBar || showFilters) ? 0 : HEADER_HEIGHT + SPACING.s
+            }
+          ]}
+          showsVerticalScrollIndicator={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         >
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'soulmarket' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('soulmarket')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'soulmarket' && styles.activeTabText,
-            ]}>
-              SoulMarket
-            </Text>
-          </Pressable>
-          
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'raydium' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('raydium')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'raydium' && styles.activeTabText,
-            ]}>
-              Raydium
-            </Text>
-          </Pressable>
-          
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'pumpfun' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('pumpfun')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'pumpfun' && styles.activeTabText,
-            ]}>
-              Pump.fun
-            </Text>
-          </Pressable>
-          
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'bullx' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('bullx')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'bullx' && styles.activeTabText,
-            ]}>
-              BullX
-            </Text>
-          </Pressable>
-          
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'dexscreener' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('dexscreener')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'dexscreener' && styles.activeTabText,
-            ]}>
-              Dexscreener
-            </Text>
-          </Pressable>
+          {renderTabContent()}
         </ScrollView>
-      </View>
-      
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={[styles.contentContainer, { paddingHorizontal: responsivePadding }]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {renderTabContent()}
-      </ScrollView>
+      </ErrorBoundary>
       
       {/* Advanced Filters Modal */}
       <Modal
@@ -359,7 +514,7 @@ export default function MarketScreen() {
               {/* Liquidity */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Liquidity</Text>
-                <View style={styles.rangeInputContainer}>
+                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Min (e.g. 500M)"
@@ -367,7 +522,7 @@ export default function MarketScreen() {
                     value={minLiquidity}
                     onChangeText={setMinLiquidity}
                   />
-                  <Text style={styles.rangeSeparator}>-</Text>
+                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Max"
@@ -381,7 +536,7 @@ export default function MarketScreen() {
               {/* Market Cap */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Market Cap</Text>
-                <View style={styles.rangeInputContainer}>
+                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Min (e.g. 1B)"
@@ -389,7 +544,7 @@ export default function MarketScreen() {
                     value={minMarketCap}
                     onChangeText={setMinMarketCap}
                   />
-                  <Text style={styles.rangeSeparator}>-</Text>
+                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Max"
@@ -403,7 +558,7 @@ export default function MarketScreen() {
               {/* FDV */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>FDV (Fully Diluted Valuation)</Text>
-                <View style={styles.rangeInputContainer}>
+                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Min (e.g. 100M)"
@@ -411,7 +566,7 @@ export default function MarketScreen() {
                     value={minFDV}
                     onChangeText={setMinFDV}
                   />
-                  <Text style={styles.rangeSeparator}>-</Text>
+                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Max"
@@ -437,7 +592,7 @@ export default function MarketScreen() {
               {/* Age */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Age (hours)</Text>
-                <View style={styles.rangeInputContainer}>
+                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Min (e.g. 24)"
@@ -446,7 +601,7 @@ export default function MarketScreen() {
                     onChangeText={setMinAge}
                     keyboardType="numeric"
                   />
-                  <Text style={styles.rangeSeparator}>-</Text>
+                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
                   <TextInput
                     style={styles.rangeInput}
                     placeholder="Max"
@@ -561,11 +716,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  combinedHeader: {
+    backgroundColor: COLORS.background,
+    paddingVertical: 0, // Completely removed all vertical padding
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: SPACING.m,
+    paddingVertical: 0, // Completely removed all vertical padding
+    backgroundColor: COLORS.background,
+    height: 60,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.s,
   },
   dropdown: {
     flex: 1,
@@ -635,7 +801,7 @@ const styles = StyleSheet.create({
     color: COLORS.solana,
   },
   tabsContainer: {
-    marginBottom: SPACING.m,
+    marginBottom: 0, // Completely removed bottom margin
   },
   tabsScroll: {
   },
@@ -661,10 +827,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    paddingBottom: 20,
+    paddingBottom: 0, // Removed bottom padding to eliminate blank space
   },
   tabContent: {
-    marginBottom: SPACING.l,
+    marginBottom: 0, // Completely removed bottom margin
   },
   webViewPlaceholder: {
     backgroundColor: COLORS.cardBackground,
@@ -743,9 +909,15 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.s,
   },
   rangeInputContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.s,
+  },
+  rangeInputRow: {
+    flexDirection: 'row',
+  },
+  rangeInputColumn: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   rangeInput: {
     ...FONTS.phantomRegular,
@@ -763,6 +935,14 @@ const styles = StyleSheet.create({
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     fontSize: 16,
+  },
+  rangeSeparatorRow: {
+    marginHorizontal: SPACING.s,
+    alignSelf: 'center',
+  },
+  rangeSeparatorColumn: {
+    marginVertical: SPACING.s,
+    alignSelf: 'center',
   },
   fullWidthInput: {
     ...FONTS.phantomRegular,

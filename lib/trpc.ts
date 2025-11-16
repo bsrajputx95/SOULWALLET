@@ -1,32 +1,86 @@
 import { createTRPCReact } from "@trpc/react-query";
 import { httpLink } from "@trpc/client";
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SecureStorage } from './secure-storage';
+import Constants from 'expo-constants';
+import type { AppRouter } from '../src/server/types';
+import { Platform } from 'react-native';
 
-// Use 'any' type for the mock AppRouter since we don't have a real tRPC backend
-export const trpc = createTRPCReact<any>();
+export const trpc = createTRPCReact<AppRouter>();
 
 const getBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_RORK_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
+  // In development, use local server
+  if (__DEV__) {
+    return 'http://localhost:3001';
+  }
+  
+  // In production, use environment variable
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
   }
 
   throw new Error(
-    "No base url found, please set EXPO_PUBLIC_RORK_API_BASE_URL"
+    "No API URL found, please set EXPO_PUBLIC_API_URL"
   );
 };
 
-// @ts-ignore - Mock tRPC client for development
 export const trpcClient = trpc.createClient({
   links: [
     httpLink({
       url: `${getBaseUrl()}/api/trpc`,
-      async headers() {
-        const userId = await AsyncStorage.getItem('userId');
-        return {
-          authorization: 'Bearer mock-token',
-          'x-user-id': userId || '',
-        };
+      headers: async () => {
+        const token = await SecureStorage.getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers.authorization = `Bearer ${token}`;
+        const appVersion = (Constants as any)?.expoConfig?.version || (Constants as any)?.manifest?.version;
+        if (appVersion) headers['x-mobile-app-version'] = String(appVersion);
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          const cookies = document.cookie || '';
+          const match = cookies.split(';').map(s => s.trim()).find(s => s.startsWith('csrf_token='));
+          if (match) {
+            const val = decodeURIComponent(match.split('=')[1] || '');
+            if (val) headers['x-csrf-token'] = val;
+          }
+        }
+        if (Platform.OS !== 'web' && process.env.CSRF_ENABLED === 'true') {
+          let csrf = await SecureStorage.getCsrfToken();
+          if (!csrf) {
+            try {
+              const res = await fetch(`${getBaseUrl()}/api/csrf`);
+              const data = await res.json();
+              csrf = data?.token;
+              if (csrf) await SecureStorage.setCsrfToken(csrf);
+            } catch {}
+          }
+          if (csrf) headers['x-csrf-token'] = csrf;
+        }
+        return headers;
       },
-    }),
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const res = await fetch(input, init);
+        if (res.status !== 401) return res;
+
+        const refreshToken = await SecureStorage.getRefreshToken();
+        if (!refreshToken) return res;
+
+        const refreshClient = trpc.createClient({
+          links: [
+            httpLink({ url: `${getBaseUrl()}/api/trpc` } as any),
+          ],
+        });
+
+        try {
+          const refreshed = await refreshClient.auth.refreshToken.mutate({ refreshToken });
+          await SecureStorage.setToken(refreshed.accessToken);
+          await SecureStorage.setRefreshToken(refreshed.refreshToken);
+
+          const headers = new Headers(init?.headers || {});
+          headers.set('authorization', `Bearer ${refreshed.accessToken}`);
+          return await fetch(input, { ...init, headers });
+        } catch {
+          await SecureStorage.clearAll();
+          return res;
+        }
+      }) as any,
+    } as any),
   ],
 });

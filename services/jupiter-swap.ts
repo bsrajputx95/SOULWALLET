@@ -11,7 +11,7 @@ export interface SwapRoute {
   otherAmountThreshold: string;
   swapMode: 'ExactIn' | 'ExactOut';
   priceImpactPct: string;
-  marketInfos: Array<{
+  marketInfos: {
     id: string;
     label: string;
     inputMint: string;
@@ -20,7 +20,7 @@ export interface SwapRoute {
     inAmount: string;
     outAmount: string;
     priceImpactPct: string;
-  }>;
+  }[];
 }
 
 export interface SwapTransaction {
@@ -108,7 +108,7 @@ class JupiterSwapService {
   /**
    * Get list of supported tokens
    */
-  async getTokenList(): Promise<Array<{
+  async getTokenList(): Promise<{
     address: string;
     chainId: number;
     decimals: number;
@@ -116,7 +116,7 @@ class JupiterSwapService {
     symbol: string;
     logoURI?: string;
     tags?: string[];
-  }>> {
+  }[]> {
     try {
       const response = await fetch('https://token.jup.ag/all');
       

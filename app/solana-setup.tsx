@@ -22,7 +22,7 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
 const isSmallScreen = screenWidth < 375;
 const isWeb = Platform.OS === 'web';
@@ -48,16 +48,23 @@ const getResponsiveFontSize = (size: number) => {
 
 export default function SolanaSetupScreen() {
   const router = useRouter();
-  const { createWallet, importWallet, isLoading } = useSolanaWallet();
+  const { createWalletEncrypted, importWalletEncrypted, isLoading } = useSolanaWallet();
   
   const [mode, setMode] = useState<'create' | 'import' | null>(null);
   const [privateKey, setPrivateKey] = useState('');
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [generatedWallet, setGeneratedWallet] = useState<any>(null);
+  const [walletPassword, setWalletPassword] = useState('');
+  const [confirmWalletPassword, setConfirmWalletPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleCreateWallet = async () => {
     try {
-      const wallet = await createWallet();
+      if (!walletPassword || walletPassword !== confirmWalletPassword) {
+        Alert.alert('Error', 'Please enter and confirm your wallet password');
+        return;
+      }
+      const wallet = await createWalletEncrypted(walletPassword);
       setGeneratedWallet(wallet);
       setMode('create');
     } catch (error) {
@@ -71,9 +78,13 @@ export default function SolanaSetupScreen() {
       Alert.alert('Error', 'Please enter a private key');
       return;
     }
+    if (!walletPassword || walletPassword !== confirmWalletPassword) {
+      Alert.alert('Error', 'Please enter and confirm your wallet password');
+      return;
+    }
 
     try {
-      await importWallet(privateKey.trim());
+      await importWalletEncrypted(privateKey.trim(), walletPassword);
       Alert.alert('Success', 'Wallet imported successfully!', [
         { text: 'OK', onPress: () => router.back() }
       ]);
@@ -123,11 +134,50 @@ export default function SolanaSetupScreen() {
             </Text>
           </View>
 
+          <View style={styles.inputSection}>
+            <Text style={styles.inputLabel}>Wallet Password</Text>
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Enter a strong password"
+                placeholderTextColor={COLORS.textSecondary}
+                value={walletPassword}
+                onChangeText={setWalletPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? (
+                  <EyeOff size={20} color={COLORS.textSecondary} />
+                ) : (
+                  <Eye size={20} color={COLORS.textSecondary} />
+                )}
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.inputLabel}>Confirm Password</Text>
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Re-enter password"
+                placeholderTextColor={COLORS.textSecondary}
+                value={confirmWalletPassword}
+                onChangeText={setConfirmWalletPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+
           <View style={styles.optionsContainer}>
             <TouchableOpacity
               style={styles.optionCard}
               onPress={handleCreateWallet}
-              disabled={isLoading}
+              disabled={isLoading || !walletPassword || walletPassword !== confirmWalletPassword}
             >
               <LinearGradient
                 colors={[COLORS.solana + '20', COLORS.solana + '10']}
@@ -284,7 +334,7 @@ export default function SolanaSetupScreen() {
             </View>
             <Text style={styles.importTitle}>Import Your Wallet</Text>
             <Text style={styles.importDescription}>
-              Enter your private key to import your existing Solana wallet
+              Enter your private key and set a password to encrypt it on this device
             </Text>
           </View>
 
@@ -313,17 +363,53 @@ export default function SolanaSetupScreen() {
                 )}
               </TouchableOpacity>
             </View>
+            <Text style={styles.inputLabel}>Wallet Password</Text>
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Enter a strong password"
+                placeholderTextColor={COLORS.textSecondary}
+                value={walletPassword}
+                onChangeText={setWalletPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? (
+                  <EyeOff size={20} color={COLORS.textSecondary} />
+                ) : (
+                  <Eye size={20} color={COLORS.textSecondary} />
+                )}
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.inputLabel}>Confirm Password</Text>
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Re-enter password"
+                placeholderTextColor={COLORS.textSecondary}
+                value={confirmWalletPassword}
+                onChangeText={setConfirmWalletPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
           </View>
 
           <TouchableOpacity
             style={styles.importButton}
             onPress={handleImportWallet}
-            disabled={isLoading || !privateKey.trim()}
+            disabled={isLoading || !privateKey.trim() || !walletPassword || walletPassword !== confirmWalletPassword}
           >
             <LinearGradient
               colors={[
-                privateKey.trim() ? COLORS.solana : COLORS.textSecondary,
-                privateKey.trim() ? COLORS.solana + '80' : COLORS.textSecondary + '80'
+                (privateKey.trim() && walletPassword && walletPassword === confirmWalletPassword) ? COLORS.solana : COLORS.textSecondary,
+                (privateKey.trim() && walletPassword && walletPassword === confirmWalletPassword) ? COLORS.solana + '80' : COLORS.textSecondary + '80'
               ]}
               style={styles.importGradient}
             >

@@ -12,7 +12,7 @@ interface TokenCardProps {
   change: number;
   liquidity?: number;
   volume?: number;
-  age?: string;
+  transactions?: number;
   logo?: string;
   onPress?: () => void;
 }
@@ -24,7 +24,7 @@ export const TokenCard: React.FC<TokenCardProps> = ({
   change,
   liquidity,
   volume,
-  age,
+  transactions,
   logo,
   onPress,
 }) => {
@@ -45,6 +45,12 @@ export const TokenCard: React.FC<TokenCardProps> = ({
 
   const getChangeColor = (change: number) => {
     return change >= 0 ? COLORS.success : COLORS.error;
+  };
+
+  const formatTxnCount = (num: number) => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+    return `${Math.round(num)}`;
   };
 
   const handlePress = () => {
@@ -85,26 +91,26 @@ export const TokenCard: React.FC<TokenCardProps> = ({
               {change >= 0 ? '+' : ''}{change.toFixed(1)}%
             </Text>
             
-            {(liquidity || volume || age) && (
+            {(liquidity || volume || transactions) && (
               <View style={styles.statsContainer}>
                 {liquidity && (
                   <View style={styles.stat}>
-                    <Text style={styles.statLabel}>💧</Text>
+                    <Text style={[styles.statLabel, styles.statLabelL]}>L</Text>
                     <Text style={styles.statValue}>{formatLargeNumber(liquidity)}</Text>
                   </View>
                 )}
                 
                 {volume && (
                   <View style={styles.stat}>
-                    <Text style={styles.statLabel}>📊</Text>
+                    <Text style={[styles.statLabel, styles.statLabelM]}>M</Text>
                     <Text style={styles.statValue}>{formatLargeNumber(volume)}</Text>
                   </View>
                 )}
                 
-                {age && (
+                {typeof transactions === 'number' && (
                   <View style={styles.stat}>
-                    <Text style={styles.statLabel}>⏰</Text>
-                    <Text style={styles.statValue}>{age}</Text>
+                    <Text style={[styles.statLabel, styles.statLabelT]}>T</Text>
+                    <Text style={styles.statValue}>{formatTxnCount(transactions)}</Text>
                   </View>
                 )}
               </View>
@@ -116,26 +122,26 @@ export const TokenCard: React.FC<TokenCardProps> = ({
   );
 };
 
-const getTokenColor = (symbol: string) => {
+const getTokenColor = (symbol: string): readonly [string, string, ...string[]] => {
   switch (symbol.toUpperCase()) {
     case 'SOL':
-      return [COLORS.solana, COLORS.solana + '80'];
+      return [COLORS.solana, COLORS.solana + '80'] as const;
     case 'ETH':
-      return [COLORS.ethereum, COLORS.ethereum + '80'];
+      return [COLORS.ethereum, COLORS.ethereum + '80'] as const;
     case 'BNB':
-      return [COLORS.binance, COLORS.binance + '80'];
+      return [COLORS.binance, COLORS.binance + '80'] as const;
     case 'USDC':
-      return [COLORS.usdc, COLORS.usdc + '80'];
+      return [COLORS.usdc, COLORS.usdc + '80'] as const;
     case 'WIF':
-      return [COLORS.wif, COLORS.wif + '80'];
+      return [COLORS.wif, COLORS.wif + '80'] as const;
     case 'RNDR':
-      return ['#FF6B35', '#FF6B35' + '80'];
+      return ['#FF6B35', '#FF6B35' + '80'] as const;
     case 'PEPE':
-      return ['#00D4AA', '#00D4AA' + '80'];
+      return ['#00D4AA', '#00D4AA' + '80'] as const;
     case 'JUP':
-      return ['#C7931E', '#C7931E' + '80'];
+      return ['#C7931E', '#C7931E' + '80'] as const;
     case 'BONK':
-      return ['#FF8C00', '#FF8C00' + '80'];
+      return ['#FF8C00', '#FF8C00' + '80'] as const;
     default:
       return COLORS.gradientPurple;
   }
@@ -215,6 +221,15 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     marginRight: 2,
+  },
+  statLabelL: {
+    color: COLORS.usdc,
+  },
+  statLabelM: {
+    color: COLORS.solana,
+  },
+  statLabelT: {
+    color: COLORS.warning,
   },
   statValue: {
     ...FONTS.sfProRegular,

@@ -3,6 +3,8 @@ import { View, StyleSheet, TouchableOpacity, Text, Animated } from 'react-native
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
+import { NotificationTabBadge } from './NotificationBadge';
+import { useNotificationBadgeContext } from '../hooks/notification-provider';
 
 type TabBarProps = {
   state: any;
@@ -13,6 +15,7 @@ type TabBarProps = {
 
 export const TabBar: React.FC<TabBarProps> = (props) => {
   const { state, descriptors, navigation } = props;
+  const { badgeCount } = useNotificationBadgeContext();
   
   // Create animated values for each tab
   const animatedValues = useRef(
@@ -74,25 +77,31 @@ export const TabBar: React.FC<TabBarProps> = (props) => {
               style={styles.tab}
             >
               <View style={styles.tabContent}>
-                <Animated.View
-                  style={{
-                    transform: [
-                      {
-                        rotate: animatedValues[index]?.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ['0deg', '360deg'],
-                        }) || '0deg',
-                      },
-                    ],
-                  }}
-                >
-                  {options.tabBarIcon &&
-                    options.tabBarIcon({
-                      focused: isFocused,
-                      color: isFocused ? COLORS.solana : COLORS.textSecondary,
-                      size: 24,
-                    })}
-                </Animated.View>
+                <View style={styles.iconContainer}>
+                  <Animated.View
+                    style={{
+                      transform: [
+                        {
+                          rotate: animatedValues[index]?.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['0deg', '360deg'],
+                          }) || '0deg',
+                        },
+                      ],
+                    }}
+                  >
+                    {options.tabBarIcon &&
+                      options.tabBarIcon({
+                        focused: isFocused,
+                        color: isFocused ? COLORS.solana : COLORS.textSecondary,
+                        size: 24,
+                      })}
+                  </Animated.View>
+                  {/* Show notification badge on Home tab (index 0) */}
+                  {index === 0 && badgeCount > 0 && (
+                      <NotificationTabBadge count={badgeCount} />
+                  )}
+                </View>
                 <Text
                   style={[
                     styles.label,
@@ -115,7 +124,7 @@ export const TabBar: React.FC<TabBarProps> = (props) => {
 
 const styles = StyleSheet.create({
   container: {
-    paddingTop: SPACING.l,
+    paddingTop: 0,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -130,6 +139,11 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.s,
   },
   tabContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconContainer: {
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },

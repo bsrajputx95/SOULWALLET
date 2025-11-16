@@ -7,19 +7,27 @@ import {
   ScrollView,
   RefreshControl,
   Modal,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Shield, ChevronDown, UserPlus, UserMinus } from 'lucide-react-native';
+import { ChevronDown, UserPlus, UserMinus, X, Zap, Copy } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
 
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { SocialPost } from '../../components/SocialPost';
+import { NeonCard } from '../../components/NeonCard';
+import { GlowingText } from '../../components/GlowingText';
 
 
-import { useSocial, TraderProfile } from '../../hooks/social-store';
+import type { TraderProfile } from '../../hooks/social-store';
+import { useSocial } from '../../hooks/social-store';
 
 type TimeFilter = '24h' | '7d' | '30d' | '90d';
+
+type PostVisibility = 'public' | 'followers' | 'vip';
 
 
 
@@ -28,14 +36,35 @@ type TimeFilter = '24h' | '7d' | '30d' | '90d';
 export default function UserProfileScreen() {
   const router = useRouter();
   const { username } = useLocalSearchParams<{ username: string }>();
-  const { getTraderProfile, toggleFollow, isFollowing } = useSocial();
+  const { getTraderProfile, toggleFollow, isFollowing, posts } = useSocial();
   const [refreshing, setRefreshing] = useState(false);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('24h');
+  const [activePostsTab, setActivePostsTab] = useState<PostVisibility>('public');
+  const [isVipMember, setIsVipMember] = useState(false);
 
   const [showTimeFilterModal, setShowTimeFilterModal] = useState(false);
+  const [showCopyModal, setShowCopyModal] = useState(false);
+  const [copyAmount, setCopyAmount] = useState('1000');
+  const [amountPerTrade, setAmountPerTrade] = useState('100');
+  const [stopLoss, setStopLoss] = useState('10');
+  const [takeProfit, setTakeProfit] = useState('30');
+  const [maxSlippage, setMaxSlippage] = useState('0.5');
+  const [exitWithTrader, setExitWithTrader] = useState(false);
 
   const userProfile: TraderProfile | null = username ? (getTraderProfile(username) || null) : null;
   const isUserFollowed = username ? isFollowing(username) : false;
+  const mockWalletAddress = userProfile ? `${userProfile.username}123456789abcdef123456789abcdef12345678` : '';
+  const trustScore = 0.9; // Mocked trust score (90%)
+
+  // Posts for this user and filtered by selected visibility
+  const allPosts = posts || [];
+  const userPosts = userProfile ? allPosts.filter(p => p.username === userProfile.username) : [];
+  const visiblePosts = userPosts.filter(p => {
+    if (activePostsTab === 'public') {
+      return p.visibility === 'public' || !p.visibility;
+    }
+    return p.visibility === activePostsTab;
+  });
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -48,9 +77,6 @@ export default function UserProfileScreen() {
       <SafeAreaView style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <ArrowLeft size={24} color={COLORS.textPrimary} />
-          </TouchableOpacity>
           <Text style={styles.headerTitle}>Profile Not Found</Text>
         </View>
         <View style={styles.errorContainer}>
@@ -94,10 +120,6 @@ export default function UserProfileScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <ArrowLeft size={24} color={COLORS.textPrimary} />
-        </TouchableOpacity>
-        
         <View style={styles.userInfo}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
@@ -108,16 +130,24 @@ export default function UserProfileScreen() {
           <View style={styles.userDetails}>
             <View style={styles.usernameRow}>
               <Text style={styles.username}>@{userProfile.username}</Text>
-              {userProfile.isVerified && (
-                <Shield size={16} color={COLORS.solana} style={styles.verifiedIcon} />
-              )}
-              {userProfile.badge && (
-                <Text style={styles.badge}>
-                  {userProfile.badge === 'elite' ? '🏆' : 
-                   userProfile.badge === 'pro' ? '⭐' : 
-                   userProfile.badge === 'vip' ? '👑' : '🥉'}
-                </Text>
-              )}
+            </View>
+            <View style={styles.walletRow}>
+              <Text style={styles.walletAddress} numberOfLines={1} ellipsizeMode="middle">
+                {mockWalletAddress}
+              </Text>
+              <TouchableOpacity
+                style={styles.copyIconButton}
+                onPress={async () => {
+                  try {
+                    await Clipboard.setStringAsync(mockWalletAddress);
+                    Alert.alert('Copied', 'Wallet address copied to clipboard');
+                  } catch (e) {
+                    if (__DEV__) console.log('Clipboard copy failed', e);
+                  }
+                }}
+              >
+                <Copy size={16} color={COLORS.textSecondary} />
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -162,7 +192,7 @@ export default function UserProfileScreen() {
         
         {/* Trading Summary */}
         <View style={styles.tradingSummaryContainer}>
-          <Text style={styles.sectionTitle}>📈 Trading Summary</Text>
+          <Text style={styles.sectionTitle}>Trading Summary</Text>
           
           <View style={styles.pnlContainer}>
             <TouchableOpacity 
@@ -193,6 +223,17 @@ export default function UserProfileScreen() {
           </View>
         </View>
         
+        {/* Trust Score (Neon Bar) */}
+        <NeonCard style={styles.trustScoreCard} color={COLORS.gradientPurple} intensity="medium">
+          <View style={styles.trustHeader}>
+            <Text style={styles.trustLabel}>Trust Score</Text>
+            <GlowingText text={`${Math.round(trustScore * 100)}%`} color={COLORS.success} fontSize={16} intensity="high" />
+          </View>
+          <View style={styles.trustBarTrack}>
+            <View style={[styles.trustBarFill, { width: `${trustScore * 100}%` }]} />
+          </View>
+        </NeonCard>
+        
         {/* Action Buttons */}
         <View style={styles.actionButtonsContainer}>
           <TouchableOpacity
@@ -215,6 +256,13 @@ export default function UserProfileScreen() {
             </Text>
           </TouchableOpacity>
           
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={() => setShowCopyModal(true)}
+          >
+            <Zap size={20} color={COLORS.success} />
+            <Text style={styles.copyButtonText}>Copy this trader</Text>
+          </TouchableOpacity>
 
         </View>
         
@@ -223,11 +271,17 @@ export default function UserProfileScreen() {
         {/* VIP */}
         {userProfile.vipPrice && (
           <View style={styles.vipContainer}>
-            <Text style={styles.sectionTitle}>🔥 VIP</Text>
+            <Text style={styles.sectionTitle}>VIP</Text>
             <View style={styles.vipContent}>
               <Text style={styles.vipPrice}>Price: ${userProfile.vipPrice}/month</Text>
-              <TouchableOpacity style={styles.joinVipButton}>
-                <Text style={styles.joinVipText}>Join VIP</Text>
+              <TouchableOpacity 
+                style={styles.joinVipButton}
+                onPress={() => {
+                  setIsVipMember(true);
+                  Alert.alert('Joined VIP', `You are now a VIP member of @${userProfile.username}`);
+                }}
+              >
+                <Text style={styles.joinVipText}>{isVipMember ? 'VIP Active' : 'Join VIP'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -235,36 +289,77 @@ export default function UserProfileScreen() {
         
         {/* Posts */}
         <View style={styles.postsContainer}>
-          <Text style={styles.sectionTitle}>📣 Posts</Text>
-          {/* Mock posts for the user */}
-          <SocialPost
-            id={`${userProfile.username}-post-1`}
-            username={userProfile.username}
-            profileImage={userProfile.profileImage}
-            content={`SOL ready to breakout above $160. Loading up on calls here 🚀`}
-            comments={12}
-            reposts={8}
-            likes={211}
-            timestamp="2h"
-            mentionedToken="SOL"
-            isVerified={userProfile.isVerified}
-            onPress={() => { if (__DEV__) console.log('Post pressed'); }}
-            onBuyPress={() => { if (__DEV__) console.log('Buy pressed: SOL'); }}
-          />
-          <SocialPost
-            id={`${userProfile.username}-post-2`}
-            username={userProfile.username}
-            profileImage={userProfile.profileImage}
-            content={`BONK showing strong accumulation. This could be the next 10x meme play`}
-            comments={23}
-            reposts={15}
-            likes={156}
-            timestamp="4h"
-            mentionedToken="BONK"
-            isVerified={userProfile.isVerified}
-            onPress={() => { if (__DEV__) console.log('Post pressed'); }}
-            onBuyPress={() => { if (__DEV__) console.log('Buy pressed: BONK'); }}
-          />
+          <Text style={styles.sectionTitle}>Posts</Text>
+          <View style={styles.postsTabsHeader}>
+            {(['public','followers','vip'] as PostVisibility[]).map(tab => (
+              <TouchableOpacity
+                key={tab}
+                style={[
+                  styles.postsTab,
+                  activePostsTab === tab && styles.postsActiveTab,
+                ]}
+                onPress={() => setActivePostsTab(tab)}
+              >
+                <Text style={[
+                  styles.postsTabText,
+                  activePostsTab === tab && styles.postsActiveTabText,
+                ]}>
+                  {tab === 'public' ? 'Public' : tab === 'followers' ? 'Followers' : 'VIP'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {activePostsTab === 'followers' && !isUserFollowed ? (
+            <View style={styles.gatedContainer}>
+              <Text style={styles.gatedText}>Follow @{userProfile.username} to view followers-only posts.</Text>
+              <TouchableOpacity
+                style={[styles.followButton, styles.gatedActionButton]}
+                onPress={() => toggleFollow(userProfile.username)}
+              >
+                <UserPlus size={20} color={COLORS.textPrimary} />
+                <Text style={styles.followButtonText}>Follow</Text>
+              </TouchableOpacity>
+            </View>
+          ) : activePostsTab === 'vip' && !isVipMember ? (
+            <View style={styles.gatedContainer}>
+              <Text style={styles.gatedText}>Subscribe to VIP to see exclusive posts.</Text>
+              <TouchableOpacity
+                style={[styles.joinVipButton, styles.gatedVipButton]}
+                onPress={() => {
+                  setIsVipMember(true);
+                  Alert.alert('Joined VIP', `You are now a VIP member of @${userProfile.username}`);
+                }}
+              >
+                <Text style={styles.joinVipText}>Join VIP</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View>
+              {visiblePosts.length > 0 ? (
+                visiblePosts.map((post) => (
+                  <SocialPost
+                    key={post.id}
+                    id={post.id}
+                    username={post.username}
+                    profileImage={userProfile.profileImage}
+                    content={post.content}
+                    images={post.images}
+                    comments={post.comments}
+                    reposts={post.reposts}
+                    likes={post.likes}
+                    timestamp={post.timestamp}
+                    mentionedToken={post.mentionedToken}
+                    isVerified={userProfile.isVerified}
+                  />
+                ))
+              ) : (
+                <View style={styles.gatedContainer}>
+                  <Text style={styles.gatedText}>No posts in this section yet.</Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       </ScrollView>
       
@@ -306,6 +401,134 @@ export default function UserProfileScreen() {
             ))}
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Copy Trading Modal */}
+      <Modal
+        visible={showCopyModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowCopyModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.copyModalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Copy @{userProfile.username}</Text>
+              <TouchableOpacity onPress={() => setShowCopyModal(false)}>
+                <X size={24} color={COLORS.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalDescription}>
+                Set up copy trading parameters for @{userProfile.username}
+              </Text>
+
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>Total Amount (USDC)</Text>
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputPrefix}>$</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="1000"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={copyAmount}
+                    onChangeText={setCopyAmount}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>Amount per Trade (USDC)</Text>
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputPrefix}>$</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="100"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={amountPerTrade}
+                    onChangeText={setAmountPerTrade}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>Stop Loss (%)</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="10"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={stopLoss}
+                    onChangeText={setStopLoss}
+                    keyboardType="numeric"
+                  />
+                  <Text style={styles.inputSuffix}>%</Text>
+                </View>
+              </View>
+
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>Take Profit (%)</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="30"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={takeProfit}
+                    onChangeText={setTakeProfit}
+                    keyboardType="numeric"
+                  />
+                  <Text style={styles.inputSuffix}>%</Text>
+                </View>
+              </View>
+
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>Max Slippage (%)</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="0.5"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={maxSlippage}
+                    onChangeText={setMaxSlippage}
+                    keyboardType="numeric"
+                  />
+                  <Text style={styles.inputSuffix}>%</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.exitWithTraderButton, exitWithTrader && styles.exitWithTraderButtonActive]}
+                onPress={() => setExitWithTrader(prev => !prev)}
+              >
+                <Text style={[styles.exitWithTraderText, exitWithTrader && styles.exitWithTraderTextActive]}>Exit with Trader</Text>
+                <Text style={styles.exitWithTraderSubtext}>Automatically exit when trader exits</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.startCopyButton}
+                onPress={() => {
+                  const params = {
+                    walletAddress: `${userProfile.username}-wallet`,
+                    totalAmount: parseFloat(copyAmount) || 1000,
+                    amountPerTrade: parseFloat(amountPerTrade) || 100,
+                    stopLoss: stopLoss ? -Math.abs(parseFloat(stopLoss)) : undefined,
+                    takeProfit: takeProfit ? Math.abs(parseFloat(takeProfit)) : undefined,
+                    maxSlippage: maxSlippage ? Math.abs(parseFloat(maxSlippage)) : 0.5,
+                    exitWithTrader,
+                  };
+                  if (__DEV__) console.log('Start copying trader:', params);
+                  Alert.alert('Success', `Started copying @${userProfile.username}!`);
+                  setShowCopyModal(false);
+                }}
+              >
+                <Text style={styles.startCopyText}>Start Copying</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -370,6 +593,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginRight: SPACING.xs,
   },
+  walletAddress: {
+    flex: 1,
+    flexShrink: 1,
+    ...FONTS.monospace,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: SPACING.xs,
+  },
+  walletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    maxWidth: '100%',
+  },
+  copyIconButton: {
+    marginLeft: SPACING.xs,
+    padding: 4,
+  },
   verifiedIcon: {
     marginRight: SPACING.xs,
   },
@@ -422,9 +662,10 @@ const styles = StyleSheet.create({
   },
   pnlContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     marginBottom: SPACING.m,
+    gap: SPACING.s,
   },
   timeFilterButton: {
     flexDirection: 'row',
@@ -439,6 +680,7 @@ const styles = StyleSheet.create({
   pnlValue: {
     ...FONTS.phantomBold,
     fontSize: 18,
+    marginLeft: SPACING.s,
   },
   metricsRow: {
     flexDirection: 'row',
@@ -458,8 +700,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   actionButtonsContainer: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     marginVertical: SPACING.m,
+    gap: SPACING.s,
+  },
+  trustScoreCard: {
+    marginBottom: SPACING.m,
+  },
+  trustHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.s,
+  },
+  trustLabel: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  trustBarTrack: {
+    height: 10,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.glowGreen,
+    overflow: 'hidden',
+  },
+  trustBarFill: {
+    height: '100%',
+    backgroundColor: COLORS.success,
+    borderRadius: BORDER_RADIUS.full,
+    shadowColor: COLORS.glowGreen,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius: 6,
   },
   followButton: {
     flex: 1,
@@ -516,6 +790,55 @@ const styles = StyleSheet.create({
   postsContainer: {
     marginBottom: SPACING.m,
   },
+  postsTabsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.m,
+    gap: SPACING.s,
+  },
+  postsTab: {
+    flex: 1,
+    paddingVertical: SPACING.s,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '30',
+    alignItems: 'center',
+  },
+  postsActiveTab: {
+    backgroundColor: COLORS.solana + '20',
+    borderColor: COLORS.solana,
+  },
+  postsTabText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  postsActiveTabText: {
+    color: COLORS.solana,
+  },
+  gatedContainer: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.l,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '20',
+    alignItems: 'center',
+  },
+  gatedText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginBottom: SPACING.m,
+    textAlign: 'center',
+  },
+  gatedActionButton: {
+    width: '100%',
+  },
+  gatedVipButton: {
+    alignSelf: 'center',
+  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -564,5 +887,123 @@ const styles = StyleSheet.create({
   },
   timeFilterOptionTextActive: {
     color: COLORS.solana,
+  },
+  // Copy Trading styles
+  copyButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.cardBackground,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.medium,
+    borderWidth: 1,
+    borderColor: COLORS.success,
+  },
+  copyButtonText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.success,
+    fontSize: 16,
+    marginLeft: SPACING.xs,
+  },
+  copyModalContainer: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.l,
+    width: '90%',
+    maxWidth: 420,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.m,
+  },
+  modalContent: {
+    maxHeight: '80%',
+  },
+  modalDescription: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginBottom: SPACING.m,
+  },
+  inputSection: {
+    marginBottom: SPACING.m,
+  },
+  inputLabel: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginBottom: SPACING.xs,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.medium,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '20',
+  },
+  inputPrefix: {
+    ...FONTS.phantomBold,
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    marginRight: SPACING.s,
+  },
+  input: {
+    ...FONTS.phantomRegular,
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+  },
+  inputSuffix: {
+    ...FONTS.phantomBold,
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    marginLeft: SPACING.s,
+  },
+  exitWithTraderButton: {
+    backgroundColor: COLORS.solana + '10',
+    borderRadius: BORDER_RADIUS.medium,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '20',
+    marginBottom: SPACING.m,
+  },
+  exitWithTraderButtonActive: {
+    backgroundColor: COLORS.solana + '20',
+    borderColor: COLORS.solana + '30',
+  },
+  exitWithTraderText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  exitWithTraderTextActive: {
+    color: COLORS.solana,
+  },
+  exitWithTraderSubtext: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  startCopyButton: {
+    backgroundColor: COLORS.success + '20',
+    borderRadius: BORDER_RADIUS.medium,
+    paddingVertical: SPACING.m,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.success + '30',
+    marginBottom: SPACING.s,
+  },
+  startCopyText: {
+    ...FONTS.phantomBold,
+    color: COLORS.success,
+    fontSize: 16,
   },
 });

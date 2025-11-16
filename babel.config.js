@@ -3,17 +3,46 @@ module.exports = function (api) {
   return {
     presets: ['babel-preset-expo'],
     plugins: [
-      'react-native-reanimated/plugin',
+      // Tree shaking optimizations
       [
-        'module-resolver',
+        'transform-imports',
         {
-          root: ['./'],
-          alias: {
-            '@': './',
+          '@expo/vector-icons': {
+            transform: '@expo/vector-icons/${member}',
+            preventFullImport: true,
           },
-          extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
         },
       ],
+      // Remove unused imports in production
+      ...(process.env.NODE_ENV === 'production'
+        ? [['transform-remove-console', { exclude: ['error', 'warn'] }]]
+        : []),
+      // IMPORTANT: Keep reanimated plugin last
+      'react-native-reanimated/plugin',
+    ],
+    overrides: [
+      {
+        test: [
+          './app/**/*',
+          './components/**/*',
+          './lib/**/*',
+          './hooks/**/*',
+          './utils/**/*',
+          './src/**/*',
+        ],
+        plugins: [
+          [
+            'module-resolver',
+            {
+              root: ['./'],
+              alias: {
+                '@': './',
+              },
+              extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
+            },
+          ],
+        ],
+      },
     ],
   };
 };

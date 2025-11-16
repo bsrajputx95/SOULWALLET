@@ -1,0 +1,396 @@
+name: CD - Deploy
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.soulwallet.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Generate Prisma Client
+        run: npm run db:generate
+      
+      - name: Verify environment configuration
+        run: npm run validate-env
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+      
+      - name: Check migration status
+        run: |
+          npx prisma migrate status
+          echo "Migration status checked"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      - name: Backup database before migration
+        run: |
+          ./scripts/backup-database.sh
+          backup_file=$(ls -t backups/backup-*.dump | head -1)
+          echo "BACKUP_FILE=$backup_file" >> $GITHUB_ENV
+          echo "Database backup created: $backup_file"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      - name: Apply migrations
+        run: |
+          npx prisma migrate deploy
+          npx prisma migrate status
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      - name: Build backend
+        run: npm run server:build
+      
+      - name: Validate environment variables
+        run: |
+          # Check required environment variables
+          required_vars=("DATABASE_URL" "REDIS_URL" "JWT_SECRET" "JWT_REFRESH_SECRET" "SOLANA_RPC_URL")
+          for var in "${required_vars[@]}"; do
+            if [ -z "${!var}" ]; then
+              echo "Error: $var is not set"
+              exit 1
+            fi
+          done
+          echo "Environment variables validation passed"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+      
+      - name: Verify database connectivity
+        run: |
+          npx prisma migrate status
+          echo "Database connectivity verified"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      - name: Backup database
+        run: |
+          timestamp=$(date +%Y-%m-%d-%H-%M-%S)
+          backup_file="backup-$timestamp.sql"
+          pg_dump $DATABASE_URL > $backup_file
+          echo "Database backup created: $backup_file"
+          # Upload backup as artifact for potential rollback
+          echo "BACKUP_FILE=$backup_file" >> $GITHUB_ENV
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      - name: Deploy to Railway (Blue-Green)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # Deploy to blue environment first
+          npm install -g railway
+          railway up --service soulwallet-blue
+          # Wait for deployment
+          sleep 30
+          # Run smoke tests on blue
+          curl -f http://soulwallet-blue.railway.app/health || exit 1
+          curl -f http://soulwallet-blue.railway.app/health/db || exit 1
+          curl -f http://soulwallet-blue.railway.app/health/redis || exit 1
+          # Switch to blue (promote to production)
+          railway domain --service soulwallet-blue
+          echo "Blue-green deployment to Railway completed"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Deploy to Heroku (Blue-Green)
+        if: contains(github.ref, 'refs/tags/v')
+        uses: akhileshns/heroku-deploy@v3.12.14
+        with:
+          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}-blue
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+      
+      - name: Wait for deployment to stabilize
+        run: sleep 30
+      
+      - name: Verify health endpoints
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            base_url="https://api.soulwallet.com"
+          else
+            base_url="https://${{ secrets.HEROKU_APP_NAME }}-blue.herokuapp.com"
+          fi
+          curl -f $base_url/health || exit 1
+          curl -f $base_url/health/db || exit 1
+          curl -f $base_url/health/redis || exit 1
+          curl -f $base_url/health/solana || exit 1
+          echo "Health checks passed"
+      
+      - name: Run smoke tests
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            base_url="https://api.soulwallet.com"
+          else
+            base_url="https://${{ secrets.HEROKU_APP_NAME }}-blue.herokuapp.com"
+          fi
+          # Test auth.login
+          curl -f -X POST $base_url/auth/login -H "Content-Type: application/json" -d '{"email":"test@example.com","password":"testpass"}' || exit 1
+          # Test wallet.getBalance
+          curl -f $base_url/wallet/getBalance -H "Authorization: Bearer ${{ secrets.TEST_JWT_TOKEN }}" || exit 1
+          echo "Smoke tests passed"
+      
+      - name: Smoke tests
+        run: |
+          # Wait for deployment to be ready
+          sleep 60
+          # Check health endpoints
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            base_url="http://soulwallet-blue.railway.app"
+          else
+            base_url="https://${{ secrets.HEROKU_APP_NAME }}-blue.herokuapp.com"
+          fi
+          curl -f $base_url/health || exit 1
+          curl -f $base_url/health/db || exit 1
+          curl -f $base_url/health/redis || exit 1
+          echo "Smoke tests passed"
+      
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, initiating rollback"
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            # Rollback Railway
+            npm install -g railway
+            railway up --service soulwallet-green  # Assuming green is previous
+          else
+            # Rollback Heroku
+            heroku rollback --app ${{ secrets.HEROKU_APP_NAME }}-blue
+          fi
+          # Restore database from backup if needed
+          if [ -f "$BACKUP_FILE" ]; then
+            psql $DATABASE_URL < $BACKUP_FILE
+            echo "Database restored from backup"
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
+      
+      - name: Deployment notification
+        if: always()
+        run: |
+          status="${{ job.status }}"
+          message="Deployment $status for ${{ github.ref }} at $(date)"
+          # Send to Slack (replace with your webhook)
+          curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"$message\"}" ${{ secrets.SLACK_WEBHOOK_URL }}
+          # Or send email
+          echo "$message" | mail -s "Deployment Status" ${{ secrets.NOTIFICATION_EMAIL }}
+      
+      - name: Tag successful deployment
+        if: success()
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            version="v$(date +%Y.%m.%d.%H%M%S)"
+            git tag $version
+            git push origin $version
+            echo "Tagged deployment as $version"
+          fi
+      
+      - name: Update deployment documentation
+        if: success()
+        run: |
+          deployment_time=$(date)
+          version=$(git describe --tags --abbrev=0 2>/dev/null || echo "main")
+          sed -i "s/Last deployment:.*/Last deployment: $deployment_time (version: $version)/" DEPLOYMENT.md
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add DEPLOYMENT.md
+          git commit -m "Update deployment info: $version at $deployment_time" || echo "No changes to commit"
+          git push
+
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    needs: deploy-backend
+    if: failure()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Restore database from backup
+        run: |
+          ./scripts/restore-database.sh $BACKUP_FILE --force --no-backup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_FILE: ${{ env.BACKUP_FILE }}
+      
+      - name: Revert to previous deployment
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            npm install -g railway
+            railway up --service soulwallet-green
+          else
+            heroku rollback --app ${{ secrets.HEROKU_APP_NAME }}-blue
+          fi
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
+      
+      - name: Notify team of rollback
+        run: |
+          message="Rollback initiated for ${{ github.ref }} at $(date)"
+          curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"$message\"}" ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  deploy-docker:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/soulwallet
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/soulwallet:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/soulwallet:buildcache,mode=max
+      
+      - name: Sign image with Cosign
+        uses: sigstore/cosign-installer@main
+        with:
+          cosign-release: 'v2.2.3'
+      
+      - name: Verify signature
+        run: cosign verify ${{ secrets.DOCKER_USERNAME }}/soulwallet:latest --keyless
+
+  deploy-expo:
+    name: Build & Submit Expo App
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Pre-build validation
+        run: |
+          # Check app.json version matches git tag
+          tag_version=$(echo ${{ github.ref }} | sed 's/refs\/tags\/v//')
+          app_version=$(node -p "require('./app.json').expo.version")
+          if [ "$tag_version" != "$app_version" ]; then
+            echo "Version mismatch: tag $tag_version vs app $app_version"
+            exit 1
+          fi
+          # Verify credentials
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "EXPO_TOKEN not set"
+            exit 1
+          fi
+          # Run eas build:inspect
+          eas build:inspect --platform ios
+      
+      - name: Build iOS app
+        run: eas build --platform ios --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Build Android app
+        run: eas build --platform android --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: expo-builds
+          path: |
+            dist/
+          retention-days: 90
+      
+      - name: Submit to App Store
+        run: eas submit --platform ios --latest
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Submit to Google Play
+        run: eas submit --platform android --latest
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Submission verification
+        run: |
+          # Check submission status
+          eas submit:status --platform ios
+          eas submit:status --platform android
+          # Notify team
+          message="Expo app submitted for ${{ github.ref }} at $(date)"
+          curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"$message\"}" ${{ secrets.SLACK_WEBHOOK_URL }}

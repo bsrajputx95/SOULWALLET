@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: soulwallet_staging
+    ports:
+      - '5433:5432'
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  redis:
+    ports:
+      - '6380:6379'
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+
+  backend:
+    environment:
+      NODE_ENV: staging
+      LOG_LEVEL: debug
+      ENABLE_PLAYGROUND: true
+      ENABLE_INTROSPECTION: true
+      FEATURE_SIMULATION_MODE: true
+    ports:
+      - '3002:3001'
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'

@@ -1,21 +1,24 @@
 import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  TextInput, 
-  View, 
-  Text, 
+import type {
   TextInputProps,
-  TouchableOpacity,
+  TextStyle} from 'react-native';
+import {
+  StyleSheet,
+  TextInput,
+  View,
+  Text,
+  TouchableOpacity
 } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
 
-interface NeonInputProps extends TextInputProps {
+interface NeonInputProps extends Omit<TextInputProps, 'style'> {
   label: string;
   error?: string;
   leftIcon?: React.ReactNode;
   isPassword?: boolean;
+  style?: TextStyle;
 }
 
 export const NeonInput: React.FC<NeonInputProps> = ({
@@ -43,8 +46,8 @@ export const NeonInput: React.FC<NeonInputProps> = ({
         <TextInput
           style={[
             styles.input,
-            leftIcon && styles.inputWithIcon,
-            isPassword && styles.inputWithPassword,
+            leftIcon ? styles.inputWithIcon : undefined,
+            isPassword ? styles.inputWithPassword : undefined,
             style,
           ]}
           placeholderTextColor={COLORS.textSecondary}

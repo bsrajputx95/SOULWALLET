@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  postgres:
+    restart: always
+    environment:
+      POSTGRES_SHARED_BUFFERS: 512MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 1536MB
+      POSTGRES_MAX_CONNECTIONS: 200
+      POSTGRES_WORK_MEM: 4MB
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '2.0'
+      restart_policy:
+        condition: on-failure
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: 5
+    labels:
+      - "logging.service=postgres"
+      - "logging.environment=production"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    privileged: false
+
+  redis:
+    restart: always
+    command: redis-server --maxmemory 1gb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+      restart_policy:
+        condition: on-failure
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: 5
+    labels:
+      - "logging.service=redis"
+      - "logging.environment=production"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    privileged: false
+
+  backend:
+    restart: always
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: warn
+      ENABLE_PLAYGROUND: false
+      ENABLE_INTROSPECTION: false
+      FEATURE_SIMULATION_MODE: false
+      SESSION_FINGERPRINT_STRICT: true
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: '4.0'
+      restart_policy:
+        condition: on-failure
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: 5
+    labels:
+      - "logging.service=backend"
+      - "logging.environment=production"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    privileged: false

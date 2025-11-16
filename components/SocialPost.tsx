@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
+import { SafeHtmlText } from './SafeHtml';
 
 interface SocialPostProps {
   id: string;
@@ -17,6 +18,7 @@ interface SocialPostProps {
   likes: number;
   timestamp: string;
   mentionedToken?: string;
+  mentionedTokenMint?: string;
   isVerified?: boolean;
   onPress?: () => void;
   onBuyPress?: () => void;
@@ -130,6 +132,12 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   }, [content, handleTokenPress]);
 
   return (
+    <Pressable
+      onPress={handlePostPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Open post by ${username}`}
+      accessibilityHint="Opens post details with comments"
+    >
     <NeonCard style={styles.container}>
       <View style={styles.header}>
         <View style={styles.profileContainer}>
@@ -143,7 +151,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
             </View>
           )}
           <View style={styles.userInfo}>
-            <Pressable onPress={handleUsernamePress}>
+            <Pressable onPress={(e) => { e.stopPropagation(); handleUsernamePress(); }}>
               <Text style={styles.username}>
                 @{username}
                 {isVerified && <Text style={styles.verified}> 🛡️</Text>}
@@ -161,7 +169,11 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
         accessibilityLabel={`Post by ${username}: ${content.substring(0, 100)}`}
         accessibilityHint="Double tap to view full post"
       >
-        <Text style={styles.content}>{formattedContent}</Text>
+        <SafeHtmlText 
+          html={content} 
+          style={styles.content}
+          maxLength={500}
+        />
         {images && images.length > 0 && (
           <View style={styles.imagesContainer}>
             {images.map((imageUrl, index) => (
@@ -234,7 +246,8 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
           {mentionedToken && (
             <Pressable
               style={styles.buyButton}
-              onPress={() => {
+              onPress={(e) => {
+                e.stopPropagation();
                 if (onBuyPress) {
                   onBuyPress();
                 } else {
@@ -249,6 +262,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
           )}
         </View>
       </NeonCard>
+    </Pressable>
   );
 });
 

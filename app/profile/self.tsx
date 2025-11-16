@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useState, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -33,7 +34,7 @@ export default function SelfProfileScreen() {
   const [vipPrice, setVipPrice] = useState('');
   const [vipDuration, setVipDuration] = useState<'monthly' | 'lifetime'>('monthly');
 
-  const onRefresh = React.useCallback(async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     // Simulate refresh
     setTimeout(() => setRefreshing(false), 1000);

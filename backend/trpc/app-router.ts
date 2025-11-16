@@ -1,4 +1,4 @@
-import type { User } from '../../hooks/auth-store';
+import type {} from '../../hooks/auth-store';
 
 // Social Media Types
 export interface SocialPost {
@@ -16,7 +16,7 @@ export interface SocialPost {
   images?: string[];
 }
 
-export interface UserProfile {
+export interface Profile {
   id: string;
   username: string;
   email: string;
@@ -126,13 +126,13 @@ export interface AppRouter {
   };
 
   account: {
-    getUserProfile: {
+    getProfile: {
       input: {};
-      output: UserProfile;
+      output: Profile;
     };
-    updateUserProfile: {
-      input: Partial<UserProfile>;
-      output: ApiResponse<{ profile: UserProfile }>;
+    updateProfile: {
+      input: Partial<Profile>;
+      output: ApiResponse<{ profile: Profile }>;
     };
     getSecuritySettings: {
       input: {};

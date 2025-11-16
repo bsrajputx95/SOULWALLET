@@ -1,4 +1,5 @@
-import React, { Component, ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import React, { Component } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
@@ -29,7 +30,7 @@ export class ErrorBoundary extends Component<Props, State> {
     };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  override componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     // Log error to console in development
     if (__DEV__) {
       console.error('Error Boundary caught an error:', error, errorInfo);
@@ -49,7 +50,7 @@ export class ErrorBoundary extends Component<Props, State> {
     });
   };
 
-  render() {
+  override render() {
     if (this.state.hasError) {
       return (
         <View style={styles.container}>

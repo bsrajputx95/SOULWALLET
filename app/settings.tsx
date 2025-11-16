@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  Share,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -24,6 +24,7 @@ import {
   Share2,
   Link,
 } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
@@ -43,6 +44,7 @@ export default function SettingsScreen() {
     privateKey: 'No wallet connected',
     mnemonic: 'No wallet connected',
   };
+  const hasWallet = !!user?.walletAddress;
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -55,12 +57,37 @@ export default function SettingsScreen() {
 
   const shareWallet = async () => {
     try {
-      await Share.share({
-        message: `My Solana wallet address: ${walletData.publicKey}`,
+      const shareData = {
         title: 'My Wallet Address',
-      });
+        text: `My Solana wallet address: ${walletData.publicKey}`,
+        url: `solana:${walletData.publicKey}`,
+      };
+
+      // Use Web Share API if available, otherwise fallback to clipboard
+      if (Platform.OS === 'web' && navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        // Fallback: copy to clipboard and show alert
+        await Clipboard.setStringAsync(shareData.text);
+        Alert.alert(
+          'Wallet Address Copied',
+          'Your wallet address has been copied to clipboard',
+          [{ text: 'OK' }]
+        );
+      }
     } catch (error) {
       if (__DEV__) console.error('Error sharing:', error);
+      // Fallback: copy to clipboard
+      try {
+        await Clipboard.setStringAsync(walletData.publicKey);
+        Alert.alert(
+          'Wallet Address Copied',
+          'Your wallet address has been copied to clipboard',
+          [{ text: 'OK' }]
+        );
+      } catch (clipboardError) {
+        if (__DEV__) console.error('Failed to copy to clipboard:', clipboardError);
+      }
     }
   };
 
@@ -152,7 +179,31 @@ export default function SettingsScreen() {
           </View>
         </NeonCard>
 
+        {/* Gating: prompt to create/import if no wallet */}
+        {!hasWallet && (
+          <NeonCard style={styles.warningCard}>
+            <Text style={styles.warningTitle}>Wallet Not Connected</Text>
+            <Text style={styles.warningText}>
+              Add or import a wallet to access wallet settings and support.
+            </Text>
+            <View style={{ marginTop: SPACING.s }}>
+              <NeonButton
+                title="Create Wallet"
+                onPress={() => router.push('/solana-setup')}
+                icon={<Wallet size={20} color={COLORS.textPrimary} />}
+              />
+              <NeonButton
+                title="Import Wallet"
+                onPress={() => router.push('/solana-setup')}
+                style={{ marginTop: SPACING.s }}
+                icon={<Key size={20} color={COLORS.textPrimary} />}
+              />
+            </View>
+          </NeonCard>
+        )}
+
         {/* Wallet Section */}
+        {hasWallet && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Wallet Information</Text>
           
@@ -253,8 +304,10 @@ export default function SettingsScreen() {
             icon={<Share2 size={20} color={COLORS.textPrimary} />}
           />
         </View>
+        )}
 
         {/* Account Linking Section */}
+        {hasWallet && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account Linking</Text>
           
@@ -270,8 +323,10 @@ export default function SettingsScreen() {
             <Link size={16} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
+        )}
 
         {/* Support Section */}
+        {hasWallet && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Support & Help</Text>
           
@@ -293,14 +348,17 @@ export default function SettingsScreen() {
             <ExternalLink size={16} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
+        )}
 
         {/* Warning */}
-        <NeonCard style={styles.warningCard}>
-          <Text style={styles.warningTitle}>⚠️ Security Warning</Text>
-          <Text style={styles.warningText}>
-            Never share your private key or recovery phrase with anyone. Soul Wallet will never ask for this information.
-          </Text>
-        </NeonCard>
+        {hasWallet && (
+          <NeonCard style={styles.warningCard}>
+            <Text style={styles.warningTitle}>⚠️ Security Warning</Text>
+            <Text style={styles.warningText}>
+              Never share your private key or recovery phrase with anyone. Soul Wallet will never ask for this information.
+            </Text>
+          </NeonCard>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

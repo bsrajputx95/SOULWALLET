@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import createContextHook from '@/lib/create-context-hook';
-import { getSecureItem, setSecureItem, deleteSecureItem } from '@/lib/secure-storage';
+import { getSecureItem, setSecureItem, deleteSecureItem, SecureStorage } from '@/lib/secure-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { trpcClient } from '@/lib/trpc';
+
+import type {
+  ParsedAccountData
+} from '@solana/web3.js';
 import { 
   Connection, 
   PublicKey, 
@@ -8,8 +14,7 @@ import {
   Transaction, 
   SystemProgram, 
   LAMPORTS_PER_SOL,
-  sendAndConfirmTransaction,
-  ParsedAccountData
+  sendAndConfirmTransaction
 } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { Platform } from 'react-native';
@@ -20,6 +25,51 @@ let getAssociatedTokenAddress: any;
 let createAssociatedTokenAccountInstruction: any;
 let createTransferInstruction: any;
 let getAccount: any;
+
+// RPC Endpoint Failover Configuration
+const RPC_ENDPOINTS = [
+  'https://api.mainnet-beta.solana.com',
+  'https://solana-api.projectserum.com',
+  'https://rpc.ankr.com/solana',
+  process.env.EXPO_PUBLIC_SOLANA_RPC_URL,
+].filter(Boolean);
+
+let currentRpcIndex = 0;
+
+// Create connection with failover
+async function createConnection(): Promise<Connection> {
+  const maxAttempts = RPC_ENDPOINTS.length;
+  let attempts = 0;
+  
+  while (attempts < maxAttempts) {
+    const endpoint = RPC_ENDPOINTS[currentRpcIndex];
+    if (!endpoint) {
+      currentRpcIndex = (currentRpcIndex + 1) % RPC_ENDPOINTS.length;
+      attempts++;
+      continue;
+    }
+    
+    const connection = new Connection(endpoint, 'confirmed');
+    
+    try {
+      // Test connection with timeout
+      await Promise.race([
+        connection.getVersion(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+      ]);
+      console.log('✅ Connected to RPC:', endpoint);
+      return connection;
+    } catch (error) {
+      console.warn('⚠️ RPC failed:', endpoint, error instanceof Error ? error.message : 'Unknown error');
+      currentRpcIndex = (currentRpcIndex + 1) % RPC_ENDPOINTS.length;
+      attempts++;
+    }
+  }
+  
+  // If all endpoints fail, return a connection anyway (offline mode)
+  console.warn('⚠️ All RPC endpoints failed. Running in offline mode.');
+  return new Connection(RPC_ENDPOINTS[0] || 'https://api.mainnet-beta.solana.com', 'confirmed');
+}
 
 // Dynamically import SPL token functions only on native platforms
 const loadSplTokenFunctions = async () => {
@@ -58,10 +108,11 @@ interface SolanaWalletState {
   tokenBalances: TokenBalance[];
   isLoading: boolean;
   connection: Connection;
+  needsUnlock?: boolean;
 }
 
-const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const STORAGE_KEY = 'solana_wallet_private_key';
+const ENCRYPTED_MARKER_KEY = 'wallet_is_encrypted';
 
 // Popular Solana tokens with their mint addresses
 const POPULAR_TOKENS = {
@@ -92,41 +143,45 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     balance: 0,
     tokenBalances: [],
     isLoading: false,
-    connection: new Connection(SOLANA_RPC_URL, 'confirmed')
+    connection: new Connection('https://api.mainnet-beta.solana.com', 'confirmed'), // Temporary, will be replaced by failover
+    needsUnlock: false,
   });
 
   // Load wallet from storage on mount
   useEffect(() => {
     const initializeWallet = async () => {
       await loadSplTokenFunctions();
+      
+      // Initialize connection with failover
+      const connection = await createConnection();
+      setState(prev => ({ ...prev, connection }));
+      
       await loadWallet();
     };
     initializeWallet();
   }, []);
 
+  // Sync wallet address with backend
+  const syncWalletAddressToBackend = async (publicKey: string) => {
+    try {
+      await trpcClient.user.updateWalletAddress.mutate({ walletAddress: publicKey });
+      console.log('✅ Wallet address synced to backend:', publicKey);
+    } catch (error) {
+      // Silent fail - backend sync is not critical for wallet functionality
+      if (__DEV__) console.warn('⚠️ Failed to sync wallet to backend:', error);
+    }
+  };
+
   // Load wallet from secure storage
   const loadWallet = async () => {
     try {
       setState(prev => ({ ...prev, isLoading: true }));
-      const privateKeyString = await getSecureItem(STORAGE_KEY);
-      
-      if (privateKeyString) {
-        const privateKeyBytes = bs58.decode(privateKeyString);
-        const wallet = Keypair.fromSecretKey(privateKeyBytes);
-        const publicKey = wallet.publicKey.toString();
-        
-        setState(prev => ({ 
-          ...prev, 
-          wallet, 
-          publicKey,
-          isLoading: false 
-        }));
-        
-        // Load balances
-        await refreshBalances(wallet);
-      } else {
-        setState(prev => ({ ...prev, isLoading: false }));
+      const isEncrypted = await AsyncStorage.getItem(ENCRYPTED_MARKER_KEY);
+      if (isEncrypted === 'true') {
+        setState(prev => ({ ...prev, isLoading: false, needsUnlock: true }));
+        return;
       }
+      setState(prev => ({ ...prev, isLoading: false }));
     } catch (error) {
       if (__DEV__) console.error('Error loading wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
@@ -134,56 +189,80 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     }
   };
 
-  // Create new wallet
-  const createWallet = async () => {
+  const unlockWallet = async (password: string) => {
+    try {
+      setState(prev => ({ ...prev, isLoading: true }));
+      const privateKeyString = await SecureStorage.getDecryptedPrivateKey(password);
+      if (!privateKeyString) {
+        setState(prev => ({ ...prev, isLoading: false }));
+        throw new Error('No encrypted wallet found');
+      }
+      const privateKeyBytes = bs58.decode(privateKeyString);
+      const wallet = Keypair.fromSecretKey(privateKeyBytes);
+      const publicKey = wallet.publicKey.toString();
+      setState(prev => ({ ...prev, wallet, publicKey, isLoading: false, needsUnlock: false }));
+      await syncWalletAddressToBackend(publicKey);
+      await refreshBalances(wallet);
+      return wallet;
+    } catch (error) {
+      setState(prev => ({ ...prev, isLoading: false }));
+      throw error;
+    }
+  };
+
+  const createWalletEncrypted = async (password: string) => {
     try {
       setState(prev => ({ ...prev, isLoading: true }));
       const wallet = Keypair.generate();
       const privateKeyString = bs58.encode(wallet.secretKey);
       const publicKey = wallet.publicKey.toString();
-      
-      await setSecureItem(STORAGE_KEY, privateKeyString);
-      
-      setState(prev => ({ 
-        ...prev, 
-        wallet, 
-        publicKey,
-        isLoading: false 
-      }));
-      
-      console.log('New wallet created:', publicKey);
+
+      await SecureStorage.setEncryptedPrivateKey(privateKeyString, password);
+      await AsyncStorage.setItem(ENCRYPTED_MARKER_KEY, 'true');
+      await deleteSecureItem(STORAGE_KEY);
+
+      setState(prev => ({ ...prev, wallet, publicKey, isLoading: false, needsUnlock: false }));
+      await syncWalletAddressToBackend(publicKey);
+      console.log('New encrypted wallet created:', publicKey);
       return wallet;
     } catch (error) {
-      if (__DEV__) console.error('Error creating wallet:', error);
+      if (__DEV__) console.error('Error creating encrypted wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
-      throw new Error('Failed to create wallet. Please try again.');
+      throw new Error('Failed to create encrypted wallet. Please try again.');
     }
   };
 
-  // Import wallet from private key
-  const importWallet = async (privateKeyString: string) => {
+  
+
+  
+
+  const importWalletEncrypted = async (privateKeyString: string, password: string) => {
     try {
       setState(prev => ({ ...prev, isLoading: true }));
       const privateKeyBytes = bs58.decode(privateKeyString);
       const wallet = Keypair.fromSecretKey(privateKeyBytes);
       const publicKey = wallet.publicKey.toString();
-      
-      await setSecureItem(STORAGE_KEY, privateKeyString);
-      
+
+      await SecureStorage.setEncryptedPrivateKey(privateKeyString, password);
+      await AsyncStorage.setItem(ENCRYPTED_MARKER_KEY, 'true');
+      await deleteSecureItem(STORAGE_KEY);
+
       setState(prev => ({ 
         ...prev, 
         wallet, 
         publicKey,
-        isLoading: false 
+        isLoading: false,
+        needsUnlock: false,
       }));
-      
+
+      await syncWalletAddressToBackend(publicKey);
       await refreshBalances(wallet);
-      console.log('Wallet imported:', publicKey);
+      console.log('Encrypted wallet imported:', publicKey);
       return wallet;
     } catch (error) {
-      if (__DEV__) console.error('Error importing wallet:', error);
+      if (__DEV__) console.error('Error importing encrypted wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
-      throw new Error('Invalid private key. Please check and try again.');
+      throw new Error('Invalid private key or password.');
     }
   };
 
@@ -200,7 +279,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       const solBalanceInSol = solBalance / LAMPORTS_PER_SOL;
       
       // Get token balances (only if TOKEN_PROGRAM_ID is available)
-      let tokenBalances: TokenBalance[] = [];
+      const tokenBalances: TokenBalance[] = [];
       
       if (TOKEN_PROGRAM_ID) {
         try {
@@ -219,15 +298,20 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
                 ([_, data]) => data.mint === mint
               );
               
-              tokenBalances.push({
+              const tokenBalance: TokenBalance = {
                 mint,
                 symbol: tokenData?.[0] || mint.slice(0, 8),
                 name: tokenData?.[1].name || 'Unknown Token',
                 balance: tokenInfo.tokenAmount.amount,
                 decimals: tokenInfo.tokenAmount.decimals,
-                logo: tokenData?.[1].logo,
                 uiAmount: tokenInfo.tokenAmount.uiAmount
-              });
+              };
+              
+              if (tokenData?.[1].logo) {
+                tokenBalance.logo = tokenData[1].logo;
+              }
+              
+              tokenBalances.push(tokenBalance);
             }
           }
         } catch (error) {
@@ -251,8 +335,8 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     }
   };
 
-  // Send SOL
-  const sendSol = async (toAddress: string, amount: number) => {
+  // Send SOL with simulation and enhanced security
+  const sendSol = async (toAddress: string, amount: number): Promise<string> => {
     if (!state.wallet) throw new Error('No wallet connected');
     
     try {
@@ -261,40 +345,157 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       const toPublicKey = new PublicKey(toAddress);
       const lamports = amount * LAMPORTS_PER_SOL;
       
+      // Create transaction
       const transaction = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: state.wallet.publicKey,
           toPubkey: toPublicKey,
-          lamports
+          lamports,
         })
       );
       
-      const signature = await sendAndConfirmTransaction(
+      // SIMULATE FIRST
+      const simulation = await simulateTransaction(transaction);
+      if (!simulation.success) {
+        throw new Error(`Simulation failed: ${simulation.error}`);
+      }
+      console.log('✅ Simulation passed');
+      
+      // Estimate fees
+      const fee = await estimateTransactionFee(transaction);
+      
+      // Check balance
+      const required = (lamports + fee) / LAMPORTS_PER_SOL;
+      if (state.balance < required) {
+        throw new Error(`Insufficient balance. Required: ${required} SOL`);
+      }
+      
+      const CONFIRMATION_TIMEOUT_MS = 60000;
+      const confirmationPromise = sendAndConfirmTransaction(
         state.connection,
         transaction,
-        [state.wallet]
+        [state.wallet],
+        { commitment: 'confirmed' }
       );
+      const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Transaction confirmation timeout')), CONFIRMATION_TIMEOUT_MS));
+      const signature = await Promise.race([confirmationPromise, timeoutPromise]);
       
-      console.log('SOL transfer successful:', signature);
+      console.log('✅ Transaction confirmed:', signature);
       
-      // Refresh balances after successful transfer
+      // Wait for finalization
+      await waitForFinalization(signature);
       await refreshBalances();
       
       setState(prev => ({ ...prev, isLoading: false }));
       return signature;
-      
     } catch (error: any) {
-      if (__DEV__) console.error('Error sending SOL:', error);
+      console.error('❌ Transaction failed:', error);
       setState(prev => ({ ...prev, isLoading: false }));
+      throw new Error(`Transaction failed: ${error.message}`);
+    }
+  };
+
+  // Wait for transaction finalization
+  const waitForFinalization = async (signature: string, maxAttempts: number = 30): Promise<void> => {
+    for (let i = 0; i < maxAttempts; i++) {
+      const status = await state.connection.getSignatureStatus(signature);
       
-      // Provide user-friendly error messages
-      if (error?.message?.includes('insufficient funds')) {
-        throw new Error('Insufficient SOL balance for this transaction.');
-      } else if (error?.message?.includes('invalid')) {
-        throw new Error('Invalid recipient address. Please check and try again.');
-      } else {
-        throw new Error('Transaction failed. Please check your network connection and try again.');
+      if (status.value?.confirmationStatus === 'finalized') {
+        console.log('✅ Finalized');
+        return;
       }
+      
+      if (status.value?.err) {
+        throw new Error(`Failed: ${JSON.stringify(status.value.err)}`);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    console.warn('⚠️ Not finalized after max attempts');
+  };
+
+  // Simulate transaction before sending
+  const simulateTransaction = async (transaction: Transaction): Promise<{
+    success: boolean;
+    error?: string;
+    logs?: string[];
+    unitsConsumed?: number;
+  }> => {
+    if (!state.wallet) throw new Error('No wallet connected');
+    
+    try {
+      const { blockhash } = await state.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = state.wallet.publicKey;
+      
+      const simulation = await state.connection.simulateTransaction(transaction);
+      
+      if (simulation.value.err) {
+        return {
+          success: false,
+          error: JSON.stringify(simulation.value.err),
+          logs: simulation.value.logs || [],
+        };
+      }
+      
+      const result: {
+        success: boolean;
+        error?: string;
+        logs?: string[];
+        unitsConsumed?: number;
+      } = {
+        success: true,
+        logs: simulation.value.logs || [],
+      };
+      
+      if (simulation.value.unitsConsumed !== undefined) {
+        result.unitsConsumed = simulation.value.unitsConsumed;
+      }
+      
+      return result;
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const simulateTransactionComprehensive = async (
+    transaction: Transaction
+  ): Promise<{ success: boolean; error?: string; logs?: string[]; unitsConsumed?: number; accountChanges?: any[] }> => {
+    if (!state.wallet) throw new Error('No wallet connected')
+    try {
+      const { blockhash, lastValidBlockHeight } = await state.connection.getLatestBlockhash('finalized')
+      transaction.recentBlockhash = blockhash
+      transaction.feePayer = state.wallet.publicKey
+      const simulation = await state.connection.simulateTransaction(transaction, {
+        sigVerify: true,
+        commitment: 'confirmed',
+      } as any)
+      if (simulation.value.err) {
+        return { success: false, error: JSON.stringify(simulation.value.err), logs: simulation.value.logs || [] }
+      }
+      const accountChanges = simulation.value.accounts?.map((account: any, index: number) => ({
+        index,
+        lamports: account?.lamports || 0,
+        owner: account?.owner?.toString(),
+        data: account?.data,
+      }))
+      return { success: true, logs: simulation.value.logs || [], unitsConsumed: simulation.value.unitsConsumed, accountChanges }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  }
+
+  // Estimate transaction fee
+  const estimateTransactionFee = async (transaction: Transaction): Promise<number> => {
+    try {
+      const feeCalculator = await state.connection.getFeeForMessage(
+        transaction.compileMessage(),
+        'confirmed'
+      );
+      return feeCalculator.value || 5000;
+    } catch (error) {
+      console.error('Failed to estimate fee:', error);
+      return 5000;
     }
   };
 
@@ -317,20 +518,16 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
         state.wallet.publicKey
       );
       
-      // Get or create destination token account
-      const destinationTokenAccount = await getAssociatedTokenAddress(
-        mintPublicKey,
-        toPublicKey
-      );
+      const destinationTokenAccount = await getAssociatedTokenAddress(mintPublicKey, toPublicKey);
       
       const transaction = new Transaction();
       
-      // Check if destination token account exists
+      let destinationExists = true
       try {
-        await getAccount(state.connection, destinationTokenAccount);
+        await getAccount(state.connection, destinationTokenAccount)
       } catch (error: any) {
-        // If account doesn't exist, create it
         if (error.name === 'TokenAccountNotFoundError' || error.message?.includes('could not find account')) {
+          destinationExists = false
           transaction.add(
             createAssociatedTokenAccountInstruction(
               state.wallet.publicKey,
@@ -338,7 +535,9 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
               toPublicKey,
               mintPublicKey
             )
-          );
+          )
+        } else {
+          throw error
         }
       }
       
@@ -352,12 +551,26 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
           transferAmount
         )
       );
+
+      const sim = await simulateTransactionComprehensive(transaction)
+      if (!sim.success) {
+        throw new Error(`Simulation failed: ${sim.error}`)
+      }
+      const fee = await estimateTransactionFee(transaction)
+      const solBalance = await state.connection.getBalance(state.wallet.publicKey)
+      const requiredSol = fee + (destinationExists ? 0 : 2039280)
+      if (solBalance < requiredSol) {
+        throw new Error(`Insufficient SOL for transaction fees. Required: ${requiredSol / LAMPORTS_PER_SOL} SOL`)
+      }
       
-      const signature = await sendAndConfirmTransaction(
+      const CONFIRMATION_TIMEOUT_MS = 60000;
+      const confirmationPromise = sendAndConfirmTransaction(
         state.connection,
         transaction,
         [state.wallet]
       );
+      const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Transaction confirmation timeout')), CONFIRMATION_TIMEOUT_MS));
+      const signature = await Promise.race([confirmationPromise, timeoutPromise]);
       
       console.log('Token transfer successful:', signature);
       
@@ -384,6 +597,8 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     try {
       setState(prev => ({ ...prev, isLoading: true }));
       await deleteSecureItem(STORAGE_KEY);
+      await SecureStorage.deleteEncryptedPrivateKey();
+      await AsyncStorage.removeItem(ENCRYPTED_MARKER_KEY);
       
       setState({
         wallet: null,
@@ -404,6 +619,42 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     }
   };
   
+  // Execute swap using Jupiter
+  const executeSwap = async (swapTransactionBase64: string): Promise<string> => {
+    if (!state.wallet) throw new Error('No wallet connected');
+    
+    try {
+      setState(prev => ({ ...prev, isLoading: true }));
+      
+      // Deserialize the transaction
+      const transaction = Transaction.from(Buffer.from(swapTransactionBase64, 'base64'));
+      
+      // Sign and send the transaction
+      const signature = await sendAndConfirmTransaction(
+        state.connection,
+        transaction,
+        [state.wallet],
+        {
+          skipPreflight: false,
+          commitment: 'confirmed'
+        }
+      );
+      
+      console.log('Swap executed successfully:', signature);
+      
+      // Refresh balances after successful swap
+      await refreshBalances();
+      
+      setState(prev => ({ ...prev, isLoading: false }));
+      return signature;
+      
+    } catch (error) {
+      console.error('Error executing swap:', error);
+      setState(prev => ({ ...prev, isLoading: false }));
+      throw error;
+    }
+  };
+
   // Get all available tokens (wallet tokens + popular tokens)
   const getAvailableTokens = () => {
     const walletTokens = state.tokenBalances.map(token => ({
@@ -447,13 +698,14 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
   return {
     ...state,
-    createWallet,
-    importWallet,
-    loadWallet,
+    createWalletEncrypted,
+    importWalletEncrypted,
+    unlockWallet,
     deleteWallet,
     refreshBalances,
     sendSol,
     sendToken,
+    executeSwap,
     getTokenInfo,
     getAvailableTokens
   };

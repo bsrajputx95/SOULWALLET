@@ -1,11 +1,12 @@
 import React from 'react';
-import { StyleSheet, View, ViewProps } from 'react-native';
+import type { ViewProps } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SHADOWS } from '../constants/colors';
 import { BORDER_RADIUS, SPACING } from '../constants/theme';
 
 interface NeonCardProps extends ViewProps {
-  color?: string[];
+  color?: readonly [string, string, ...string[]];
   intensity?: 'low' | 'medium' | 'high';
   borderWidth?: number;
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -16,6 +16,7 @@ import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
 import { trpc } from '../../lib/trpc';
+import { useSocial } from '../../hooks/social-store';
 
 interface Comment {
   id: string;
@@ -24,6 +25,8 @@ interface Comment {
   timestamp: string;
   isVerified: boolean;
   profileImage?: string;
+  likes?: number;
+  createdAt?: string | number | Date;
 }
 
 export default function PostDetailScreen() {
@@ -32,31 +35,33 @@ export default function PostDetailScreen() {
   const [newComment, setNewComment] = useState('');
   const [isLiked, setIsLiked] = useState(false);
   const [isReposted, setIsReposted] = useState(false);
+  const { posts } = useSocial();
+  const [userVote, setUserVote] = useState<null | 'agree' | 'disagree'>(null);
+  const [agreeCount, setAgreeCount] = useState<number>(80);
+  const [disagreeCount, setDisagreeCount] = useState<number>(20);
+  const [sortMode, setSortMode] = useState<'new' | 'old' | 'liked'>('new');
 
-  // @ts-ignore - Mock tRPC queries for development
-  const postQuery = trpc.social.getPost.useQuery(
+  // Mock tRPC queries for development - using any to bypass type checking
+  const postQuery = (trpc as any).social.getPost.useQuery(
     { postId: id! },
     { enabled: !!id }
   );
 
-  // @ts-ignore - Mock tRPC mutations for development
-  const likePostMutation = trpc.social.likePost.useMutation({
-    onSuccess: (data) => {
+  const likePostMutation = (trpc as any).social.likePost.useMutation({
+    onSuccess: (data: any) => {
       setIsLiked(data.liked);
       postQuery.refetch();
     },
   });
 
-  // @ts-ignore - Mock tRPC mutations for development
-  const repostMutation = trpc.social.repost.useMutation({
-    onSuccess: (data) => {
+  const repostMutation = (trpc as any).social.repost.useMutation({
+    onSuccess: (data: any) => {
       setIsReposted(data.reposted);
       postQuery.refetch();
     },
   });
 
-  // @ts-ignore - Mock tRPC mutations for development
-  const addCommentMutation = trpc.social.addComment.useMutation({
+  const addCommentMutation = (trpc as any).social.addComment.useMutation({
     onSuccess: () => {
       setNewComment('');
       postQuery.refetch();
@@ -109,6 +114,48 @@ export default function PostDetailScreen() {
     });
   };
 
+  // Determine post data up front (server or offline), keeping hooks stable
+  const offlinePost = posts.find(p => p.id === String(id));
+  const post: any = postQuery.data ?? (offlinePost ? {
+    ...offlinePost,
+    commentsList: [
+      {
+        id: 'c1',
+        username: 'ghostxsol',
+        content: 'Solid take! Agree on the targets. 🚀',
+        timestamp: '1h ago',
+        isVerified: true,
+        profileImage: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61',
+        likes: 24,
+        createdAt: Date.now() - 60 * 60 * 1000,
+      },
+      {
+        id: 'c2',
+        username: 'alphaWolf',
+        content: 'Watching this closely. Entry looks clean.',
+        timestamp: '45m ago',
+        isVerified: true,
+        profileImage: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e',
+        likes: 15,
+        createdAt: Date.now() - 45 * 60 * 1000,
+      },
+    ],
+    agreeCount: 80,
+    disagreeCount: 20,
+  } : null);
+
+  // Sync vote counts from server/offline post if available
+  useEffect(() => {
+    if (!post) return;
+    if (typeof (post as any)?.agreeCount === 'number') {
+      setAgreeCount((post as any).agreeCount);
+    }
+    if (typeof (post as any)?.disagreeCount === 'number') {
+      setDisagreeCount((post as any).disagreeCount);
+    }
+  }, [post]);
+
+  // Early returns AFTER hooks to keep hook order stable
   if (postQuery.isLoading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -124,7 +171,7 @@ export default function PostDetailScreen() {
     );
   }
 
-  if (postQuery.error || !postQuery.data) {
+  if (postQuery.error && !offlinePost) {
     return (
       <SafeAreaView style={styles.container}>
         <Stack.Screen
@@ -139,7 +186,66 @@ export default function PostDetailScreen() {
     );
   }
 
-  const post = postQuery.data;
+  if (!post) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Stack.Screen
+          options={{
+            headerShown: false,
+          }}
+        />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Post not found</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const totalVotes = Math.max(agreeCount + disagreeCount, 0.0001);
+  const agreePercent = Math.round((agreeCount / totalVotes) * 100);
+  const disagreePercent = 100 - agreePercent;
+
+  const handleVote = (choice: 'agree' | 'disagree') => {
+    setUserVote(prev => {
+      if (prev === choice) return prev;
+      if (prev === null) {
+        if (choice === 'agree') setAgreeCount(c => c + 1);
+        else setDisagreeCount(c => c + 1);
+      } else {
+        if (choice === 'agree') {
+          setAgreeCount(c => c + 1);
+          setDisagreeCount(c => Math.max(c - 1, 0));
+        } else {
+          setDisagreeCount(c => c + 1);
+          setAgreeCount(c => Math.max(c - 1, 0));
+        }
+      }
+      return choice;
+    });
+  };
+
+  // Helpers for sorting
+  const parseRelativeTime = (text?: string) => {
+    if (!text) return 0;
+    const m = text.match(/(\d+)\s*([smhdw])\s*ago/i);
+    if (!m) return 0;
+    const n = parseInt(m[1], 10);
+    const unit = m[2];
+    const msMap: Record<string, number> = {
+      s: 1000,
+      m: 60 * 1000,
+      h: 60 * 60 * 1000,
+      d: 24 * 60 * 60 * 1000,
+      w: 7 * 24 * 60 * 60 * 1000,
+    };
+    return Date.now() - n * (msMap[unit] || 0);
+  };
+
+  const getTime = (c: Comment, idx: number) => {
+    if (c.createdAt) return new Date(c.createdAt).getTime();
+    const rel = parseRelativeTime(c.timestamp);
+    return rel || idx; // fallback
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -223,6 +329,34 @@ export default function PostDetailScreen() {
             </View>
           </View>
         </NeonCard>
+        {/* Index: Agree / Disagree (moved above comment input) */}
+        <NeonCard style={styles.indexCard}>
+          <View style={styles.indexHeaderRow}>
+            <Text style={styles.indexTitle}>Index</Text>
+          </View>
+          <View style={styles.voteRow}>
+            <TouchableOpacity
+              style={[styles.voteChip, userVote === 'agree' && styles.voteChipSelected]}
+              onPress={() => handleVote('agree')}
+            >
+              <Text style={[styles.voteText, userVote === 'agree' && styles.voteTextSelected]}>Agree</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.voteChip, userVote === 'disagree' && styles.voteChipSelected]}
+              onPress={() => handleVote('disagree')}
+            >
+              <Text style={[styles.voteText, userVote === 'disagree' && styles.voteTextSelected]}>Disagree</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.indexBarContainer}>
+            <View style={[styles.indexBarAgree, { flex: Math.max(agreeCount, 0) }]} />
+            <View style={[styles.indexBarDisagree, { flex: Math.max(disagreeCount, 0) }]} />
+          </View>
+          <View style={styles.indexBarLabels}>
+            <Text style={styles.indexBarLabel}>Agree {agreePercent}%</Text>
+            <Text style={styles.indexBarLabel}>Disagree {disagreePercent}%</Text>
+          </View>
+        </NeonCard>
         
         {/* Add Comment */}
         <NeonCard style={styles.commentInputContainer}>
@@ -251,13 +385,40 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           </View>
         </NeonCard>
-        
+
         {/* Comments */}
         <View style={styles.commentsSection}>
           <Text style={styles.commentsTitle}>Comments ({post.commentsList?.length || 0})</Text>
+          <View style={styles.sortRow}>
+            <TouchableOpacity
+              style={[styles.sortChip, sortMode === 'new' && styles.sortChipSelected]}
+              onPress={() => setSortMode('new')}
+            >
+              <Text style={[styles.sortText, sortMode === 'new' && styles.sortTextSelected]}>New</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortChip, sortMode === 'old' && styles.sortChipSelected]}
+              onPress={() => setSortMode('old')}
+            >
+              <Text style={[styles.sortText, sortMode === 'old' && styles.sortTextSelected]}>Old</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortChip, sortMode === 'liked' && styles.sortChipSelected]}
+              onPress={() => setSortMode('liked')}
+            >
+              <Text style={[styles.sortText, sortMode === 'liked' && styles.sortTextSelected]}>Most liked</Text>
+            </TouchableOpacity>
+          </View>
           
           {post.commentsList && post.commentsList.length > 0 ? (
-            post.commentsList.map((comment: Comment) => (
+            [...post.commentsList].sort((a: Comment, b: Comment) => {
+              if (sortMode === 'liked') {
+                return (b.likes || 0) - (a.likes || 0);
+              }
+              const ta = getTime(a, 0);
+              const tb = getTime(b, 0);
+              return sortMode === 'new' ? tb - ta : ta - tb;
+            }).map((comment: Comment) => (
               <NeonCard key={comment.id} style={styles.commentContainer}>
                 <View style={styles.commentHeader}>
                   <View style={styles.profileContainer}>
@@ -283,6 +444,13 @@ export default function PostDetailScreen() {
                 </View>
                 
                 <Text style={styles.commentContent}>{formatContent(comment.content)}</Text>
+                {typeof comment.likes === 'number' && (
+                  <View style={{ marginTop: SPACING.xs }}>
+                    <Text style={{ ...FONTS.phantomRegular, color: COLORS.textSecondary, fontSize: 12 }}>
+                      {comment.likes} likes
+                    </Text>
+                  </View>
+                )}
               </NeonCard>
             ))
           ) : (
@@ -420,6 +588,66 @@ const styles = StyleSheet.create({
   commentInputContainer: {
     marginBottom: SPACING.m,
   },
+  indexCard: {
+    marginTop: SPACING.m,
+    marginBottom: SPACING.m,
+  },
+  indexHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.s,
+  },
+  indexTitle: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+  },
+  voteRow: {
+    flexDirection: 'row',
+    marginBottom: SPACING.s,
+  },
+  voteChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: BORDER_RADIUS.small,
+    backgroundColor: COLORS.cardBackground,
+    marginRight: SPACING.s,
+  },
+  voteChipSelected: {
+    backgroundColor: COLORS.solana + '30',
+  },
+  voteText: {
+    ...FONTS.phantomSemiBold,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  voteTextSelected: {
+    color: COLORS.textPrimary,
+  },
+  indexBarContainer: {
+    flexDirection: 'row',
+    height: 12,
+    borderRadius: BORDER_RADIUS.small,
+    overflow: 'hidden',
+    backgroundColor: COLORS.cardBackground,
+  },
+  indexBarAgree: {
+    backgroundColor: COLORS.success + '70',
+  },
+  indexBarDisagree: {
+    backgroundColor: COLORS.error + '70',
+  },
+  indexBarLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: SPACING.xs,
+  },
+  indexBarLabel: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
   commentInputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -452,6 +680,28 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 18,
     marginBottom: SPACING.m,
+  },
+  sortRow: {
+    flexDirection: 'row',
+    marginBottom: SPACING.s,
+  },
+  sortChip: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: BORDER_RADIUS.small,
+    backgroundColor: COLORS.cardBackground,
+    marginRight: SPACING.s,
+  },
+  sortChipSelected: {
+    backgroundColor: COLORS.solana + '30',
+  },
+  sortText: {
+    ...FONTS.phantomSemiBold,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  sortTextSelected: {
+    color: COLORS.textPrimary,
   },
   commentContainer: {
     marginBottom: SPACING.m,

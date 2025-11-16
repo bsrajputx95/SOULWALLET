@@ -6,7 +6,7 @@
  */
 
 interface EnvConfig {
-  EXPO_PUBLIC_RORK_API_BASE_URL: string;
+  EXPO_PUBLIC_API_URL: string;
 }
 
 interface ValidationResult {
@@ -17,9 +17,9 @@ interface ValidationResult {
 
 const REQUIRED_ENV_VARS = [
   {
-    key: 'EXPO_PUBLIC_RORK_API_BASE_URL',
+    key: 'EXPO_PUBLIC_API_URL',
     description: 'Backend API base URL',
-    example: 'https://api.rork.ai or http://localhost:3000',
+    example: 'https://api.example.com or http://localhost:3001',
     required: true,
   },
 ] as const;
@@ -118,7 +118,7 @@ export function validateEnvironmentOrThrow(): void {
       '3. Restart your development server (npx expo start)',
       '',
       'Example .env file:',
-      'EXPO_PUBLIC_RORK_API_BASE_URL=http://localhost:3000',
+      'EXPO_PUBLIC_API_URL=http://localhost:3001',
       '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     ].join('\n');
 
@@ -166,5 +166,5 @@ export function getOptionalEnv(key: string, fallback: string = ''): string {
  * Type-safe environment configuration
  */
 export const env: EnvConfig = {
-  EXPO_PUBLIC_RORK_API_BASE_URL: getRequiredEnv('EXPO_PUBLIC_RORK_API_BASE_URL'),
+  EXPO_PUBLIC_API_URL: getRequiredEnv('EXPO_PUBLIC_API_URL'),
 };

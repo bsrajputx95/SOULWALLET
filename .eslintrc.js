@@ -1,24 +1,65 @@
 module.exports = {
-  extends: ['expo'],
+  root: true,
+  extends: [
+    'expo',
+    'eslint:recommended',
+    'plugin:@typescript-eslint/recommended',
+    'plugin:react/recommended',
+    'plugin:react-hooks/recommended',
+  ],
   parser: '@typescript-eslint/parser',
-  plugins: ['@typescript-eslint'],
+  parserOptions: {
+    ecmaVersion: 2021,
+    sourceType: 'module',
+    ecmaFeatures: {
+      jsx: true,
+    },
+  },
+  plugins: ['@typescript-eslint', 'react', 'react-hooks'],
+  settings: {
+    react: {
+      version: 'detect',
+    },
+  },
   rules: {
-    // Allow ts-ignore comments (we're using them for mock tRPC)
-    '@typescript-eslint/ban-ts-comment': 'off',
-    // Don't require explicit return types
+    // TypeScript
+    '@typescript-eslint/ban-ts-comment': ['warn', {
+      'ts-ignore': 'allow-with-description',
+      'ts-expect-error': 'allow-with-description',
+    }],
     '@typescript-eslint/explicit-module-boundary-types': 'off',
-    // Allow any types for now
-    '@typescript-eslint/no-explicit-any': 'off',
-    // Allow unused vars that start with underscore
-    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-    // Allow require statements
+    '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-unused-vars': [
+      'warn',
+      {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      },
+    ],
     '@typescript-eslint/no-var-requires': 'off',
-    // React Native specific
-    'react-native/no-inline-styles': 'off',
+    '@typescript-eslint/consistent-type-imports': [
+      'warn',
+      { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
+    ],
+    
+    // React
+    'react/react-in-jsx-scope': 'off',
+    'react/prop-types': 'off',
+    'react/display-name': 'off',
+    'react-hooks/rules-of-hooks': 'error',
+    'react-hooks/exhaustive-deps': 'warn',
+    
     // General
-    'no-console': 'off',
+    'no-console': ['warn', { allow: ['warn', 'error', 'info'] }],
     'prefer-const': 'warn',
     'no-var': 'error',
+    'no-unused-expressions': ['error', {
+      allowShortCircuit: true,
+      allowTernary: true,
+    }],
+    'eqeqeq': ['error', 'always', { null: 'ignore' }],
+    'no-debugger': 'warn',
   },
   ignorePatterns: [
     'node_modules/',

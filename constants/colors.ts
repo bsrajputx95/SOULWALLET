@@ -5,6 +5,8 @@ export const COLORS = {
   // Text colors
   textPrimary: "#FFFFFF",
   textSecondary: "#B0B7C3",
+  text: "#FFFFFF", // Alias for textPrimary
+  primary: "#9945FF", // Primary brand color
   
   // Chain-specific colors
   solana: "#9945FF", // Neon Purple/Violet
@@ -17,16 +19,17 @@ export const COLORS = {
   
   // UI elements
   cardBackground: "#131A35",
+  inputBackground: "#1A2332", // Added missing inputBackground
   border: "#2A3441",
   success: "#00FF7F", // Fluorescent Green
   error: "#FF3D71",
   warning: "#FFAA00",
   
   // Gradients
-  gradientPurple: ["#9945FF", "#14F195"],
-  gradientBlue: ["#2775CA", "#14F195"],
-  gradientPink: ["#FF3D71", "#9945FF"],
-  gradientGold: ["#FFD700", "#FFA500"],
+  gradientPurple: ["#9945FF", "#14F195"] as const,
+  gradientBlue: ["#2775CA", "#14F195"] as const,
+  gradientPink: ["#FF3D71", "#9945FF"] as const,
+  gradientGold: ["#FFD700", "#FFA500"] as const,
   
   // Neon glows
   glowPurple: "#9945FF80",

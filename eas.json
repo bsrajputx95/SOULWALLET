@@ -1,0 +1,179 @@
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "gradleCommand": ":app:assembleDebug",
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Debug"
+      },
+      "env": {
+        "NODE_ENV": "development",
+        "EXPO_PUBLIC_API_URL": "http://localhost:3001",
+        "EXPO_PUBLIC_SENTRY_DSN": "",
+        "EXPO_PUBLIC_DEV_MODE": "true",
+        "EXPO_PUBLIC_LOG_LEVEL": "debug"
+      },
+      "cache": {
+        "key": "development-cache"
+      }
+    },
+    "staging": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "ios": {
+        "buildType": "simulator"
+      },
+      "env": {
+        "NODE_ENV": "staging",
+        "EXPO_PUBLIC_API_URL": "https://staging-api.soulwallet.com",
+        "EXPO_PUBLIC_SENTRY_DSN": "your-staging-sentry-dsn-here"
+      },
+      "cache": {
+        "key": "staging-cache"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      },
+      "env": {
+        "NODE_ENV": "staging",
+        "EXPO_PUBLIC_API_URL": "https://staging-api.soulwallet.com",
+        "EXPO_PUBLIC_SENTRY_DSN": "${SENTRY_DSN_STAGING}",
+        "EXPO_PUBLIC_DEV_MODE": "false",
+        "EXPO_PUBLIC_LOG_LEVEL": "info"
+      },
+      "cache": {
+        "key": "preview-cache"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "aab",
+        "gradleCommand": ":app:bundleRelease",
+        "keystore": {
+          "keyAlias": "your-key-alias",
+          "keyPassword": "your-key-password",
+          "storePassword": "your-store-password",
+          "keystorePath": "./android/keystore.jks"
+        },
+        "googleServicesFile": "./android/google-services.json",
+        "gradleCommand": ":app:bundleRelease --minifyEnabled true --shrinkResources true"
+      },
+      "ios": {
+        "buildType": "release",
+        "appleId": "your-apple-id@example.com",
+        "ascAppId": "your-app-store-connect-app-id",
+        "appleTeamId": "your-apple-team-id",
+        "provisioningProfilePath": "./ios/provisioning-profile.mobileprovision",
+        "certificatePath": "./ios/certificates/distribution.p12",
+        "certificatePassword": "your-certificate-password",
+        "pushCertificatePath": "./ios/certificates/push.p12",
+        "pushCertificatePassword": "your-push-certificate-password",
+        "entitlements": {
+          "aps-environment": "production",
+          "com.apple.developer.applesignin": ["Default"],
+          "com.apple.developer.networking.wifi-info": true
+        },
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "bundleIdentifier": "com.soulwallet.app",
+        "provisioningProfilePath": "./ios/SoulWallet_Production.mobileprovision",
+        "certificateDistributionType": "app-store"
+      },
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_PUBLIC_API_URL": "https://api.soulwallet.com",
+        "EXPO_PUBLIC_SENTRY_DSN": "your-production-sentry-dsn-here",
+        "EXPO_PUBLIC_DEV_MODE": "false",
+        "EXPO_PUBLIC_LOG_LEVEL": "warn",
+        "EXPO_PUBLIC_ENABLE_SOCIAL_FEATURES": "true",
+        "EXPO_PUBLIC_FEATURE_SIMULATION_MODE": "false"
+      },
+      "updates": {
+        "enabled": true,
+        "checkAutomatically": "ON_LOAD",
+        "fallbackToCacheTimeout": 0
+      },
+      "autoIncrement": true,
+      "prebuildCommand": "npm run prebuild",
+      "postbuildCommand": "npm run postbuild",
+      "assetBundlePatterns": [
+        "**/*"
+      ],
+      "version": {
+        "strategy": "auto"
+      },
+      "optimization": "speed",
+      "minify": true,
+      "obfuscate": true,
+      "stripDebugSymbols": true,
+      "enableProguard": true,
+      "autoIncrement": "version",
+      "versionCode": "auto",
+      "buildNumber": "auto",
+      "resourceClass": "large",
+      "cache": {
+        "key": "production-cache"
+      }
+    },
+    "production-apk": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease --minifyEnabled true --shrinkResources true"
+      },
+      "cache": {
+        "key": "production-apk-cache"
+      }
+    }
+  },
+  "update": {
+    "development": {
+      "channel": "development"
+    },
+    "preview": {
+      "channel": "staging"
+    },
+    "production": {
+      "channel": "production"
+    },
+    "checkAutomatically": "ON_LOAD",
+    "fallbackToCacheTimeout": 0
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "production",
+        "releaseStatus": "completed",
+        "rollout": 0.1
+      },
+      "ios": {
+        "appleId": "${APPLE_ID}",
+        "ascAppId": "${ASC_APP_ID}",
+        "appleTeamId": "${APPLE_TEAM_ID}",
+        "sku": "soulwallet-prod",
+        "language": "en-US",
+        "companyName": "SoulWallet"
+      }
+    }
+  }
+}
