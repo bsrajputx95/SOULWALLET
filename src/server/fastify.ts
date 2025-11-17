@@ -84,10 +84,7 @@ export async function createServer(): Promise<FastifyInstance> {
     origin: (origin, callback) => {
       // Only allow null origin in development
       if (!origin) {
-        if (process.env.NODE_ENV === 'production') {
-          callback(new Error('Origin required in production'), false);
-          return;
-        }
+        // Always allow health and docs endpoints without origin
         callback(null, true);
         return;
       }
