@@ -183,12 +183,18 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Add additional security headers
   server.addHook('onRequest', async (request, reply) => {
+    const url = request.url || '';
+    const allowlistPath = url.startsWith('/health') || url.startsWith('/api/docs') || url.startsWith('/api');
+    
+    // Skip origin checks for public endpoints
+    if (allowlistPath) {
+      return;
+    }
+    
     if (process.env.NODE_ENV === 'production') {
       const origin = request.headers.origin;
       const hasMobileHeader = !!request.headers['x-mobile-app-version'];
-      const url = request.url || '';
-      const allowlistPath = url.startsWith('/health') || url.startsWith('/api/docs');
-      if (!origin && !hasMobileHeader && !allowlistPath) {
+      if (!origin && !hasMobileHeader) {
         reply.code(403).send({ error: 'Forbidden', message: 'Null origin not allowed' });
         return;
       }
