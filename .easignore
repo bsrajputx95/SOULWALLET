@@ -1,0 +1,18 @@
+# EAS Build ignore file
+# Exclude backend and server-only files
+
+prisma/
+backend/
+server.js
+pm2.config.js
+docker-compose*.yml
+Dockerfile
+*.md
+audits/
+docs/
+scripts/backup-database.sh
+scripts/restore-database.sh
+.env.production
+.env.production.example
+.env.production.generated
+test-api.js

@@ -39,7 +39,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "rm -rf node_modules dist .expo android/build ios/build",
-    "postinstall": "prisma generate",
+    "postinstall": "test -d prisma && prisma generate || echo Skipping prisma",
     "prepare": "husky install || true",
     "validate-env": "tsx scripts/validate-env.ts",
     "deploy:staging": "npm run build && npm run db:migrate:deploy && npm run server:start",
@@ -61,7 +61,9 @@
     "docker:logs": "docker-compose logs -f backend",
     "logs:tail": "tail -f logs/combined.log",
     "logs:error": "tail -f logs/error.log",
-    "monitor": "pm2 monit"
+    "monitor": "pm2 monit",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@craftzdog/react-native-buffer": "^6.1.0",
@@ -138,7 +140,7 @@
     "react-native-safe-area-context": "4.12.0",
     "react-native-screens": "~4.4.0",
     "react-native-share": "^12.2.0",
-    "react-native-svg": "^15.8.0",
+    "react-native-svg": "^15.15.0",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "~0.19.13",
     "readable-stream": "^4.7.0",

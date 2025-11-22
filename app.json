@@ -49,6 +49,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": "https://rork.com/"
+      },
+      "eas": {
+        "projectId": "88930aea-d253-4dc4-bea2-6c6f0867ec62"
+      }
+    },
+    "owner": "soul-wallet"
   }
 }
