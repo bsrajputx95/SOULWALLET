@@ -1,6 +1,9 @@
 # EAS Build ignore file
 # Exclude backend and server-only files
 
+# Exclude native folders for CNG/Prebuild
+/android
+
 prisma/
 backend/
 server.js

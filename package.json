@@ -77,8 +77,8 @@
     "@nkzw/create-context-hook": "^1.1.0",
     "@prisma/client": "^6.16.3",
     "@react-native-async-storage/async-storage": "1.23.1",
-    "@react-navigation/bottom-tabs": "^7.4.2",
-    "@react-navigation/native": "^7.1.6",
+    "@react-navigation/bottom-tabs": "^7.2.0",
+    "@react-navigation/native": "^7.0.14",
     "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.2",
     "@tanstack/react-query": "^5.83.0",
@@ -140,7 +140,7 @@
     "react-native-safe-area-context": "4.12.0",
     "react-native-screens": "~4.4.0",
     "react-native-share": "^12.2.0",
-    "react-native-svg": "^15.15.0",
+    "react-native-svg": "15.8.0",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "~0.19.13",
     "readable-stream": "^4.7.0",
@@ -184,6 +184,48 @@
     "copy-anything": "^3.0.5",
     "parse5": "^7.1.2",
     "jsdom": "^22.1.0"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "@fastify/cors",
+          "@fastify/helmet",
+          "@fastify/jwt",
+          "@fastify/rate-limit",
+          "@hono/trpc-server",
+          "@prisma/client",
+          "@trpc/client",
+          "@trpc/react-query",
+          "@trpc/server",
+          "bcryptjs",
+          "fastify",
+          "hono",
+          "ioredis",
+          "jsonwebtoken",
+          "node-cache",
+          "node-cron",
+          "nodemailer",
+          "pino",
+          "pino-pretty",
+          "prisma",
+          "rate-limiter-flexible",
+          "rotating-file-stream",
+          "sharp",
+          "bull",
+          "crypto-js",
+          "metro"
+        ],
+        "listUnknownPackages": false
+      }
+    },
+    "install": {
+      "exclude": [
+        "metro",
+        "metro-resolver",
+        "metro-config"
+      ]
+    }
   },
   "private": true
 }
