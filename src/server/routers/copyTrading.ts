@@ -271,7 +271,7 @@ export const copyTradingRouter = router({
           trader = await prisma.traderProfile.create({
             data: {
               walletAddress: input.walletAddress,
-              name: `Trader ${input.walletAddress.slice(0, 6)}...${input.walletAddress.slice(-4)}`,
+              username: `Trader ${input.walletAddress.slice(0, 6)}...${input.walletAddress.slice(-4)}`,
               bio: 'Auto-created trader profile',
               totalROI: 0,
               winRate: 0,
