@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Dependencies
 # ==========================================
-FROM node:20.18.1-alpine AS dependencies
+FROM node:22-alpine AS dependencies
 
 # Install system dependencies
 RUN apk add --no-cache libc6-compat python3 make g++ wget && \
@@ -18,12 +18,12 @@ RUN npm ci --only=production --legacy-peer-deps && \
     npx prisma generate && \
     npm cache clean --force
 
-RUN npm prune --production
+RUN npm prune --production --legacy-peer-deps
 
 # ==========================================
 # Stage 2: Builder
 # ==========================================
-FROM node:20.18.1-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -46,7 +46,7 @@ RUN npm run server:build
 # ==========================================
 # Stage 3: Runner
 # ==========================================
-FROM node:20.18.1-alpine AS runner
+FROM node:22-alpine AS runner
 
 LABEL org.opencontainers.image.title="SoulWallet Backend"
 LABEL org.opencontainers.image.description="Solana wallet backend API"
