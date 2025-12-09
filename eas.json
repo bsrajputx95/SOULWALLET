@@ -7,12 +7,14 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "node": "22.x",
       "android": {
         "buildType": "apk"
       }
     },
     "beta-apk": {
       "distribution": "internal",
+      "node": "22.x",
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
@@ -29,6 +31,7 @@
     },
     "preview": {
       "distribution": "internal",
+      "node": "22.x",
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
@@ -47,6 +50,7 @@
       "distribution": "store",
       "autoIncrement": true,
       "credentialsSource": "remote",
+      "node": "22.x",
       "android": {
         "buildType": "app-bundle"
       },
