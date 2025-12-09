@@ -827,7 +827,7 @@ export async function createServer(): Promise<FastifyInstance> {
   });
 
   // Error handler
-  server.setErrorHandler((error, _request, reply) => {
+  server.setErrorHandler((error: any, _request, reply) => {
     server.log.error(error);
 
     // Handle validation errors

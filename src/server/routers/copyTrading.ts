@@ -102,10 +102,10 @@ export const copyTradingRouter = router({
         // Get USDC balance
         let usdcBalance = 0;
         try {
-          const rpcUrl = process.env.HELIUS_RPC_URL || 
+          const rpcUrl = process.env.HELIUS_RPC_URL ||
             `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
           const connection = new Connection(rpcUrl, 'confirmed');
-          
+
           const walletPubkey = new PublicKey(publicKey);
           const usdcMint = new PublicKey(USDC_MINT);
           const ata = await getAssociatedTokenAddress(usdcMint, walletPubkey);
@@ -271,7 +271,7 @@ export const copyTradingRouter = router({
           trader = await prisma.traderProfile.create({
             data: {
               walletAddress: input.walletAddress,
-              displayName: `Trader ${input.walletAddress.slice(0, 6)}...${input.walletAddress.slice(-4)}`,
+              name: `Trader ${input.walletAddress.slice(0, 6)}...${input.walletAddress.slice(-4)}`,
               bio: 'Auto-created trader profile',
               totalROI: 0,
               winRate: 0,
