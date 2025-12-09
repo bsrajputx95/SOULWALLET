@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -7,7 +7,8 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Image } from 'react-native';
+  Image,
+  TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Mail, Lock, ArrowLeft, Shield } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -19,10 +20,17 @@ import { NeonButton } from '../../components/NeonButton';
 import { GlowingText } from '../../components/GlowingText';
 import { trpcClient } from '../../lib/trpc';
 
+// Local logo asset
+const logoImage = require('../../assets/images/icon-rounded.png');
+
 type Step = 'email' | 'otp' | 'password';
+
+// Rate limit cooldown in seconds
+const RATE_LIMIT_COOLDOWN = 60;
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+  const otpInputRef = useRef<TextInput>(null);
   
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
@@ -32,9 +40,41 @@ export default function ForgotPasswordScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [rateLimitCooldown, setRateLimitCooldown] = useState(0);
+
+  // Auto-focus OTP input when step changes to 'otp'
+  useEffect(() => {
+    if (step === 'otp' && otpInputRef.current) {
+      const timer = setTimeout(() => {
+        otpInputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [step]);
+
+  // Rate limit cooldown timer
+  useEffect(() => {
+    if (rateLimitCooldown > 0) {
+      const timer = setTimeout(() => {
+        setRateLimitCooldown(rateLimitCooldown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [rateLimitCooldown]);
+
+  // Check if rate limited
+  const isRateLimited = rateLimitCooldown > 0;
 
   const handleRequestReset = async () => {
     try {
+      // Check rate limit
+      if (isRateLimited) {
+        setError(`Please wait ${rateLimitCooldown} seconds before requesting another code`);
+        return;
+      }
+      
       setIsLoading(true);
       setError(null);
       setMessage(null);
@@ -57,10 +97,23 @@ export default function ForgotPasswordScreen() {
 
       await trpcClient.auth.requestPasswordReset.mutate({ email: email.trim() });
       
+      // Set rate limit cooldown
+      setRateLimitCooldown(RATE_LIMIT_COOLDOWN);
+      
       setMessage('If an account with this email exists, you will receive a verification code');
       setStep('otp');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send reset code');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to send reset code';
+      
+      // Handle rate limit error from server
+      if (errorMessage.toLowerCase().includes('rate limit') || 
+          errorMessage.toLowerCase().includes('too many requests') ||
+          errorMessage.toLowerCase().includes('try again')) {
+        setRateLimitCooldown(RATE_LIMIT_COOLDOWN);
+        setError(`Too many requests. Please wait ${RATE_LIMIT_COOLDOWN} seconds.`);
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -229,8 +282,9 @@ export default function ForgotPasswordScreen() {
 
         <View style={styles.logoContainer}>
           <Image 
-            source={{ uri: 'https://r2-pub.rork.com/attachments/q78x34dzrm35cfaz7pqli' }} 
+            source={logoImage} 
             style={styles.logoImage}
+            accessibilityLabel="Soul Wallet Logo"
           />
         </View>
 
@@ -276,6 +330,8 @@ export default function ForgotPasswordScreen() {
                 keyboardType="number-pad"
                 maxLength={6}
                 leftIcon={<Shield size={20} color={COLORS.textSecondary} />}
+                accessibilityLabel="Verification code input"
+                accessibilityHint="Enter the 6-digit code sent to your email"
               />
               <NeonButton
                 title="Verify Code"
@@ -285,11 +341,15 @@ export default function ForgotPasswordScreen() {
                 fullWidth
               />
               <TouchableOpacity 
-                style={styles.resendContainer}
+                style={[styles.resendContainer, isRateLimited && styles.resendDisabled]}
                 onPress={handleRequestReset}
-                disabled={isLoading}
+                disabled={isLoading || isRateLimited}
               >
-                <Text style={styles.resendText}>Didn't receive the code? Resend</Text>
+                <Text style={[styles.resendText, isRateLimited && styles.resendTextDisabled]}>
+                  {isRateLimited 
+                    ? `Resend code in ${rateLimitCooldown}s` 
+                    : "Didn't receive the code? Resend"}
+                </Text>
               </TouchableOpacity>
             </>
           )}
@@ -393,6 +453,10 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontSize: 14,
     fontFamily: FONTS.medium },
+  resendDisabled: {
+    opacity: 0.5 },
+  resendTextDisabled: {
+    color: COLORS.textSecondary },
   loginContainer: {
     flexDirection: 'row',
     justifyContent: 'center',

@@ -38,6 +38,7 @@ import * as Haptics from 'expo-haptics';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
+import { logger } from '../lib/client-logger';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 import { useAuth } from '../hooks/auth-store';
 import { trpc } from '../lib/trpc';
@@ -198,10 +199,10 @@ export default function SendReceiveScreen() {
           to: sendAddress,
           from: publicKey || undefined,
         });
-        if (__DEV__) console.log('Transaction recorded in database:', signature);
+        if (__DEV__) logger.info('Transaction recorded in database:', signature);
       } catch (recordError) {
         // Don't fail the whole operation if recording fails
-        if (__DEV__) console.error('Failed to record transaction:', recordError);
+        if (__DEV__) logger.error('Failed to record transaction:', recordError);
       }
 
       setSendSuccess(`Transaction successful! Signature: ${signature.slice(0, 8)}...${signature.slice(-8)}`);
@@ -212,7 +213,7 @@ export default function SendReceiveScreen() {
       await refreshBalances();
       
     } catch (error: any) {
-      if (__DEV__) console.error('Send transaction failed:', error);
+      if (__DEV__) logger.error('Send transaction failed:', error);
       setSendError(error.message || 'Transaction failed. Please try again.');
     } finally {
       setIsSending(false);
@@ -604,7 +605,7 @@ export default function SendReceiveScreen() {
         );
       }
     } catch (error) {
-      console.log('Share cancelled or failed:', error);
+      logger.info('Share cancelled or failed:', error);
       // Fallback: copy to clipboard
       try {
         await Clipboard.setStringAsync(walletAddress);
@@ -614,7 +615,7 @@ export default function SendReceiveScreen() {
           [{ text: 'OK' }]
         );
       } catch (clipboardError) {
-        console.error('Failed to copy to clipboard:', clipboardError);
+        logger.error('Failed to copy to clipboard:', clipboardError);
       }
     }
   };
@@ -629,7 +630,7 @@ export default function SendReceiveScreen() {
         setSendAddress(clipboardText);
       }
     } catch (error) {
-      if (__DEV__) console.error('Failed to paste:', error);
+      if (__DEV__) logger.error('Failed to paste:', error);
     }
   };
 
@@ -642,7 +643,7 @@ export default function SendReceiveScreen() {
         Alert.alert('Success', 'Address copied to clipboard');
       }
     } catch (error) {
-      if (__DEV__) console.error('Failed to copy address:', error);
+      if (__DEV__) logger.error('Failed to copy address:', error);
       Alert.alert('Error', 'Failed to copy address');
     }
   };

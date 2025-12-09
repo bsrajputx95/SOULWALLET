@@ -11,11 +11,10 @@ import {
   Alert,
   Modal,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import {
-  ArrowLeft,
   User,
   Mail,
   Phone,
@@ -23,42 +22,33 @@ import {
   Lock,
   Users,
   Camera,
-  Globe,
   Languages,
   ShieldCheck,
   DollarSign,
   X,
   Check,
+  Smartphone,
+  Trash2,
 } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { useAuth } from '../hooks/auth-store';
+import { trpc } from '../lib/trpc';
 
 import { useAccount } from '../hooks/account-store';
 
 export default function AccountScreen() {
-  const router = useRouter();
-  const { user } = useAuth();
-
   const { 
     profile, 
-    securitySettings, 
-    walletInfo, 
-    isLoading: isAccountLoading, 
     isUpdating: isAccountUpdating,
     updateProfile,
     updateSecurity,
-    resetPassword: resetUserPassword,
-    getWalletPrivateKey,
-    getWalletRecoveryPhrase,
-    generateBackupCodes,
-    uploadProfileImage,
-    profileError,
-    securityError,
-    walletError
   } = useAccount();
+
+  // Session management
+  const sessionsQuery = trpc.auth.getSessions.useQuery();
+  const revokeSessionMutation = trpc.auth.revokeSession.useMutation();
+  const deleteAccountMutation = trpc.account.deleteAccount.useMutation();
   
   const [firstName, setFirstName] = useState(profile?.firstName || '');
   const [lastName, setLastName] = useState(profile?.lastName || '');
@@ -77,16 +67,34 @@ export default function AccountScreen() {
   const [resetOtp, setResetOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isPasswordResetLoading, setIsPasswordResetLoading] = useState(false);
+
+  // Password Reset Mutations
+  const requestPasswordResetMutation = trpc.auth.requestPasswordReset.useMutation();
+  const verifyOtpMutation = trpc.auth.verifyOtp.useMutation();
+  const resetPasswordMutation = trpc.auth.resetPassword.useMutation();
+
+  // 2FA TOTP Mutations
+  const setupTOTPMutation = trpc.account.setupTOTP.useMutation();
+  const enableTOTPMutation = trpc.account.enableTOTP.useMutation();
+  const disableTOTPMutation = trpc.account.disableTOTP.useMutation();
 
   // Two-Factor Authentication Modal States
   const [showTwoFactorModal, setShowTwoFactorModal] = useState(false);
-  const [twoFactorStep, setTwoFactorStep] = useState(1); // 1: current verification, 2: new method setup, 3: confirmation
-  const [currentVerificationMethod, setCurrentVerificationMethod] = useState('email'); // 'email' or 'phone'
-  const [currentVerificationValue, setCurrentVerificationValue] = useState('');
-  const [currentVerificationOtp, setCurrentVerificationOtp] = useState('');
-  const [newTwoFactorMethod, setNewTwoFactorMethod] = useState('email'); // 'email' or 'phone'
-  const [newTwoFactorValue, setNewTwoFactorValue] = useState('');
-  const [newTwoFactorOtp, setNewTwoFactorOtp] = useState('');
+  const [twoFactorStep, setTwoFactorStep] = useState(1); // 1: password, 2: QR code, 3: verify code, 4: backup codes
+  const [totpPassword, setTotpPassword] = useState('');
+  const [totpQrCode, setTotpQrCode] = useState('');
+  const [totpBackupCodes, setTotpBackupCodes] = useState<string[]>([]);
+  const [totpVerifyCode, setTotpVerifyCode] = useState('');
+  const [isTwoFactorLoading, setIsTwoFactorLoading] = useState(false);
+
+  // Delete Account Modal States
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  
+
 
   // Scroll tracking for header animation
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -127,7 +135,7 @@ export default function AccountScreen() {
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
     {
       useNativeDriver: false,
-      listener: (event) => {
+      listener: (event: any) => {
         const currentScrollY = event.nativeEvent.contentOffset.y;
         const scrollDirection = currentScrollY > lastScrollY.current ? 'down' : 'up';
         
@@ -177,68 +185,134 @@ export default function AccountScreen() {
 
   const handleSetupTwoFactor = async () => {
     if (twoFactorEnabled) {
+      // Show disable 2FA modal - will need password and TOTP code
       Alert.alert(
         'Disable 2FA',
-        'Are you sure you want to disable two-factor authentication?',
+        'To disable two-factor authentication, you will need to enter your password and a verification code from your authenticator app.',
         [
           { text: 'Cancel', style: 'cancel' },
           { 
-            text: 'Disable', 
-            onPress: async () => {
-              try {
-                await updateSecurity({ twoFactorEnabled: false });
-                setTwoFactorEnabled(false);
-                Alert.alert('Success', '2FA disabled successfully!');
-              } catch (error) {
-                Alert.alert('Error', 'Failed to disable 2FA.');
-              }
+            text: 'Continue', 
+            onPress: () => {
+              // For now, show a prompt for password and code
+              // In a full implementation, this would be a proper modal
+              Alert.prompt(
+                'Enter Password',
+                'Enter your account password:',
+                async (password) => {
+                  if (!password) return;
+                  Alert.prompt(
+                    'Enter 2FA Code',
+                    'Enter the 6-digit code from your authenticator app:',
+                    async (code) => {
+                      if (!code) return;
+                      try {
+                        await disableTOTPMutation.mutateAsync({ password, code });
+                        setTwoFactorEnabled(false);
+                        Alert.alert('Success', '2FA disabled successfully!');
+                      } catch (error: any) {
+                        Alert.alert('Error', error?.message || 'Failed to disable 2FA.');
+                      }
+                    },
+                    'plain-text'
+                  );
+                },
+                'secure-text'
+              );
             }
           },
         ]
       );
     } else {
+      // Start 2FA setup flow
       setShowTwoFactorModal(true);
       setTwoFactorStep(1);
-      setCurrentVerificationValue('');
-      setCurrentVerificationOtp('');
-      setNewTwoFactorValue('');
-      setNewTwoFactorOtp('');
+      setTotpPassword('');
+      setTotpQrCode('');
+      setTotpBackupCodes([]);
+      setTotpVerifyCode('');
     }
   };
 
-  const copyToClipboard = (text: string, label: string) => {
-    if (__DEV__) console.log(`Copied ${label}:`, text);
-    Alert.alert('Copied', `${label} copied to clipboard`);
-  };
+
 
   // Password Reset Modal Handlers
-  const handlePasswordResetNext = () => {
+  const handlePasswordResetNext = async () => {
     if (passwordResetStep === 1) {
       if (!resetContactValue.trim()) {
         Alert.alert('Error', `Please enter your ${resetContactMethod}`);
         return;
       }
-      // Simulate sending OTP
-      Alert.alert('OTP Sent', `Verification code sent to your ${resetContactMethod}`);
-      setPasswordResetStep(2);
+      
+      // Only email is supported for now
+      if (resetContactMethod === 'phone') {
+        Alert.alert('Not Available', 'Phone verification is not yet available. Please use email.');
+        return;
+      }
+
+      try {
+        setIsPasswordResetLoading(true);
+        await requestPasswordResetMutation.mutateAsync({ email: resetContactValue.trim().toLowerCase() });
+        Alert.alert('OTP Sent', 'A verification code has been sent to your email');
+        setPasswordResetStep(2);
+      } catch (error: any) {
+        Alert.alert('Error', error?.message || 'Failed to send verification code');
+      } finally {
+        setIsPasswordResetLoading(false);
+      }
     } else if (passwordResetStep === 2) {
       if (!resetOtp.trim() || resetOtp.length !== 6) {
         Alert.alert('Error', 'Please enter a valid 6-digit OTP');
         return;
       }
-      setPasswordResetStep(3);
+
+      try {
+        setIsPasswordResetLoading(true);
+        const result = await verifyOtpMutation.mutateAsync({ 
+          email: resetContactValue.trim().toLowerCase(), 
+          otp: resetOtp.trim() 
+        });
+        if (result.isValid) {
+          setPasswordResetStep(3);
+        } else {
+          Alert.alert('Error', 'Invalid verification code');
+        }
+      } catch (error: any) {
+        Alert.alert('Error', error?.message || 'Invalid or expired verification code');
+      } finally {
+        setIsPasswordResetLoading(false);
+      }
     } else if (passwordResetStep === 3) {
-      if (!newPassword.trim() || newPassword.length < 6) {
-        Alert.alert('Error', 'Password must be at least 6 characters');
+      if (!newPassword.trim() || newPassword.length < 8) {
+        Alert.alert('Error', 'Password must be at least 8 characters');
         return;
       }
       if (newPassword !== confirmPassword) {
         Alert.alert('Error', 'Passwords do not match');
         return;
       }
-      // Simulate password reset
-      Alert.alert('Success', 'Password reset successfully!');
-      setShowPasswordResetModal(false);
+
+      try {
+        setIsPasswordResetLoading(true);
+        await resetPasswordMutation.mutateAsync({
+          email: resetContactValue.trim().toLowerCase(),
+          otp: resetOtp.trim(),
+          newPassword: newPassword,
+          confirmPassword: confirmPassword,
+        });
+        Alert.alert('Success', 'Password reset successfully! Please log in with your new password.');
+        setShowPasswordResetModal(false);
+        // Reset form state
+        setPasswordResetStep(1);
+        setResetContactValue('');
+        setResetOtp('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } catch (error: any) {
+        Alert.alert('Error', error?.message || 'Failed to reset password');
+      } finally {
+        setIsPasswordResetLoading(false);
+      }
     }
   };
 
@@ -248,46 +322,136 @@ export default function AccountScreen() {
     }
   };
 
-  // Two-Factor Authentication Modal Handlers
-  const handleTwoFactorNext = () => {
+  // Two-Factor Authentication Modal Handlers (TOTP)
+  const handleTwoFactorNext = async () => {
     if (twoFactorStep === 1) {
-      if (!currentVerificationValue.trim()) {
-        Alert.alert('Error', `Please enter your ${currentVerificationMethod}`);
+      // Step 1: Verify password and get QR code
+      if (!totpPassword.trim()) {
+        Alert.alert('Error', 'Please enter your password');
         return;
       }
-      // Simulate sending OTP
-      Alert.alert('OTP Sent', `Verification code sent to your ${currentVerificationMethod}`);
-      setTwoFactorStep(2);
+      
+      try {
+        setIsTwoFactorLoading(true);
+        const result = await setupTOTPMutation.mutateAsync({ password: totpPassword });
+        setTotpQrCode(result.qrCodeUrl);
+        setTotpBackupCodes(result.backupCodes);
+        setTwoFactorStep(2);
+      } catch (error: any) {
+        Alert.alert('Error', error?.message || 'Failed to setup 2FA');
+      } finally {
+        setIsTwoFactorLoading(false);
+      }
     } else if (twoFactorStep === 2) {
-      if (!currentVerificationOtp.trim() || currentVerificationOtp.length !== 6) {
-        Alert.alert('Error', 'Please enter a valid 6-digit OTP');
-        return;
-      }
+      // Step 2: User has scanned QR code, move to verification
       setTwoFactorStep(3);
     } else if (twoFactorStep === 3) {
-      if (!newTwoFactorValue.trim()) {
-        Alert.alert('Error', `Please enter your ${newTwoFactorMethod} for 2FA`);
+      // Step 3: Verify the TOTP code
+      if (!totpVerifyCode.trim() || totpVerifyCode.length !== 6) {
+        Alert.alert('Error', 'Please enter a valid 6-digit code from your authenticator app');
         return;
       }
-      // Simulate sending OTP for new method
-      Alert.alert('OTP Sent', `Verification code sent to your new ${newTwoFactorMethod}`);
-      setTwoFactorStep(4);
+      
+      try {
+        setIsTwoFactorLoading(true);
+        await enableTOTPMutation.mutateAsync({ code: totpVerifyCode });
+        setTwoFactorStep(4);
+      } catch (error: any) {
+        Alert.alert('Error', error?.message || 'Invalid verification code');
+      } finally {
+        setIsTwoFactorLoading(false);
+      }
     } else if (twoFactorStep === 4) {
-      if (!newTwoFactorOtp.trim() || newTwoFactorOtp.length !== 6) {
-        Alert.alert('Error', 'Please enter a valid 6-digit OTP');
-        return;
-      }
-      // Simulate enabling 2FA
+      // Step 4: Show backup codes and finish
       setTwoFactorEnabled(true);
-      Alert.alert('Success', 'Two-Factor Authentication activated successfully!');
       setShowTwoFactorModal(false);
+      Alert.alert('Success', 'Two-Factor Authentication is now enabled!');
+      // Reset state
+      setTotpPassword('');
+      setTotpQrCode('');
+      setTotpBackupCodes([]);
+      setTotpVerifyCode('');
+      setTwoFactorStep(1);
     }
   };
 
   const handleTwoFactorBack = () => {
-    if (twoFactorStep > 1) {
+    if (twoFactorStep > 1 && twoFactorStep < 4) {
       setTwoFactorStep(twoFactorStep - 1);
     }
+  };
+
+  // Session Management Handlers
+  const handleRevokeSession = async (sessionId: string) => {
+    Alert.alert(
+      'Revoke Session',
+      'Are you sure you want to end this session? The device will be logged out.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revoke',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await revokeSessionMutation.mutateAsync({ sessionId });
+              sessionsQuery.refetch();
+              Alert.alert('Success', 'Session revoked successfully');
+            } catch (error: any) {
+              Alert.alert('Error', error?.message || 'Failed to revoke session');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Delete Account Handlers
+  const handleDeleteAccount = () => {
+    setShowDeleteAccountModal(true);
+    setDeletePassword('');
+    setDeleteConfirmText('');
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (!deletePassword.trim()) {
+      Alert.alert('Error', 'Please enter your password');
+      return;
+    }
+    if (deleteConfirmText !== 'DELETE MY ACCOUNT') {
+      Alert.alert('Error', 'Please type "DELETE MY ACCOUNT" to confirm');
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      await deleteAccountMutation.mutateAsync({
+        password: deletePassword,
+        confirmText: deleteConfirmText,
+      });
+      Alert.alert('Account Deleted', 'Your account has been permanently deleted.');
+      setShowDeleteAccountModal(false);
+      // The user will be logged out automatically since their session is invalidated
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Failed to delete account');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Format session info for display
+  const formatSessionInfo = (userAgent: string | null) => {
+    if (!userAgent) return 'Unknown Device';
+    if (userAgent.includes('iPhone') || userAgent.includes('iPad')) return 'iOS Device';
+    if (userAgent.includes('Android')) return 'Android Device';
+    if (userAgent.includes('Windows')) return 'Windows PC';
+    if (userAgent.includes('Mac')) return 'Mac';
+    if (userAgent.includes('Linux')) return 'Linux';
+    return 'Unknown Device';
+  };
+
+  const formatDate = (date: Date | string) => {
+    const d = new Date(date);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   return (
@@ -482,6 +646,53 @@ export default function AccountScreen() {
 
 
 
+        {/* Active Sessions */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Active Sessions</Text>
+          <Text style={styles.sectionDescription}>
+            Manage devices where you're currently logged in
+          </Text>
+          
+          {sessionsQuery.isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={COLORS.solana} />
+              <Text style={styles.loadingText}>Loading sessions...</Text>
+            </View>
+          ) : sessionsQuery.data?.sessions && sessionsQuery.data.sessions.length > 0 ? (
+            sessionsQuery.data.sessions.map((session: { id: string; ipAddress: string | null; userAgent: string | null; createdAt: Date; lastActivityAt: Date; current: boolean }) => (
+              <View key={session.id} style={styles.sessionItem}>
+                <View style={styles.sessionInfo}>
+                  <View style={styles.sessionHeader}>
+                    <Smartphone size={18} color={COLORS.textSecondary} />
+                    <Text style={styles.sessionDevice}>
+                      {formatSessionInfo(session.userAgent)}
+                    </Text>
+                    {session.current && (
+                      <View style={styles.currentBadge}>
+                        <Text style={styles.currentBadgeText}>Current</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.sessionDetails}>
+                    {session.ipAddress || 'Unknown IP'} • Last active: {formatDate(session.lastActivityAt)}
+                  </Text>
+                </View>
+                {!session.current && (
+                  <TouchableOpacity
+                    style={styles.revokeButton}
+                    onPress={() => handleRevokeSession(session.id)}
+                    disabled={revokeSessionMutation.isPending}
+                  >
+                    <Text style={styles.revokeButtonText}>Revoke</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))
+          ) : (
+            <Text style={styles.noSessionsText}>No active sessions found</Text>
+          )}
+        </View>
+
         {/* Social */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Social</Text>
@@ -493,6 +704,19 @@ export default function AccountScreen() {
             </View>
             <Text style={styles.settingArrow}>›</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Danger Zone */}
+        <View style={[styles.section, styles.dangerSection]}>
+          <Text style={[styles.sectionTitle, { color: COLORS.error }]}>Danger Zone</Text>
+          
+          <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+            <Trash2 size={20} color={COLORS.error} />
+            <Text style={styles.deleteAccountText}>Delete Account</Text>
+          </TouchableOpacity>
+          <Text style={styles.deleteAccountWarning}>
+            This action is permanent and cannot be undone.
+          </Text>
         </View>
 
         <View style={styles.bottomPadding} />
@@ -627,22 +851,32 @@ export default function AccountScreen() {
           </View>
 
           <View style={styles.modalFooter}>
-            {passwordResetStep > 1 && (
+            {passwordResetStep > 1 && !isPasswordResetLoading && (
               <TouchableOpacity style={styles.backButton} onPress={handlePasswordResetBack}>
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             )}
             
-            <TouchableOpacity style={styles.nextButton} onPress={handlePasswordResetNext}>
+            <TouchableOpacity 
+              style={[styles.nextButton, isPasswordResetLoading && styles.nextButtonDisabled]} 
+              onPress={handlePasswordResetNext}
+              disabled={isPasswordResetLoading}
+            >
               <Text style={styles.nextButtonText}>
-                {passwordResetStep === 1 ? 'Send Code' : passwordResetStep === 2 ? 'Verify' : 'Reset Password'}
+                {isPasswordResetLoading 
+                  ? 'Please wait...' 
+                  : passwordResetStep === 1 
+                    ? 'Send Code' 
+                    : passwordResetStep === 2 
+                      ? 'Verify' 
+                      : 'Reset Password'}
               </Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
       </Modal>
 
-      {/* Two-Factor Authentication Modal */}
+      {/* Two-Factor Authentication Modal (TOTP) */}
       <Modal
         visible={showTwoFactorModal}
         animationType="slide"
@@ -654,53 +888,28 @@ export default function AccountScreen() {
             <TouchableOpacity onPress={() => setShowTwoFactorModal(false)}>
               <X size={24} color={COLORS.textSecondary} />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Setup 2FA</Text>
+            <Text style={styles.modalTitle}>Setup Authenticator App</Text>
             <View style={{ width: 24 }} />
           </View>
 
-          <View style={styles.modalContent}>
+          <ScrollView style={styles.modalContent}>
             {twoFactorStep === 1 && (
               <>
                 <Text style={styles.modalDescription}>
-                  First, verify your current email or phone number
+                  Enter your password to begin setting up two-factor authentication with an authenticator app.
                 </Text>
                 
-                <View style={styles.methodSelector}>
-                  <TouchableOpacity
-                    style={[styles.methodButton, currentVerificationMethod === 'email' && styles.methodButtonActive]}
-                    onPress={() => setCurrentVerificationMethod('email')}
-                  >
-                    <Mail size={20} color={currentVerificationMethod === 'email' ? COLORS.textPrimary : COLORS.textSecondary} />
-                    <Text style={[styles.methodText, currentVerificationMethod === 'email' && styles.methodTextActive]}>Email</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[styles.methodButton, currentVerificationMethod === 'phone' && styles.methodButtonActive]}
-                    onPress={() => setCurrentVerificationMethod('phone')}
-                  >
-                    <Phone size={20} color={currentVerificationMethod === 'phone' ? COLORS.textPrimary : COLORS.textSecondary} />
-                    <Text style={[styles.methodText, currentVerificationMethod === 'phone' && styles.methodTextActive]}>Phone</Text>
-                  </TouchableOpacity>
-                </View>
-
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
-                    {currentVerificationMethod === 'email' ? 'Email Address' : 'Phone Number'}
-                  </Text>
+                  <Text style={styles.inputLabel}>Password</Text>
                   <View style={styles.inputContainer}>
-                    {currentVerificationMethod === 'email' ? (
-                      <Mail size={20} color={COLORS.textSecondary} />
-                    ) : (
-                      <Phone size={20} color={COLORS.textSecondary} />
-                    )}
+                    <Lock size={20} color={COLORS.textSecondary} />
                     <TextInput
                       style={styles.input}
-                      value={currentVerificationValue}
-                      onChangeText={setCurrentVerificationValue}
-                      placeholder={currentVerificationMethod === 'email' ? 'Enter your email' : 'Enter your phone number'}
+                      value={totpPassword}
+                      onChangeText={setTotpPassword}
+                      placeholder="Enter your password"
                       placeholderTextColor={COLORS.textSecondary}
-                      keyboardType={currentVerificationMethod === 'email' ? 'email-address' : 'phone-pad'}
-                      autoCapitalize="none"
+                      secureTextEntry
                     />
                   </View>
                 </View>
@@ -710,69 +919,47 @@ export default function AccountScreen() {
             {twoFactorStep === 2 && (
               <>
                 <Text style={styles.modalDescription}>
-                  Enter the verification code sent to your {currentVerificationMethod}
+                  Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
                 </Text>
                 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Verification Code</Text>
-                  <View style={styles.inputContainer}>
-                    <Lock size={20} color={COLORS.textSecondary} />
-                    <TextInput
-                      style={styles.input}
-                      value={currentVerificationOtp}
-                      onChangeText={setCurrentVerificationOtp}
-                      placeholder="Enter 6-digit code"
-                      placeholderTextColor={COLORS.textSecondary}
-                      keyboardType="number-pad"
-                      maxLength={6}
+                {totpQrCode ? (
+                  <View style={styles.qrCodeContainer}>
+                    <Image 
+                      source={{ uri: totpQrCode }} 
+                      style={styles.qrCode}
+                      resizeMode="contain"
                     />
                   </View>
-                </View>
+                ) : (
+                  <View style={styles.qrCodeContainer}>
+                    <Text style={styles.qrCodePlaceholder}>Loading QR Code...</Text>
+                  </View>
+                )}
+                
+                <Text style={[styles.modalDescription, { marginTop: SPACING.m }]}>
+                  After scanning, tap "Next" to verify the setup.
+                </Text>
               </>
             )}
 
             {twoFactorStep === 3 && (
               <>
                 <Text style={styles.modalDescription}>
-                  Choose your preferred method for two-factor authentication
+                  Enter the 6-digit code from your authenticator app to verify the setup.
                 </Text>
                 
-                <View style={styles.methodSelector}>
-                  <TouchableOpacity
-                    style={[styles.methodButton, newTwoFactorMethod === 'email' && styles.methodButtonActive]}
-                    onPress={() => setNewTwoFactorMethod('email')}
-                  >
-                    <Mail size={20} color={newTwoFactorMethod === 'email' ? COLORS.textPrimary : COLORS.textSecondary} />
-                    <Text style={[styles.methodText, newTwoFactorMethod === 'email' && styles.methodTextActive]}>Email</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[styles.methodButton, newTwoFactorMethod === 'phone' && styles.methodButtonActive]}
-                    onPress={() => setNewTwoFactorMethod('phone')}
-                  >
-                    <Phone size={20} color={newTwoFactorMethod === 'phone' ? COLORS.textPrimary : COLORS.textSecondary} />
-                    <Text style={[styles.methodText, newTwoFactorMethod === 'phone' && styles.methodTextActive]}>Phone</Text>
-                  </TouchableOpacity>
-                </View>
-
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
-                    {newTwoFactorMethod === 'email' ? 'Email for 2FA' : 'Phone for 2FA'}
-                  </Text>
+                  <Text style={styles.inputLabel}>Verification Code</Text>
                   <View style={styles.inputContainer}>
-                    {newTwoFactorMethod === 'email' ? (
-                      <Mail size={20} color={COLORS.textSecondary} />
-                    ) : (
-                      <Phone size={20} color={COLORS.textSecondary} />
-                    )}
+                    <ShieldCheck size={20} color={COLORS.textSecondary} />
                     <TextInput
                       style={styles.input}
-                      value={newTwoFactorValue}
-                      onChangeText={setNewTwoFactorValue}
-                      placeholder={newTwoFactorMethod === 'email' ? 'Enter email for 2FA' : 'Enter phone for 2FA'}
+                      value={totpVerifyCode}
+                      onChangeText={setTotpVerifyCode}
+                      placeholder="Enter 6-digit code"
                       placeholderTextColor={COLORS.textSecondary}
-                      keyboardType={newTwoFactorMethod === 'email' ? 'email-address' : 'phone-pad'}
-                      autoCapitalize="none"
+                      keyboardType="number-pad"
+                      maxLength={6}
                     />
                   </View>
                 </View>
@@ -781,48 +968,130 @@ export default function AccountScreen() {
 
             {twoFactorStep === 4 && (
               <>
-                <Text style={styles.modalDescription}>
-                  Enter the verification code sent to your new {newTwoFactorMethod}
-                </Text>
-                
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Verification Code</Text>
-                  <View style={styles.inputContainer}>
-                    <Lock size={20} color={COLORS.textSecondary} />
-                    <TextInput
-                      style={styles.input}
-                      value={newTwoFactorOtp}
-                      onChangeText={setNewTwoFactorOtp}
-                      placeholder="Enter 6-digit code"
-                      placeholderTextColor={COLORS.textSecondary}
-                      keyboardType="number-pad"
-                      maxLength={6}
-                    />
-                  </View>
-                </View>
-
                 <View style={styles.successMessage}>
                   <Check size={24} color={COLORS.solana} />
                   <Text style={styles.successText}>
-                    Almost done! Verify this code to activate 2FA
+                    2FA is now enabled!
                   </Text>
                 </View>
+                
+                <Text style={styles.modalDescription}>
+                  Save these backup codes in a safe place. You can use them to access your account if you lose your authenticator device.
+                </Text>
+                
+                <View style={styles.backupCodesContainer}>
+                  {totpBackupCodes.map((code, index) => (
+                    <View key={index} style={styles.backupCodeItem}>
+                      <Text style={styles.backupCodeText}>{code}</Text>
+                    </View>
+                  ))}
+                </View>
+                
+                <Text style={[styles.modalDescription, { color: COLORS.error, marginTop: SPACING.m }]}>
+                  ⚠️ These codes will only be shown once. Save them now!
+                </Text>
               </>
             )}
-          </View>
+          </ScrollView>
 
           <View style={styles.modalFooter}>
-            {twoFactorStep > 1 && (
+            {twoFactorStep > 1 && twoFactorStep < 4 && !isTwoFactorLoading && (
               <TouchableOpacity style={styles.backButton} onPress={handleTwoFactorBack}>
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             )}
             
-            <TouchableOpacity style={styles.nextButton} onPress={handleTwoFactorNext}>
+            <TouchableOpacity 
+              style={[styles.nextButton, isTwoFactorLoading && styles.nextButtonDisabled]} 
+              onPress={handleTwoFactorNext}
+              disabled={isTwoFactorLoading}
+            >
               <Text style={styles.nextButtonText}>
-                {twoFactorStep === 1 ? 'Send Code' : 
-                 twoFactorStep === 2 ? 'Verify' : 
-                 twoFactorStep === 3 ? 'Send Code' : 'Activate 2FA'}
+                {isTwoFactorLoading 
+                  ? 'Please wait...' 
+                  : twoFactorStep === 1 
+                    ? 'Continue' 
+                    : twoFactorStep === 2 
+                      ? 'Next' 
+                      : twoFactorStep === 3 
+                        ? 'Verify & Enable' 
+                        : 'Done'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Delete Account Modal */}
+      <Modal
+        visible={showDeleteAccountModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowDeleteAccountModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowDeleteAccountModal(false)}>
+              <X size={24} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Delete Account</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <View style={styles.modalContent}>
+            <View style={styles.dangerWarning}>
+              <Trash2 size={32} color={COLORS.error} />
+              <Text style={styles.dangerWarningTitle}>This action is permanent</Text>
+              <Text style={styles.dangerWarningText}>
+                Deleting your account will permanently remove all your data, including your wallet, transaction history, and settings. This cannot be undone.
+              </Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <View style={styles.inputContainer}>
+                <Lock size={20} color={COLORS.textSecondary} />
+                <TextInput
+                  style={styles.input}
+                  value={deletePassword}
+                  onChangeText={setDeletePassword}
+                  placeholder="Enter your password"
+                  placeholderTextColor={COLORS.textSecondary}
+                  secureTextEntry
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Type "DELETE MY ACCOUNT" to confirm</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={deleteConfirmText}
+                  onChangeText={setDeleteConfirmText}
+                  placeholder="DELETE MY ACCOUNT"
+                  placeholderTextColor={COLORS.textSecondary}
+                  autoCapitalize="characters"
+                />
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.modalFooter}>
+            <TouchableOpacity 
+              style={styles.backButton} 
+              onPress={() => setShowDeleteAccountModal(false)}
+            >
+              <Text style={styles.backButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.deleteButton, isDeleting && styles.nextButtonDisabled]} 
+              onPress={handleConfirmDeleteAccount}
+              disabled={isDeleting}
+            >
+              <Text style={styles.deleteButtonText}>
+                {isDeleting ? 'Deleting...' : 'Delete Account'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1077,6 +1346,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.solana,
     alignItems: 'center',
   },
+  nextButtonDisabled: {
+    opacity: 0.6,
+  },
   nextButtonText: {
     ...FONTS.phantomSemiBold,
     color: COLORS.textPrimary,
@@ -1096,5 +1368,174 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: SPACING.s,
     flex: 1,
+  },
+  qrCodeContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.m,
+    marginVertical: SPACING.l,
+  },
+  qrCode: {
+    width: 200,
+    height: 200,
+  },
+  qrCodePlaceholder: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  backupCodesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: SPACING.m,
+  },
+  backupCodeItem: {
+    width: '48%',
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.small,
+    padding: SPACING.m,
+    marginBottom: SPACING.s,
+    alignItems: 'center',
+  },
+  backupCodeText: {
+    ...FONTS.monospace,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    letterSpacing: 2,
+  },
+  // Session Management Styles
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.l,
+  },
+  loadingText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginLeft: SPACING.s,
+  },
+  sessionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.m,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.cardBackground,
+  },
+  sessionInfo: {
+    flex: 1,
+  },
+  sessionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.xs,
+  },
+  sessionDevice: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    marginLeft: SPACING.s,
+  },
+  currentBadge: {
+    backgroundColor: COLORS.solana + '20',
+    paddingHorizontal: SPACING.s,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.small,
+    marginLeft: SPACING.s,
+  },
+  currentBadgeText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.solana,
+    fontSize: 10,
+  },
+  sessionDetails: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginLeft: 26,
+  },
+  revokeButton: {
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.small,
+    borderWidth: 1,
+    borderColor: COLORS.error + '40',
+  },
+  revokeButtonText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.error,
+    fontSize: 12,
+  },
+  noSessionsText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: SPACING.l,
+  },
+  // Danger Zone Styles
+  dangerSection: {
+    borderBottomWidth: 0,
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.m,
+    backgroundColor: COLORS.error + '10',
+    borderRadius: BORDER_RADIUS.medium,
+    borderWidth: 1,
+    borderColor: COLORS.error + '30',
+  },
+  deleteAccountText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.error,
+    fontSize: 16,
+    marginLeft: SPACING.s,
+  },
+  deleteAccountWarning: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: SPACING.s,
+    textAlign: 'center',
+  },
+  dangerWarning: {
+    alignItems: 'center',
+    backgroundColor: COLORS.error + '10',
+    padding: SPACING.l,
+    borderRadius: BORDER_RADIUS.medium,
+    marginBottom: SPACING.l,
+  },
+  dangerWarningTitle: {
+    ...FONTS.phantomBold,
+    color: COLORS.error,
+    fontSize: 18,
+    marginTop: SPACING.m,
+    marginBottom: SPACING.s,
+  },
+  dangerWarningText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  deleteButton: {
+    flex: 2,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.error,
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    ...FONTS.phantomSemiBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
   },
 });

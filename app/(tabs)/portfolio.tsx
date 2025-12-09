@@ -1,5 +1,5 @@
 import React from 'react';
-import { useState, lazy, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -8,15 +8,13 @@ import {
   ScrollView, 
   RefreshControl,
   Modal,
-  TextInput,
   Image,
   Alert,
   useWindowDimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign, ChevronDown, Wallet, Copy, Eye, EyeOff } from 'lucide-react-native';
+import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign, ChevronDown } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { COLORS } from '../../constants/colors';
@@ -29,12 +27,6 @@ import type { Token, CopiedWallet } from '../../hooks/wallet-store';
 import { useWallet } from '../../hooks/wallet-store';
 import { trpc } from '../../lib/trpc';
 
-// Lazy load heavy components
-const PortfolioChart = lazy(() => import('../../components/PortfolioChart'));
-const TokenChart = lazy(() => import('../../components/TokenChart'));
-const WalletCard = lazy(() => import('../../components/WalletCard').then(module => ({ default: module.WalletCard })));
-const PortfolioCharts = lazy(() => import('../../components/portfolio/PortfolioCharts'));
-
 type PortfolioTab = 'tokens' | 'copied' | 'watchlist';
 type ChartPeriod = '24h' | '7d' | '30d' | 'all';
 type ChartType = 'line' | 'candle';
@@ -43,7 +35,7 @@ export default function PortfolioScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { tokens, copiedWallets, totalBalance, dailyPnl, refetch, updateCopiedWallet } = useWallet();
-  const openPositionsQuery = trpc.copyTrading.getOpenPositions.useQuery(undefined, { refetchInterval: 30000 });
+  const openPositionsQuery = trpc.copyTrading.getOpenPositions.useQuery({}, { refetchInterval: 30000 });
 
   // Responsive padding logic like Home screen
   const { width } = useWindowDimensions();
@@ -69,16 +61,10 @@ export default function PortfolioScreen() {
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1d' | '7d' | '30d' | '1y'>('1d');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
 
-  const [showWalletModal, setShowWalletModal] = useState(false);
-  const [walletStep, setWalletStep] = useState<'choose' | 'import' | 'create' | 'mnemonic'>('choose');
-  const [importInput, setImportInput] = useState('');
-  const [showMnemonic, setShowMnemonic] = useState(false);
-  const [mnemonicConfirmed, setMnemonicConfirmed] = useState(false);
+  // Wallet creation/import is handled by /solana-setup page
 
   // Header height for content offset
   const HEADER_HEIGHT = 60;
-
-  const { updateUser } = useAuth();
   
   const loadWatchlist = useCallback(async () => {
     try {
@@ -506,11 +492,31 @@ export default function PortfolioScreen() {
           </View>
           
           <View style={styles.chartPlaceholder}>
-            <Text style={styles.chartPlaceholderText}>Chart visualization would appear here</Text>
+            <TrendingUp size={32} color={COLORS.textSecondary} />
+            <Text style={styles.chartPlaceholderText}>
+              Portfolio: ${totalBalance.toLocaleString()}
+            </Text>
+            <Text style={[
+              styles.chartPlaceholderSubtext,
+              { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
+            ]}>
+              {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString()} ({chartPeriod})
+            </Text>
           </View>
         </View>
         
-        <Pressable style={styles.activityButton}>
+        <Pressable 
+          style={styles.activityButton}
+          onPress={() => {
+            // Open Solscan for wallet activity
+            if (user?.walletAddress) {
+              const url = `https://solscan.io/account/${user.walletAddress}#txs`;
+              import('react-native').then(({ Linking }) => Linking.openURL(url));
+            } else {
+              Alert.alert('No Wallet', 'Connect a wallet to view activity');
+            }
+          }}
+        >
           <Text style={styles.activityButtonText}>Wallet Activity</Text>
           <ChevronRight size={20} color={COLORS.textPrimary} />
         </Pressable>
@@ -603,7 +609,7 @@ export default function PortfolioScreen() {
                     value={tradeAmount}
                     onChangeText={(text) => { setTradeAmount(text); setTradeError(undefined); }}
                     keyboardType="numeric"
-                    error={tradeError}
+                    error={tradeError || ''}
                   />
                   <View style={styles.tradeActions}>
                     <NeonButton
@@ -621,12 +627,22 @@ export default function PortfolioScreen() {
                           setTradeError('Enter a valid amount');
                           return;
                         }
-                        Alert.alert(
-                          'Trade',
-                          `${tradeMode === 'buy' ? 'Buying' : 'Selling'} ${value} ${selectedToken?.symbol}`
-                        );
+                        // Navigate to swap screen with token pre-selected
+                        const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+                        const tokenMint = selectedToken?.id || '';
+                        
+                        setSelectedToken(null);
                         setTradeMode(null);
                         setTradeAmount('');
+                        
+                        router.push({
+                          pathname: '/swap',
+                          params: {
+                            inputMint: tradeMode === 'buy' ? usdcMint : tokenMint,
+                            outputMint: tradeMode === 'buy' ? tokenMint : usdcMint,
+                            amount: tradeAmount,
+                          },
+                        });
                       }}
                       style={{ flex: 1, marginLeft: SPACING.m }}
                     />
@@ -722,13 +738,20 @@ export default function PortfolioScreen() {
                   title="Save Changes"
                   onPress={() => {
                     if (selectedWallet) {
-                      updateCopiedWallet(selectedWallet.id, {
-                        totalAmount: parseFloat(editAmount) || undefined,
-                        amountPerTrade: parseFloat(editAmountPerTrade) || undefined,
-                        stopLoss: parseFloat(editSL) || undefined,
-                        takeProfit: parseFloat(editTP) || undefined,
-                        slippage: parseFloat(editSlippage) || undefined,
-                      });
+                      const updates: Partial<CopiedWallet> = {};
+                      const totalAmountVal = parseFloat(editAmount);
+                      const amountPerTradeVal = parseFloat(editAmountPerTrade);
+                      const stopLossVal = parseFloat(editSL);
+                      const takeProfitVal = parseFloat(editTP);
+                      const slippageVal = parseFloat(editSlippage);
+                      
+                      if (!isNaN(totalAmountVal)) updates.totalAmount = totalAmountVal;
+                      if (!isNaN(amountPerTradeVal)) updates.amountPerTrade = amountPerTradeVal;
+                      if (!isNaN(stopLossVal)) updates.stopLoss = stopLossVal;
+                      if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
+                      if (!isNaN(slippageVal)) updates.slippage = slippageVal;
+                      
+                      updateCopiedWallet(selectedWallet.id, updates);
                     }
                     setSelectedWallet(null);
                   }}
@@ -740,229 +763,7 @@ export default function PortfolioScreen() {
         </View>
       </Modal>
       
-
-      
-      {/* Wallet Connection Modal */}
-      <Modal
-        visible={showWalletModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowWalletModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {walletStep === 'choose' ? 'Connect Wallet' : 
-                 walletStep === 'import' ? 'Import Wallet' :
-                 walletStep === 'create' ? 'Create Wallet' : 'Save Mnemonic'}
-              </Text>
-              <Pressable onPress={() => setShowWalletModal(false)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </Pressable>
-            </View>
-            
-            <View style={styles.modalContent}>
-              {walletStep === 'choose' && (
-                <View style={styles.walletChoiceContainer}>
-                  <Pressable 
-                    style={styles.walletOption}
-                    onPress={() => setWalletStep('import')}
-                  >
-                    <View style={styles.walletOptionIcon}>
-                      <Wallet size={24} color={COLORS.solana} />
-                    </View>
-                    <View style={styles.walletOptionContent}>
-                      <Text style={styles.walletOptionTitle}>Import Wallet</Text>
-                      <Text style={styles.walletOptionDescription}>
-                        Import existing wallet using mnemonic phrase or private key
-                      </Text>
-                    </View>
-                    <ChevronRight size={20} color={COLORS.textSecondary} />
-                  </Pressable>
-                  
-                  <Pressable 
-                    style={styles.walletOption}
-                    onPress={() => setWalletStep('create')}
-                  >
-                    <View style={styles.walletOptionIcon}>
-                      <Wallet size={24} color={COLORS.success} />
-                    </View>
-                    <View style={styles.walletOptionContent}>
-                      <Text style={styles.walletOptionTitle}>Create New Wallet</Text>
-                      <Text style={styles.walletOptionDescription}>
-                        Generate a new wallet with secure mnemonic phrase
-                      </Text>
-                    </View>
-                    <ChevronRight size={20} color={COLORS.textSecondary} />
-                  </Pressable>
-                </View>
-              )}
-              
-              {walletStep === 'import' && (
-                <View style={styles.importContainer}>
-                  <Text style={styles.importTitle}>Enter your mnemonic phrase or private key</Text>
-                  <Text style={styles.importDescription}>
-                    Enter your 12 or 24-word mnemonic phrase, or your private key to import your wallet.
-                  </Text>
-                  
-                  <TextInput
-                    style={styles.importInput}
-                    placeholder="Enter mnemonic phrase or private key..."
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={importInput}
-                    onChangeText={setImportInput}
-                    multiline
-                    numberOfLines={4}
-                    textAlignVertical="top"
-                  />
-                  
-                  <View style={styles.importActions}>
-                    <Pressable 
-                      style={[styles.importButton, styles.backButton]}
-                      onPress={() => setWalletStep('choose')}
-                    >
-                      <Text style={styles.backButtonText}>Back</Text>
-                    </Pressable>
-                    
-                    <Pressable 
-                      style={[styles.importButton, styles.importConfirmButton]}
-                      onPress={() => {
-                        if (importInput.trim()) {
-                          // Generate mock wallet data from import
-                          const mockAddress = `sol${Math.random().toString(36).substring(2, 8)}...${Math.random().toString(36).substring(2, 6)}`;
-                          const mockWalletData = {
-                            publicKey: `HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH`,
-                            privateKey: `5KJvsngHeMpm884wtkJNzQGaCErckhHJBGFsvd3VyK5qMZXj3hS`,
-                            mnemonic: importInput.trim()
-                          };
-                          updateUser({ 
-                            walletAddress: mockAddress,
-                            walletData: mockWalletData
-                          });
-                          setShowWalletModal(false);
-                          setImportInput('');
-                          Alert.alert('Success', 'Wallet imported successfully!');
-                        } else {
-                          Alert.alert('Error', 'Please enter a valid mnemonic phrase or private key');
-                        }
-                      }}
-                    >
-                      <Text style={styles.importConfirmButtonText}>Import Wallet</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              )}
-              
-              {walletStep === 'create' && (
-                <View style={styles.createContainer}>
-                  <Text style={styles.createTitle}>Your Mnemonic Phrase</Text>
-                  <Text style={styles.createDescription}>
-                    Write down these 12 words in the exact order. Keep them safe and never share them with anyone.
-                  </Text>
-                  
-                  <View style={styles.mnemonicContainer}>
-                    <View style={styles.mnemonicGrid}>
-                      {[
-                        'abandon', 'ability', 'able', 'about', 'above', 'absent',
-                        'absorb', 'abstract', 'absurd', 'abuse', 'access', 'accident'
-                      ].map((word, index) => (
-                        <View key={index} style={styles.mnemonicWord}>
-                          <Text style={styles.mnemonicNumber}>{index + 1}</Text>
-                          <Text style={styles.mnemonicText}>{showMnemonic ? word : '••••••'}</Text>
-                        </View>
-                      ))}
-                    </View>
-                    
-                    <Pressable 
-                      style={styles.showMnemonicButton}
-                      onPress={() => setShowMnemonic(!showMnemonic)}
-                    >
-                      {showMnemonic ? <EyeOff size={20} color={COLORS.textSecondary} /> : <Eye size={20} color={COLORS.textSecondary} />}
-                      <Text style={styles.showMnemonicText}>
-                        {showMnemonic ? 'Hide' : 'Show'} Mnemonic
-                      </Text>
-                    </Pressable>
-                    
-                    <Pressable 
-                      style={styles.copyMnemonicButton}
-                      onPress={() => {
-                        Alert.alert('Copied', 'Mnemonic phrase copied to clipboard');
-                      }}
-                    >
-                      <Copy size={16} color={COLORS.solana} />
-                      <Text style={styles.copyMnemonicText}>Copy to Clipboard</Text>
-                    </Pressable>
-                  </View>
-                  
-                  <View style={styles.confirmationContainer}>
-                    <Pressable 
-                      style={styles.checkboxContainer}
-                      onPress={() => setMnemonicConfirmed(!mnemonicConfirmed)}
-                    >
-                      <View style={[
-                        styles.checkbox,
-                        mnemonicConfirmed && styles.checkboxChecked
-                      ]}>
-                        {mnemonicConfirmed && <Text style={styles.checkmark}>✓</Text>}
-                      </View>
-                      <Text style={styles.checkboxText}>
-                        I have safely stored my mnemonic phrase
-                      </Text>
-                    </Pressable>
-                  </View>
-                  
-                  <View style={styles.createActions}>
-                    <Pressable 
-                      style={[styles.createButton, styles.backButton]}
-                      onPress={() => setWalletStep('choose')}
-                    >
-                      <Text style={styles.backButtonText}>Back</Text>
-                    </Pressable>
-                    
-                    <Pressable 
-                      style={[
-                        styles.createButton, 
-                        styles.createConfirmButton,
-                        !mnemonicConfirmed && styles.createConfirmButtonDisabled
-                      ]}
-                      disabled={!mnemonicConfirmed}
-                      onPress={() => {
-                        if (mnemonicConfirmed) {
-                          // Generate mock wallet data for new wallet
-                          const mockAddress = `sol${Math.random().toString(36).substring(2, 8)}...${Math.random().toString(36).substring(2, 6)}`;
-                          const mockWalletData = {
-                            publicKey: `HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH`,
-                            privateKey: `5KJvsngHeMpm884wtkJNzQGaCErckhHJBGFsvd3VyK5qMZXj3hS`,
-                            mnemonic: 'abandon ability able about above absent absorb abstract absurd abuse access accident'
-                          };
-                          updateUser({ 
-                            walletAddress: mockAddress,
-                            walletData: mockWalletData
-                          });
-                          setShowWalletModal(false);
-                          setMnemonicConfirmed(false);
-                          setShowMnemonic(false);
-                          Alert.alert('Success', 'Wallet created successfully!');
-                        }
-                      }}
-                    >
-                      <Text style={[
-                        styles.createConfirmButtonText,
-                        !mnemonicConfirmed && styles.createConfirmButtonTextDisabled
-                      ]}>
-                        Create Wallet
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
-      
-
+      {/* Wallet creation/import is handled by /solana-setup page */}
     </SafeAreaView>
   );
 }
@@ -1295,9 +1096,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center' },
   chartPlaceholderText: {
+    ...FONTS.sfProMedium,
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    marginTop: SPACING.s },
+  chartPlaceholderSubtext: {
     ...FONTS.sfProRegular,
-    color: COLORS.textSecondary,
-    fontSize: 14 },
+    fontSize: 14,
+    marginTop: SPACING.xs },
   activityButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',

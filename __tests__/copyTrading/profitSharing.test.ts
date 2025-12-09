@@ -33,7 +33,7 @@ describe('Profit Sharing Service', () => {
       jest.spyOn(prisma.position, 'findUnique').mockResolvedValue(mockPosition as any);
 
       const result = await profitSharing.processProfitSharing('test-position-1');
-      
+
       expect(result.success).toBe(true);
       expect(result.feeAmount).toBe(0);
       expect(result.feeTxHash).toBeUndefined();
@@ -62,13 +62,13 @@ describe('Profit Sharing Service', () => {
       jest.spyOn(prisma.traderProfile, 'update').mockResolvedValue({} as any);
 
       // Mock the wallet and transaction methods
-      const mockProcessProfitSharing = jest.spyOn(profitSharing as any, 'sendFeeToTrader')
+      jest.spyOn(profitSharing as any, 'sendFeeToTrader')
         .mockResolvedValue('mock-tx-hash');
-      const mockConvertUSDCtoSOL = jest.spyOn(profitSharing as any, 'convertUSDCtoSOL')
+      jest.spyOn(profitSharing as any, 'convertUSDCtoSOL')
         .mockResolvedValue(0.033); // Assuming SOL at $150
 
       const result = await profitSharing.processProfitSharing('test-position-2');
-      
+
       expect(result.success).toBe(true);
       expect(result.feeAmount).toBe(5); // 5% of 100
       expect(result.feeTxHash).toBe('mock-tx-hash');
@@ -83,10 +83,10 @@ describe('Profit Sharing Service', () => {
 
       // Mock Jupiter price API
       const mockGetPrice = jest.fn().mockResolvedValue(solPrice);
-      
+
       // This would be the actual calculation
       const actualSolAmount = usdcAmount / solPrice;
-      
+
       expect(actualSolAmount).toBe(expectedSolAmount);
     });
   });
@@ -101,7 +101,7 @@ describe('Profit Sharing Service', () => {
       jest.spyOn(prisma.position, 'count').mockResolvedValue(50);
 
       const stats = await profitSharing.getFeeStats();
-      
+
       expect(stats.totalFeesPaid).toBe(250.50);
       expect(stats.totalPositionsWithFees).toBe(50);
       expect(stats.feePercentage).toBe(5);

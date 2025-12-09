@@ -23,6 +23,7 @@ import { NeonButton } from '../components/NeonButton';
 import { NeonCard } from '../components/NeonCard';
 import { GlowingText } from '../components/GlowingText';
 import { trpc } from '../lib/trpc';
+import { logger } from '../lib/client-logger';
 
 // Use the SwapRoute type from jupiter-swap service
 import type { SwapRoute } from '../services/jupiter-swap';
@@ -163,7 +164,7 @@ export default function SwapScreen() {
       setSelectedRouteIndex(0);
       
     } catch (error) {
-      if (__DEV__) console.error('Error fetching quote:', error);
+      if (__DEV__) logger.error('Error fetching quote:', error);
       Alert.alert('Error', 'Failed to fetch swap quote. Please try again.');
       setRouteOptions([]);
     } finally {
@@ -207,10 +208,10 @@ export default function SwapScreen() {
           throw new Error('Swap execution returned no signature');
         }
         
-        if (__DEV__) console.log('Swap executed on blockchain:', signature);
+        if (__DEV__) logger.info('Swap executed on blockchain:', signature);
       } catch (swapError) {
         // If real execution fails, fall back to simulation for now
-        if (__DEV__) console.warn('Real swap failed, using simulation:', swapError);
+        if (__DEV__) logger.warn('Real swap failed, using simulation:', swapError);
         signature = `sim_swap_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       }
       
@@ -226,9 +227,9 @@ export default function SwapScreen() {
           from: publicKey,
           notes: `Swapped ${fromAmount} ${fromToken.symbol} for ~${selectedRoute.outputAmount.toFixed(6)} ${toToken.symbol}`,
         });
-        if (__DEV__) console.log('Swap recorded in database:', signature);
+        if (__DEV__) logger.info('Swap recorded in database:', signature);
       } catch (recordError) {
-        if (__DEV__) console.error('Failed to record swap:', recordError);
+        if (__DEV__) logger.error('Failed to record swap:', recordError);
       }
       
       Alert.alert(
@@ -238,7 +239,7 @@ export default function SwapScreen() {
           {
             text: 'View on Explorer',
             onPress: () => {
-              if (__DEV__) console.log(`https://explorer.solana.com/tx/${signature}`);
+              if (__DEV__) logger.debug(`https://explorer.solana.com/tx/${signature}`);
             }
           },
           { text: 'OK' }
@@ -256,7 +257,7 @@ export default function SwapScreen() {
       refetchHistory();
       
     } catch (error) {
-      if (__DEV__) console.error('Swap error:', error);
+      if (__DEV__) logger.error('Swap error:', error);
       Alert.alert('Swap Failed', error instanceof Error ? error.message : 'Unknown error occurred');
     } finally {
       setIsSwapping(false);
@@ -807,10 +808,10 @@ export default function SwapScreen() {
         </View>
 
         {/* Price Impact Warning */}
-        {priceImpact > 5 && (
+        {priceImpact > 1 && (
           <View style={styles.warningContainer}>
             <Text style={styles.warningText}>
-              ⚠️ High price impact ({priceImpact.toFixed(2)}%). You may lose a significant portion of your funds.
+              ⚠️ High price impact ({priceImpact.toFixed(2)}%). {priceImpact > 5 ? 'You may lose a significant portion of your funds.' : 'Consider reducing your swap amount.'}
             </Text>
           </View>
         )}

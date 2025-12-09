@@ -1,10 +1,15 @@
 import Bull from 'bull';
-import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
 import prisma from '../prisma';
 import { logger } from '../logger';
 import { jupiterSwap } from './jupiterSwap';
 import { profitSharing } from './profitSharing';
-import { getWalletService } from './wallet';
+import { custodialWalletService } from './custodialWallet';
+
+// USDC mint address on Solana mainnet
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const USDC_DECIMALS = 6;
 
 interface BuyOrderData {
   userId: string;
@@ -33,14 +38,10 @@ class ExecutionQueue {
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     
-    // Create Bull queues
     this.buyQueue = new Bull('copy-trades-buy', redisUrl, {
       defaultJobOptions: {
         attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
-        },
+        backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: 100,
         removeOnFail: 50,
       },
@@ -49,58 +50,76 @@ class ExecutionQueue {
     this.sellQueue = new Bull('copy-trades-sell', redisUrl, {
       defaultJobOptions: {
         attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
-        },
+        backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: 100,
         removeOnFail: 50,
       },
     });
 
-    // Initialize Solana connection
-    const rpcUrl = process.env.HELIUS_RPC_URL || `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
+    const rpcUrl = process.env.HELIUS_RPC_URL || 
+      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
     this.connection = new Connection(rpcUrl, 'confirmed');
 
-    // Set up queue processors
     this.setupProcessors();
+  }
+
+
+  /**
+   * Get token balance for a wallet
+   */
+  private async getTokenBalance(
+    walletPubkey: PublicKey,
+    tokenMint: string,
+    decimals: number
+  ): Promise<number> {
+    try {
+      const mintPubkey = new PublicKey(tokenMint);
+      const ata = await getAssociatedTokenAddress(mintPubkey, walletPubkey);
+      const account = await getAccount(this.connection, ata);
+      return Number(account.amount) / Math.pow(10, decimals);
+    } catch {
+      return 0;
+    }
   }
 
   private setupProcessors() {
     // Process BUY orders
     this.buyQueue.process(async (job) => {
-      const { userId, copyTradingId, tokenMint, amount, detectedTxId } = job.data;
+      const { userId, copyTradingId, tokenMint, amount } = job.data;
       
       try {
-        logger.info(`Processing BUY order: User ${userId}, Token ${tokenMint}, Amount $${amount}`);
+        logger.info(`Processing BUY order: User ${userId}, Token ${tokenMint}, Amount ${amount} USDC`);
 
-        // Get user wallet
-        const walletService = getWalletService();
-        const userWalletAddress = await walletService.getUserWalletAddress(userId);
-        // Fallback stub wallet for compilation/runtime safety; replace with real signer in production
-        const userWallet = Keypair.generate();
-        
+        // Get user's custodial wallet keypair - REAL WALLET
+        const userWallet = await custodialWalletService.getKeypair(userId);
         if (!userWallet) {
-          throw new Error('User wallet not found');
+          throw new Error(`Custodial wallet not found for user ${userId}. Set up copy trading wallet first.`);
         }
 
-        // Get quote from Jupiter
+        // Get copy trading settings for slippage
+        const copyTrading = await prisma.copyTrading.findUnique({
+          where: { id: copyTradingId },
+          select: { maxSlippage: true },
+        });
+        const slippageBps = Math.round((copyTrading?.maxSlippage || 1) * 100);
+
+        // Verify sufficient USDC balance before swap
+        const usdcBalance = await this.getTokenBalance(userWallet.publicKey, USDC_MINT, USDC_DECIMALS);
+        if (usdcBalance < amount) {
+          throw new Error(`Insufficient USDC. Required: ${amount}, Available: ${usdcBalance.toFixed(2)}`);
+        }
+
+        // Get quote from Jupiter with user's slippage
         const quote = await jupiterSwap.getQuote({
-          inputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+          inputMint: USDC_MINT,
           outputMint: tokenMint,
-          amount: amount * 1_000_000, // Convert to USDC decimals (6)
-          slippageBps: 100, // 1% slippage
+          amount: amount * Math.pow(10, USDC_DECIMALS),
+          slippageBps,
         });
+        if (!quote) throw new Error('Failed to get swap quote from Jupiter');
 
-        if (!quote) {
-          throw new Error('Failed to get swap quote');
-        }
-
-        // Execute swap
-        const txHash = await jupiterSwap.executeSwap({
-          wallet: userWallet,
-          quoteResponse: quote,
-        });
+        // Execute swap with real wallet
+        const txHash = await jupiterSwap.executeSwap({ wallet: userWallet, quoteResponse: quote });
 
         // Create position record
         const position = await prisma.position.create({
@@ -118,53 +137,29 @@ class ExecutionQueue {
           },
         });
 
-        // Update copy trading stats
+        // Update stats
         await prisma.copyTrading.update({
           where: { id: copyTradingId },
-          data: {
-            totalCopied: { increment: 1 },
-            activeTrades: { increment: 1 },
-          },
+          data: { totalCopied: { increment: 1 }, activeTrades: { increment: 1 } },
         });
 
-        // Update execution queue record
         await prisma.executionQueue.updateMany({
-          where: {
-            userId,
-            copyTradingId,
-            tokenMint,
-            status: 'PENDING',
-          },
-          data: {
-            status: 'SUCCESS',
-            txHash,
-            executedAt: new Date(),
-          },
+          where: { userId, copyTradingId, tokenMint, status: 'PENDING' },
+          data: { status: 'SUCCESS', txHash, executedAt: new Date() },
         });
 
-        logger.info(`✅ BUY order executed: Position ${position.id}, Tx ${txHash}`);
+        logger.info(`✅ BUY executed: Position ${position.id}, Tx ${txHash}`);
         return { success: true, positionId: position.id, txHash };
       } catch (error) {
-        logger.error(`Failed to execute BUY order:`, error);
-        
-        // Update execution queue record
+        logger.error(`Failed BUY order:`, error);
         await prisma.executionQueue.updateMany({
-          where: {
-            userId,
-            copyTradingId,
-            tokenMint,
-            status: 'PENDING',
-          },
-          data: {
-            status: 'FAILED',
-            lastError: error instanceof Error ? error.message : 'Unknown error',
-            attempts: { increment: 1 },
-          },
+          where: { userId, copyTradingId, tokenMint, status: 'PENDING' },
+          data: { status: 'FAILED', lastError: error instanceof Error ? error.message : 'Unknown', attempts: { increment: 1 } },
         });
-
         throw error;
       }
     });
+
 
     // Process SELL orders
     this.sellQueue.process(async (job) => {
@@ -173,46 +168,37 @@ class ExecutionQueue {
       try {
         logger.info(`Processing SELL order: Position ${positionId}, Reason ${reason}`);
 
-        // Get position
         const position = await prisma.position.findUnique({
           where: { id: positionId },
           include: { copyTrading: true },
         });
-
         if (!position || position.status !== 'OPEN') {
           throw new Error('Position not found or already closed');
         }
 
-        // Get user wallet
-        const walletService = getWalletService();
-        const userWalletAddress = await walletService.getUserWalletAddress(userId);
-        // Fallback stub wallet for compilation/runtime safety; replace with real signer in production
-        const userWallet = Keypair.generate();
-        
+        // Get user's custodial wallet keypair - REAL WALLET
+        const userWallet = await custodialWalletService.getKeypair(userId);
         if (!userWallet) {
-          throw new Error('User wallet not found');
+          throw new Error(`Custodial wallet not found for user ${userId}`);
         }
+
+        // Get slippage from copy trading settings (slightly higher for sells)
+        const slippageBps = Math.round((position.copyTrading.maxSlippage || 1.5) * 100);
 
         // Get quote from Jupiter (sell token for USDC)
         const quote = await jupiterSwap.getQuote({
           inputMint: tokenMint,
-          outputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-          amount: amount * Math.pow(10, 9), // Assuming 9 decimals for most tokens
-          slippageBps: 150, // 1.5% slippage for sells
+          outputMint: USDC_MINT,
+          amount: amount * Math.pow(10, 9), // Assuming 9 decimals
+          slippageBps,
         });
+        if (!quote) throw new Error('Failed to get swap quote');
 
-        if (!quote) {
-          throw new Error('Failed to get swap quote');
-        }
-
-        // Execute swap
-        const txHash = await jupiterSwap.executeSwap({
-          wallet: userWallet,
-          quoteResponse: quote,
-        });
+        // Execute swap with real wallet
+        const txHash = await jupiterSwap.executeSwap({ wallet: userWallet, quoteResponse: quote });
 
         // Calculate profit/loss
-        const exitValue = parseFloat(quote.outAmount) / 1_000_000; // USDC has 6 decimals
+        const exitValue = parseFloat(quote.outAmount) / Math.pow(10, USDC_DECIMALS);
         const profitLoss = exitValue - position.entryValue;
         const profitLossPercent = (profitLoss / position.entryValue) * 100;
 
@@ -235,10 +221,7 @@ class ExecutionQueue {
         // Update copy trading stats
         await prisma.copyTrading.update({
           where: { id: copyTradingId },
-          data: {
-            activeTrades: { decrement: 1 },
-            totalProfit: { increment: profitLoss },
-          },
+          data: { activeTrades: { decrement: 1 }, totalProfit: { increment: profitLoss } },
         });
 
         // Process profit sharing if profit > 0
@@ -246,49 +229,27 @@ class ExecutionQueue {
           await profitSharing.processProfitSharing(positionId);
         }
 
-        logger.info(`✅ SELL order executed: Position ${positionId}, P&L: $${profitLoss.toFixed(2)}, Tx ${txHash}`);
+        logger.info(`✅ SELL executed: Position ${positionId}, P&L: ${profitLoss.toFixed(2)}, Tx ${txHash}`);
         return { success: true, positionId, txHash, profitLoss };
       } catch (error) {
-        logger.error(`Failed to execute SELL order:`, error);
-        
-        // Update execution queue record
+        logger.error(`Failed SELL order:`, error);
         await prisma.executionQueue.updateMany({
-          where: {
-            userId,
-            positionId,
-            status: 'PENDING',
-          },
-          data: {
-            status: 'FAILED',
-            lastError: error instanceof Error ? error.message : 'Unknown error',
-            attempts: { increment: 1 },
-          },
+          where: { userId, positionId, status: 'PENDING' },
+          data: { status: 'FAILED', lastError: error instanceof Error ? error.message : 'Unknown', attempts: { increment: 1 } },
         });
-
         throw error;
       }
     });
 
-    // Handle queue events
-    this.buyQueue.on('completed', (job, result) => {
-      logger.info(`BUY job ${job.id} completed:`, result);
-    });
-
-    this.buyQueue.on('failed', (job, err) => {
-      logger.error(`BUY job ${job.id} failed:`, err);
-    });
-
-    this.sellQueue.on('completed', (job, result) => {
-      logger.info(`SELL job ${job.id} completed:`, result);
-    });
-
-    this.sellQueue.on('failed', (job, err) => {
-      logger.error(`SELL job ${job.id} failed:`, err);
-    });
+    // Queue event handlers
+    this.buyQueue.on('completed', (job, result) => logger.info(`BUY job ${job.id} completed:`, result));
+    this.buyQueue.on('failed', (job, err) => logger.error(`BUY job ${job.id} failed:`, err));
+    this.sellQueue.on('completed', (job, result) => logger.info(`SELL job ${job.id} completed:`, result));
+    this.sellQueue.on('failed', (job, err) => logger.error(`SELL job ${job.id} failed:`, err));
   }
 
+
   async addBuyOrder(data: BuyOrderData): Promise<string> {
-    // Store in database
     const queueRecord = await prisma.executionQueue.create({
       data: {
         type: 'BUY',
@@ -301,18 +262,12 @@ class ExecutionQueue {
       },
     });
 
-    // Add to Bull queue
-    const job = await this.buyQueue.add(data, {
-      priority: data.priority || 0,
-      delay: 0,
-    });
-
+    const job = await this.buyQueue.add(data, { priority: data.priority || 0, delay: 0 });
     logger.info(`Added BUY order to queue: ${job.id}`);
     return queueRecord.id;
   }
 
   async addSellOrder(data: SellOrderData): Promise<string> {
-    // Store in database
     const queueRecord = await prisma.executionQueue.create({
       data: {
         type: 'SELL',
@@ -326,12 +281,7 @@ class ExecutionQueue {
       },
     });
 
-    // Add to Bull queue
-    const job = await this.sellQueue.add(data, {
-      priority: data.priority || 0,
-      delay: 0,
-    });
-
+    const job = await this.sellQueue.add(data, { priority: data.priority || 0, delay: 0 });
     logger.info(`Added SELL order to queue: ${job.id}`);
     return queueRecord.id;
   }
@@ -352,18 +302,8 @@ class ExecutionQueue {
     ]);
 
     return {
-      buy: {
-        waiting: buyWaiting,
-        active: buyActive,
-        completed: buyCompleted,
-        failed: buyFailed,
-      },
-      sell: {
-        waiting: sellWaiting,
-        active: sellActive,
-        completed: sellCompleted,
-        failed: sellFailed,
-      },
+      buy: { waiting: buyWaiting, active: buyActive, completed: buyCompleted, failed: buyFailed },
+      sell: { waiting: sellWaiting, active: sellActive, completed: sellCompleted, failed: sellFailed },
     };
   }
 
@@ -380,5 +320,4 @@ class ExecutionQueue {
   }
 }
 
-// Export singleton instance
 export const executionQueue = new ExecutionQueue();

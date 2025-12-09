@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as CryptoJS from 'crypto-js';
+import { logger } from './client-logger';
 
 /**
  * Secure Storage Utility
@@ -103,7 +104,7 @@ export async function setSecureItem(key: string, value: string): Promise<void> {
       await AsyncStorage.setItem(key, value);
     }
   } catch (error) {
-    console.error('Error storing item:', error);
+    logger.error('Error storing item:', error);
     throw error;
   }
 }
@@ -122,7 +123,7 @@ export async function getSecureItem(key: string): Promise<string | null> {
       return await AsyncStorage.getItem(key);
     }
   } catch (error) {
-    console.error('Error retrieving item:', error);
+    logger.error('Error retrieving item:', error);
     return null;
   }
 }
@@ -139,7 +140,7 @@ export async function deleteSecureItem(key: string): Promise<void> {
       await AsyncStorage.removeItem(key);
     }
   } catch (error) {
-    console.error('Error deleting item:', error);
+    logger.error('Error deleting item:', error);
     throw error;
   }
 }
@@ -156,14 +157,14 @@ export async function isSecureStorageAvailable(): Promise<boolean> {
     // Try to set and get a test value
     const testKey = '__secure_storage_test__';
     const testValue = 'test';
-    
+
     await SecureStore.setItemAsync(testKey, testValue);
     const result = await SecureStore.getItemAsync(testKey);
     await SecureStore.deleteItemAsync(testKey);
-    
+
     return result === testValue;
   } catch (error) {
-    console.error('Secure storage not available:', error);
+    logger.error('Secure storage not available:', error);
     return false;
   }
 }
@@ -175,7 +176,8 @@ interface UserData {
   id: string;
   email: string;
   username: string;
-  walletAddress?: string | null;
+  walletAddress?: string | null | undefined;
+  isVerified?: boolean | undefined;
 }
 
 /**
@@ -224,6 +226,13 @@ export class SecureStorage {
   }
 
   /**
+   * Clear refresh token (alias for removeRefreshToken)
+   */
+  static async clearRefreshToken(): Promise<void> {
+    await this.removeRefreshToken();
+  }
+
+  /**
    * Store user data (non-sensitive)
    */
   static async setUserData(userData: UserData): Promise<void> {
@@ -238,7 +247,7 @@ export class SecureStorage {
       const data = await AsyncStorage.getItem(this.USER_DATA_KEY);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Error parsing user data:', error);
+      logger.error('Error parsing user data:', error);
       return null;
     }
   }

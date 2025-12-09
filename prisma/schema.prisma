@@ -10,6 +10,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Connection pooling configuration (set via DATABASE_URL query params):
+// ?connection_limit=10&pool_timeout=20&connect_timeout=10
+// Example: postgresql://user:pass@host:5432/db?connection_limit=10
+
 // User model for authentication
 model User {
   id        String   @id @default(cuid())
@@ -76,6 +80,12 @@ model User {
   vipSubscribers      VIPSubscription[] @relation("VIPCreator")
   vipSubscriptions    VIPSubscription[] @relation("VIPSubscriber")
   
+  // Custodial Wallet for copy trading
+  custodialWallet CustodialWallet?
+  
+  @@index([walletAddress])
+  @@index([email, emailVerifiedAt])
+  @@index([createdAt])
   @@map("users")
 }
 
@@ -291,6 +301,8 @@ model Post {
   @@index([createdAt(sort: Desc)])
   @@index([visibility])
   @@index([mentionedTokenSymbol])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([mentionedTokenSymbol, createdAt(sort: Desc)])
   @@map("posts")
 }
 
@@ -477,11 +489,37 @@ model TraderProfile {
   // Relations
   copiers        CopyTrading[]
   monitored      MonitoredWallet[]
+  snapshots     TraderPerformanceSnapshot[]
   
   @@index([isFeatured, featuredOrder])
   @@index([totalROI])
   @@index([walletAddress])
+  @@index([totalROI(sort: Desc), isFeatured])
   @@map("trader_profiles")
+}
+
+// Trader performance snapshots for historical tracking
+model TraderPerformanceSnapshot {
+  id             String   @id @default(cuid())
+  traderId       String
+  
+  // Snapshot Data
+  date           DateTime
+  roi            Float
+  totalPnL       Float
+  totalTrades    Int
+  totalFollowers Int
+  winRate        Float
+  
+  // Timestamps
+  createdAt      DateTime @default(now())
+  
+  // Relations
+  trader         TraderProfile @relation(fields: [traderId], references: [id], onDelete: Cascade)
+  
+  @@unique([traderId, date])
+  @@index([traderId, date])
+  @@map("trader_performance_snapshots")
 }
 
 // Copy trading relationships
@@ -520,6 +558,14 @@ model CopyTrading {
   @@map("copy_trading")
 }
 
+// Position status enum for type safety
+enum PositionStatus {
+  OPEN
+  CLOSING
+  CLOSED
+  FAILED
+}
+
 // Individual trade positions
 model Position {
   id              String   @id @default(cuid())
@@ -551,8 +597,11 @@ model Position {
   feeAmount       Float?
   feeTxHash       String?
   
-  // Status
-  status          String   @default("OPEN")
+  // Status - using enum for type safety
+  status          PositionStatus @default(OPEN)
+  
+  // SL/TP Processing Lock - prevents duplicate sell orders
+  slTpTriggeredAt DateTime?
   
   // Timestamps
   createdAt       DateTime @default(now())
@@ -561,9 +610,11 @@ model Position {
   // Relations
   copyTrading     CopyTrading @relation(fields: [copyTradingId], references: [id], onDelete: Cascade)
   
-  @@index([copyTradingId, status])
   @@index([tokenMint, status])
   @@index([status, updatedAt])
+  @@index([copyTradingId, status, updatedAt(sort: Desc)])
+  @@index([status, exitTimestamp(sort: Desc)])
+  @@index([status, slTpTriggeredAt])
   @@map("positions")
 }
 
@@ -673,4 +724,36 @@ model ExecutionQueue {
   @@index([status, priority, createdAt])
   @@index([userId])
   @@map("execution_queue")
+}
+
+// ============================================
+// CUSTODIAL WALLET MODEL
+// ============================================
+
+// Custodial wallet for server-side transaction signing
+// Used for copy trading execution where server needs to sign on behalf of user
+model CustodialWallet {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  
+  // Wallet Keys
+  publicKey       String   @unique
+  encryptedKey    String   // AES-256-GCM encrypted private key (base64)
+  keyIv           String   // Initialization vector for decryption (base64)
+  keyTag          String   // Authentication tag for GCM (base64)
+  keyVersion      Int      @default(1) // For key rotation support
+  
+  // Status
+  isActive        Boolean  @default(true)
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([publicKey])
+  @@index([userId, isActive])
+  @@map("custodial_wallets")
 }

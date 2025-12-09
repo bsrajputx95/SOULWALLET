@@ -98,7 +98,8 @@ export function validateEnvironment(): ValidationResult {
 }
 
 /**
- * Validates environment and throws if invalid (for app startup)
+ * Validates environment and logs errors but doesn't throw in production
+ * This prevents the app from crashing on startup
  */
 export function validateEnvironmentOrThrow(): void {
   const result = validateEnvironment();
@@ -123,7 +124,12 @@ export function validateEnvironmentOrThrow(): void {
     ].join('\n');
 
     console.error(errorMessage);
-    throw new Error('Environment validation failed. Check console for details.');
+    
+    // In development, throw to alert developer
+    // In production, log but don't crash - let app show error UI
+    if (__DEV__) {
+      throw new Error('Environment validation failed. Check console for details.');
+    }
   }
 
   // Log warnings in development

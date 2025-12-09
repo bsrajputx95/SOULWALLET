@@ -14,13 +14,58 @@
     "beta-apk": {
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
-        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://mainnet.helius-rpc.com/?api-key=cb611f1c-335b-4835-8fec-9fc90070680c",
+        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
         "EXPO_PUBLIC_DEV_MODE": "false",
-        "EXPO_PUBLIC_LOG_LEVEL": "warn"
+        "EXPO_PUBLIC_LOG_LEVEL": "warn",
+        "EXPO_PUBLIC_SENTRY_DSN": "${EXPO_PUBLIC_SENTRY_DSN}",
+        "SENTRY_ORG": "${SENTRY_ORG}",
+        "SENTRY_PROJECT": "soulwallet-mobile"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
+        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
+        "EXPO_PUBLIC_DEV_MODE": "false",
+        "EXPO_PUBLIC_LOG_LEVEL": "warn",
+        "EXPO_PUBLIC_SENTRY_DSN": "${EXPO_PUBLIC_SENTRY_DSN}",
+        "SENTRY_ORG": "${SENTRY_ORG}",
+        "SENTRY_PROJECT": "soulwallet-mobile"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "credentialsSource": "remote",
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
+        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
+        "EXPO_PUBLIC_DEV_MODE": "false",
+        "EXPO_PUBLIC_LOG_LEVEL": "warn",
+        "EXPO_PUBLIC_SENTRY_DSN": "${EXPO_PUBLIC_SENTRY_DSN}",
+        "SENTRY_ORG": "${SENTRY_ORG}",
+        "SENTRY_PROJECT": "soulwallet-mobile"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-services-key.json",
+        "track": "internal"
       }
     }
   }

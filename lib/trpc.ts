@@ -7,20 +7,28 @@ import { Platform } from 'react-native';
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const getBaseUrl = () => {
+const getBaseUrl = (): string => {
   // In development, use local server
   if (__DEV__) {
     return 'http://localhost:3001';
   }
   
   // In production, use environment variable
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
+  const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+  
+  if (apiUrl) {
+    return apiUrl;
   }
 
-  throw new Error(
-    "No API URL found, please set EXPO_PUBLIC_API_URL"
+  // Fallback: Log error but return empty string
+  // This allows the app to render and show a proper error message
+  // API calls will fail gracefully instead of crashing the app
+  console.error(
+    '🚨 EXPO_PUBLIC_API_URL is not configured!\n' +
+    'API calls will fail. Please set this environment variable.'
   );
+  
+  return '';
 };
 
 export const trpcClient = trpc.createClient({

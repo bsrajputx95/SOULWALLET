@@ -7,12 +7,11 @@
  * 1. Install: npm install @sentry/react-native
  * 2. Get DSN from: https://sentry.io
  * 3. Add EXPO_PUBLIC_SENTRY_DSN to your .env file
- * 4. Un comment the initialization code below
  */
 
-// Uncomment when ready to add Sentry:
-// import * as Sentry from '@sentry/react-native';
+import * as Sentry from '@sentry/react-native';
 import { getOptionalEnv } from './validate-env';
+import { logger } from './client-logger';
 
 let sentryInitialized = false;
 
@@ -28,21 +27,19 @@ export function initializeSentry(): void {
   const dsn = getOptionalEnv('EXPO_PUBLIC_SENTRY_DSN');
 
   // Don't initialize Sentry if disabled or not configured
-  if (!dsn || dsn === 'disabled' || dsn.trim() === '') {
+  if (!dsn || dsn === 'disabled' || dsn.trim() === '' || dsn === 'your-sentry-dsn-here') {
     if (__DEV__) {
-      console.log('ℹ️  Sentry not initialized (disabled or not configured)');
+      logger.info('ℹ️  Sentry not initialized (disabled or not configured)');
     }
     return;
   }
 
   try {
-    // Uncomment when you install @sentry/react-native:
-    /*
     Sentry.init({
       dsn,
       debug: __DEV__, // Enable debug mode in development
       enableInExpoDevelopment: false, // Disable in Expo development
-      tracesSampleRate: 1.0, // Capture 100% of transactions for performance monitoring
+      tracesSampleRate: __DEV__ ? 1.0 : 0.1, // 100% in dev, 10% in production
       
       // Filter out sensitive data
       beforeSend(event) {
@@ -77,16 +74,20 @@ export function initializeSentry(): void {
       // Attach stack traces
       attachStacktrace: true,
     });
-    */
 
     sentryInitialized = true;
     
-    if (__DEV__) {
-      console.log('✅ Sentry initialized successfully');
-    }
+    logger.info('✅ Sentry initialized successfully');
   } catch (error) {
-    console.error('Failed to initialize Sentry:', error);
+    logger.error('Failed to initialize Sentry:', error);
   }
+}
+
+/**
+ * Check if Sentry is initialized
+ */
+export function isSentryInitialized(): boolean {
+  return sentryInitialized;
 }
 
 /**
@@ -95,22 +96,16 @@ export function initializeSentry(): void {
 export function captureException(error: Error, context?: Record<string, any>): void {
   if (!sentryInitialized) {
     // Fallback to console in development or if Sentry not initialized
-    console.error('Error captured:', error, context);
+    logger.error('Error captured:', error, context);
     return;
   }
 
   try {
-    // Uncomment when you install @sentry/react-native:
-    /*
     Sentry.captureException(error, {
       extra: context,
     });
-    */
-    
-    // Temporary fallback
-    console.error('Error captured:', error, context);
   } catch (err) {
-    console.error('Failed to capture exception:', err);
+    logger.error('Failed to capture exception:', err);
   }
 }
 
@@ -119,20 +114,14 @@ export function captureException(error: Error, context?: Record<string, any>): v
  */
 export function captureMessage(message: string, level: 'info' | 'warning' | 'error' = 'info'): void {
   if (!sentryInitialized) {
-    console.log(`[${level}] ${message}`);
+    logger.log(`[${level}] ${message}`);
     return;
   }
 
   try {
-    // Uncomment when you install @sentry/react-native:
-    /*
     Sentry.captureMessage(message, level);
-    */
-    
-    // Temporary fallback
-    console.log(`[${level}] ${message}`);
   } catch (err) {
-    console.error('Failed to capture message:', err);
+    logger.error('Failed to capture message:', err);
   }
 }
 
@@ -142,28 +131,20 @@ export function captureMessage(message: string, level: 'info' | 'warning' | 'err
 export function addBreadcrumb(message: string, data?: Record<string, any>): void {
   if (!sentryInitialized) {
     if (__DEV__) {
-      console.log('[Breadcrumb]', message, data);
+      logger.debug('[Breadcrumb]', message, data);
     }
     return;
   }
 
   try {
-    // Uncomment when you install @sentry/react-native:
-    /*
     Sentry.addBreadcrumb({
       message,
       data,
       level: 'info',
       timestamp: Date.now() / 1000,
     });
-    */
-    
-    // Temporary fallback
-    if (__DEV__) {
-      console.log('[Breadcrumb]', message, data);
-    }
   } catch (err) {
-    console.error('Failed to add breadcrumb:', err);
+    logger.error('Failed to add breadcrumb:', err);
   }
 }
 
@@ -176,16 +157,13 @@ export function setUser(user: { id: string; username?: string; email?: string })
   }
 
   try {
-    // Uncomment when you install @sentry/react-native:
-    /*
     Sentry.setUser({
       id: user.id,
       username: user.username,
       email: user.email,
     });
-    */
   } catch (err) {
-    console.error('Failed to set user context:', err);
+    logger.error('Failed to set user context:', err);
   }
 }
 
@@ -198,19 +176,11 @@ export function clearUser(): void {
   }
 
   try {
-    // Uncomment when you install @sentry/react-native:
-    /*
     Sentry.setUser(null);
-    */
   } catch (err) {
-    console.error('Failed to clear user context:', err);
+    logger.error('Failed to clear user context:', err);
   }
 }
 
-// Example usage in ErrorBoundary component:
-// 
-// import { captureException } from '@/lib/sentry';
-// 
-// componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-//   captureException(error, { errorInfo });
-// }
+// Export Sentry for advanced usage
+export { Sentry };

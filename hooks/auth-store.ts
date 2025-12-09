@@ -2,26 +2,28 @@ import { useState, useEffect } from 'react';
 import createContextHook from '../lib/create-context-hook';
 import { trpcClient } from '../lib/trpc';
 import { SecureStorage } from '../lib/secure-storage';
+import { logger } from '../lib/client-logger';
+import { setUser as setSentryUser, clearUser as clearSentryUser, captureException, addBreadcrumb } from '../lib/sentry';
 
 export interface User {
   id: string;
   username: string;
   email: string;
-  profileImage?: string;
-  walletAddress?: string;
+  profileImage?: string | undefined;
+  walletAddress?: string | undefined;
   isVerified: boolean;
-  firstName?: string;
-  lastName?: string;
-  phone?: string;
-  dateOfBirth?: string;
-  defaultCurrency?: string;
-  language?: string;
-  twoFactorEnabled?: boolean;
+  firstName?: string | undefined;
+  lastName?: string | undefined;
+  phone?: string | undefined;
+  dateOfBirth?: string | undefined;
+  defaultCurrency?: string | undefined;
+  language?: string | undefined;
+  twoFactorEnabled?: boolean | undefined;
   walletData?: {
     publicKey: string;
     privateKey: string;
     mnemonic: string;
-  };
+  } | undefined;
 }
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
@@ -38,16 +40,27 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setIsLoading(true);
       const token = await SecureStorage.getToken();
       const storedUser = await SecureStorage.getUserData();
-      
+
       if (token && storedUser) {
-        setUser(storedUser);
+        // Convert stored user data to User type with defaults
+        const restoredUser: User = {
+          ...storedUser,
+          isVerified: storedUser.isVerified ?? false,
+          walletAddress: storedUser.walletAddress ?? undefined,
+        };
+        setUser(restoredUser);
+        // Set Sentry user context for restored session
+        setSentryUser({ id: restoredUser.id, username: restoredUser.username, email: restoredUser.email });
+        addBreadcrumb('Session restored', { userId: restoredUser.id });
       } else {
         // Clear any partial data if token or user is missing
         await SecureStorage.clearAll();
+        clearSentryUser();
       }
     } catch (err) {
       setError('Failed to load user data');
-      console.error('Failed to load user:', err);
+      logger.error('Failed to load user:', err);
+      captureException(err instanceof Error ? err : new Error('Failed to load user'), { context: 'loadUser' });
     } finally {
       setIsLoading(false);
     }
@@ -57,32 +70,51 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       setIsLoading(true);
       setError(null);
-      
+      addBreadcrumb('Login attempt', { identifier: identifier.includes('@') ? 'email' : 'username' });
+
       // Use tRPC client for login
       const result = await trpcClient.auth.login.mutate({ identifier, password });
-      
+
       const loggedInUser: User = {
         id: result.user.id,
         username: result.user.username,
         email: result.user.email,
         isVerified: result.user.isVerified ?? false,
-        walletAddress: result.user.walletAddress,
+        walletAddress: result.user.walletAddress ?? undefined,
       };
-      
+
       // Store tokens securely and user data
+      // Always store access token for current session
       await SecureStorage.setToken(result.token);
-      if (result.refreshToken) {
+
+      // Only persist refresh token if "Remember Me" is checked
+      // This means session-only auth when rememberMe=false
+      if (result.refreshToken && rememberMe) {
         await SecureStorage.setRefreshToken(result.refreshToken);
+      } else if (!rememberMe) {
+        // Clear any existing refresh token for session-only mode
+        await SecureStorage.clearRefreshToken();
       }
+
       await SecureStorage.setUserData(loggedInUser);
       await SecureStorage.setRememberMe(rememberMe);
-      
+
       setUser(loggedInUser);
+
+      // Set Sentry user context
+      setSentryUser({ id: loggedInUser.id, username: loggedInUser.username, email: loggedInUser.email });
+      addBreadcrumb('Login successful', { userId: loggedInUser.id });
+
       return true;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Login failed';
       setError(errorMessage);
-      console.error('Login error:', err);
+      logger.error('Login error:', err);
+      // Capture login errors (without sensitive data)
+      captureException(err instanceof Error ? err : new Error(errorMessage), {
+        context: 'login',
+        identifierType: identifier.includes('@') ? 'email' : 'username'
+      });
       return false;
     } finally {
       setIsLoading(false);
@@ -93,31 +125,38 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       setIsLoading(true);
       setError(null);
-      
+      addBreadcrumb('Signup attempt', { username });
+
       // Use tRPC client for signup
       const result = await trpcClient.auth.signup.mutate({ username, email, password, confirmPassword });
-      
+
       const newUser: User = {
         id: result.user.id,
         username: result.user.username,
         email: result.user.email,
         isVerified: result.user.isVerified ?? false,
-        walletAddress: result.user.walletAddress,
+        walletAddress: result.user.walletAddress ?? undefined,
       };
-      
+
       // Store tokens securely and user data
       await SecureStorage.setToken(result.token);
       if (result.refreshToken) {
         await SecureStorage.setRefreshToken(result.refreshToken);
       }
       await SecureStorage.setUserData(newUser);
-      
+
       setUser(newUser);
+
+      // Set Sentry user context
+      setSentryUser({ id: newUser.id, username: newUser.username, email: newUser.email });
+      addBreadcrumb('Signup successful', { userId: newUser.id });
+
       return true;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Signup failed';
       setError(errorMessage);
-      console.error('Signup error:', err);
+      logger.error('Signup error:', err);
+      captureException(err instanceof Error ? err : new Error(errorMessage), { context: 'signup' });
       return false;
     } finally {
       setIsLoading(false);
@@ -127,25 +166,35 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const updateUser = async (updates: Partial<User>) => {
     try {
       if (!user) return;
-      
+
       const updatedUser = { ...user, ...updates };
       await SecureStorage.setUserData(updatedUser);
       setUser(updatedUser);
     } catch (err) {
-      console.error('Update user error:', err);
+      logger.error('Update user error:', err);
       setError('Failed to update user data');
     }
   };
 
   const logout = async () => {
     try {
+      addBreadcrumb('Logout initiated', { userId: user?.id });
+      // Clear Sentry user context before logout
+      clearSentryUser();
+
+      // Attempt server logout (non-blocking - local clear happens regardless)
       try {
         await trpcClient.auth.logout.mutate();
-      } catch {}
+      } catch (serverErr) {
+        // Log warning but continue with local cleanup
+        logger.warn('Server logout failed, clearing local session only:', serverErr);
+      }
+
       await SecureStorage.clearAll();
       setUser(null);
+      addBreadcrumb('Logout completed');
     } catch (err) {
-      console.error('Logout error:', err);
+      logger.error('Logout error:', err);
     }
   };
 
@@ -157,5 +206,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signup,
     updateUser,
     logout,
-    isAuthenticated: !!user };
+    isAuthenticated: !!user
+  };
 });

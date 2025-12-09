@@ -16,6 +16,7 @@ import {
 } from '@solana/spl-token';
 import * as crypto from 'crypto';
 import { TRPCError } from '@trpc/server';
+import { logger } from '../lib/logger';
 
 const algorithm = 'aes-256-gcm';
 
@@ -81,7 +82,7 @@ export class WalletService {
       const balance = await this.connection.getBalance(new PublicKey(publicKey));
       return balance / LAMPORTS_PER_SOL;
     } catch (error) {
-      console.error('Error getting balance:', error);
+      logger.error('Error getting balance', error);
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to get wallet balance'
@@ -97,7 +98,7 @@ export class WalletService {
       // For now, returning empty array
       return [];
     } catch (error) {
-      console.error('Error getting token holdings:', error);
+      logger.error('Error getting token holdings', error);
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to get token holdings'
@@ -140,7 +141,7 @@ export class WalletService {
         balance: 0
       };
     } catch (error) {
-      console.error('Error creating wallet:', error);
+      logger.error('Error creating wallet', error);
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to create wallet'
@@ -197,7 +198,7 @@ export class WalletService {
         balance: wallet.balance
       };
     } catch (error) {
-      console.error('Error importing wallet:', error);
+      logger.error('Error importing wallet', error);
       if (error instanceof TRPCError) throw error;
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
@@ -316,7 +317,7 @@ export class WalletService {
         recipient: recipientAddress
       };
     } catch (error) {
-      console.error('Error sending transaction:', error);
+      logger.error('Error sending transaction', error);
       if (error instanceof TRPCError) throw error;
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
@@ -365,7 +366,7 @@ export class WalletService {
         toMint
       };
     } catch (error) {
-      console.error('Error swapping tokens:', error);
+      logger.error('Error swapping tokens', error);
       if (error instanceof TRPCError) throw error;
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
@@ -396,7 +397,7 @@ export class WalletService {
       
       return wallet.transactions;
     } catch (error) {
-      console.error('Error getting transaction history:', error);
+      logger.error('Error getting transaction history', error);
       if (error instanceof TRPCError) throw error;
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
@@ -422,7 +423,7 @@ export class WalletService {
       
       return true;
     } catch (error) {
-      console.error('Error updating token holdings:', error);
+      logger.error('Error updating token holdings', error);
       return false;
     }
   }

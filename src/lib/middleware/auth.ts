@@ -4,6 +4,7 @@ import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
 import type { IncomingHttpHeaders } from 'http';
 import { AuthService, type SessionActivityData } from '../services/auth';
 import prisma from '../prisma';
+import { logger } from '../logger';
 
 // Types for fingerprinting
 export interface Fingerprint {
@@ -106,7 +107,7 @@ async function validateSessionFingerprint(
   } catch (error) {
     // If validation fails
     const strictMode = process.env.SESSION_FINGERPRINT_STRICT === 'true';
-    console.warn('Session fingerprint validation error:', error);
+    logger.warn('Session fingerprint validation error', error);
     return strictMode ? false : true;
   }
 }

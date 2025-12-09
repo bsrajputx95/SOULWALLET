@@ -52,6 +52,11 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     }
   );
 
+  // Fetch asset breakdown for real token prices and values
+  const assetBreakdownQuery = trpc.portfolio.getAssetBreakdown.useQuery(undefined, {
+    refetchInterval: 60000, // Refresh every 60s
+  });
+
   // Fetch copy trades
   const copyTradesQuery = trpc.copyTrading.getMyCopyTrades.useQuery(undefined, {
     refetchInterval: 30000,
@@ -68,17 +73,24 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     return acc;
   }, {} as Record<string, any>) || {};
 
-  // Transform tokens data with metadata
+  // Build asset price lookup from asset breakdown (real prices from DexScreener)
+  const assetPriceMap = assetBreakdownQuery.data?.assets?.reduce((acc, asset) => {
+    acc[asset.mint] = { price: asset.price, value: asset.value };
+    return acc;
+  }, {} as Record<string, { price: number; value: number }>) || {};
+
+  // Transform tokens data with metadata and REAL prices
   const tokens: Token[] = tokensQuery.data?.tokens.map(token => {
     const metadata = metadataMap[token.mint];
+    const priceData = assetPriceMap[token.mint];
     return {
       id: token.mint,
       symbol: metadata?.symbol || 'UNKNOWN',
       name: metadata?.name || 'Unknown Token',
-      price: 1,
-      change24h: 0,
+      price: priceData?.price || 0,           // ✅ Real price from DexScreener
+      change24h: 0,                            // Would need historical data
       balance: token.balance,
-      value: token.balance,
+      value: priceData?.value || token.balance * (priceData?.price || 0), // ✅ Real value
       logo: metadata?.logoURI,
     };
   }) || [];
@@ -103,6 +115,7 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
       pnlQuery.refetch(),
       tokensQuery.refetch(),
       metadataQuery.refetch(),
+      assetBreakdownQuery.refetch(),
       copyTradesQuery.refetch(),
     ]);
   };
@@ -119,7 +132,7 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     totalBalance,    // ✅ Real value from portfolio.getOverview
     dailyPnl,        // ✅ Real PnL from portfolio.getPNL
     solPrice,        // ✅ Real SOL price
-    isLoading: overviewQuery.isLoading || pnlQuery.isLoading || tokensQuery.isLoading || metadataQuery.isLoading,
+    isLoading: overviewQuery.isLoading || pnlQuery.isLoading || tokensQuery.isLoading || metadataQuery.isLoading || assetBreakdownQuery.isLoading,
     refetch,
     updateCopiedWallet,
   };

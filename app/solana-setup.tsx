@@ -21,6 +21,7 @@ import bs58 from 'bs58';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
+import { logger } from '../lib/client-logger';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
@@ -69,7 +70,7 @@ export default function SolanaSetupScreen() {
       setMode('create');
     } catch (error) {
       Alert.alert('Error', 'Failed to create wallet. Please try again.');
-      if (__DEV__) console.error('Create wallet error:', error);
+      if (__DEV__) logger.error('Create wallet error:', error);
     }
   };
 
@@ -90,7 +91,7 @@ export default function SolanaSetupScreen() {
       ]);
     } catch (error) {
       Alert.alert('Error', 'Invalid private key. Please check and try again.');
-      if (__DEV__) console.error('Import wallet error:', error);
+      if (__DEV__) logger.error('Import wallet error:', error);
     }
   };
 

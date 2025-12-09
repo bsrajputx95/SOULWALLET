@@ -1,16 +1,17 @@
 {
   "expo": {
     "name": "Soul Wallet V4",
-    "slug": "soul-wallet-crypto-trading-social-k3w9yfos-fp38btej-9nwm0vwm-s6zbjptf",
+    "slug": "soul-wallet-d-gcmrwud1abeowvvcqs0",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "soulwallet",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "jsEngine": "hermes",
     "splash": {
       "image": "./assets/images/splash.png",
-      "resizeMode": "contain",
+      "resizeMode": "cover",
       "backgroundColor": "#101428"
     },
     "ios": {
@@ -19,15 +20,18 @@
       "usesIcloudStorage": true
     },
     "android": {
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#101428"
       },
       "package": "io.soulwallet.app",
+      "allowBackup": false,
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
+        "android.permission.INTERNET",
         "android.permission.VIBRATE",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.WAKE_LOCK"
+        "android.permission.CAMERA"
       ]
     },
     "web": {
@@ -55,9 +59,15 @@
         "origin": "https://rork.com/"
       },
       "eas": {
-        "projectId": "88930aea-d253-4dc4-bea2-6c6f0867ec62"
+        "projectId": "501a2cb4-c7d1-4233-bed7-aa47db621eae"
       }
     },
-    "owner": "soul-wallet"
+    "owner": "soul-wallet",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/501a2cb4-c7d1-4233-bed7-aa47db621eae"
+    }
   }
 }

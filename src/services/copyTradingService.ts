@@ -3,6 +3,7 @@ import { PublicKey } from '@solana/web3.js';
 import { TRPCError } from '@trpc/server';
 import { WalletService } from './walletService';
 import { logger } from '../lib/logger';
+import { getTokenMetadata } from './tokenMetadata';
 
 export class CopyTradingService {
   // Connection instance can be added when needed for blockchain operations
@@ -40,12 +41,30 @@ export class CopyTradingService {
         });
       }
 
-      // Check if settings already exist
+      // First, find or create the trader profile using targetWalletAddress
+      let traderProfile = await prisma.traderProfile.findFirst({
+        where: { walletAddress: targetWalletAddress }
+      });
+
+      if (!traderProfile) {
+        traderProfile = await prisma.traderProfile.create({
+          data: {
+            walletAddress: targetWalletAddress,
+            username: targetWalletAddress.slice(0, 8) + '...',
+            totalROI: 0,
+            totalVolume: 0,
+            winRate: 0,
+            totalTrades: 0,
+            totalFollowers: 0
+          }
+        });
+      }
+
+      // Check if settings already exist using userId and traderId
       const existing = await prisma.copyTrading.findFirst({
         where: {
           userId,
-          // TODO: Update to match actual schema fields
-          // targetWalletAddress is not in the schema, may need trader relation
+          traderId: traderProfile.id
         }
       });
 
@@ -63,34 +82,11 @@ export class CopyTradingService {
           }
         });
       } else {
-        // Create new settings
-        // Create placeholder trader profile if needed
-        let traderId = '';
-        const traderProfile = await prisma.traderProfile.findFirst({
-          where: { walletAddress: targetWalletAddress }
-        });
-        
-        if (traderProfile) {
-          traderId = traderProfile.id;
-        } else {
-          const newTrader = await prisma.traderProfile.create({
-            data: {
-              walletAddress: targetWalletAddress,
-              username: targetWalletAddress.slice(0, 8) + '...',
-              totalROI: 0,
-              totalVolume: 0,
-              winRate: 0,
-              totalTrades: 0,
-              totalFollowers: 0
-            }
-          });
-          traderId = newTrader.id;
-        }
-        
+        // Create new settings using the trader profile we already found/created
         return await prisma.copyTrading.create({
           data: {
             userId,
-            traderId,
+            traderId: traderProfile.id,
             totalBudget: totalAmount,
             amountPerTrade,
             stopLoss: stopLoss ?? null,
@@ -292,13 +288,16 @@ export class CopyTradingService {
       });
 
       // Record the copy trade
+      // Fetch token metadata
+      const tokenMetadata = await getTokenMetadata(tokenOut);
+
       // Create position instead of copyTrade
       const copyTrade = await prisma.position.create({
         data: {
           copyTradingId: settingId,
           tokenMint: tokenOut,
-          tokenSymbol: 'TOKEN', // TODO: Get actual symbol
-          tokenName: 'Token', // TODO: Get actual name
+          tokenSymbol: tokenMetadata.symbol,
+          tokenName: tokenMetadata.name,
           entryAmount: tradeAmount,
           entryPrice: tradeAmount,
           entryValue: tradeAmount,
@@ -322,20 +321,23 @@ export class CopyTradingService {
       return copyTrade;
     } catch (error) {
       logger.error('Error executing copy trade:', error);
-      
+
       // Get the setting to retrieve the correct userId
       const setting = await prisma.copyTrading.findUnique({
         where: { id: params.settingId }
       });
-      
+
       if (setting) {
+        // Fetch token metadata for failed trade
+        const tokenMetadata = await getTokenMetadata(params.tokenOut);
+
         // Record failed trade with correct userId
         await prisma.position.create({
           data: {
             copyTradingId: params.settingId,
             tokenMint: params.tokenOut,
-            tokenSymbol: 'TOKEN', // TODO: Get actual symbol
-            tokenName: 'Token', // TODO: Get actual name
+            tokenSymbol: tokenMetadata.symbol,
+            tokenName: tokenMetadata.name,
             entryAmount: params.amountIn,
             entryPrice: params.amountIn,
             entryValue: params.amountIn,
@@ -361,7 +363,7 @@ export class CopyTradingService {
       const totalTrades = trades.length;
       const successfulTrades = trades.filter(t => t.status === 'OPEN' || t.exitPrice).length;
       const failedTrades = trades.filter(t => t.status === 'CLOSED' && !t.exitPrice).length;
-      
+
       let totalInvested = 0;
       let totalReturned = 0;
 
@@ -417,7 +419,7 @@ export class CopyTradingService {
           where: { id: settingId },
           data: { isActive: false }
         });
-        
+
         logger.info(`Stop loss triggered for setting ${settingId}.`);
       }
 
@@ -427,7 +429,7 @@ export class CopyTradingService {
           where: { id: settingId },
           data: { isActive: false }
         });
-        
+
         logger.info(`Take profit reached for setting ${settingId}.`);
       }
     } catch (error) {

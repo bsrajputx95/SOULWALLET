@@ -1,21 +1,24 @@
-import { 
-  Connection, 
-  Keypair, 
-  PublicKey, 
-  Transaction, 
-  SystemProgram, 
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
   LAMPORTS_PER_SOL,
-  sendAndConfirmTransaction 
+  sendAndConfirmTransaction
 } from '@solana/web3.js';
 import prisma from '../prisma';
 import { logger } from '../logger';
 import { jupiterSwap } from './jupiterSwap';
-import { getWalletService } from './wallet';
+import { custodialWalletService } from './custodialWallet';
+
+// Minimum fee threshold in SOL - below this, skip transfer to avoid tx fees exceeding fee amount
+const MIN_FEE_SOL = 0.001;
 
 interface ProfitSharingResult {
   success: boolean;
   feeAmount?: number;
   feeTxHash?: string;
+  skipped?: boolean;
   error?: string;
 }
 
@@ -24,12 +27,14 @@ class ProfitSharing {
   private feePercentage = 0.05; // 5% fee
 
   constructor() {
-    const rpcUrl = process.env.HELIUS_RPC_URL || `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
+    const rpcUrl = process.env.HELIUS_RPC_URL || 
+      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
     this.connection = new Connection(rpcUrl, 'confirmed');
   }
 
   /**
    * Process profit sharing for a closed position
+   * Uses database transaction for atomicity - only records fee after successful transfer
    */
   async processProfitSharing(positionId: string): Promise<ProfitSharingResult> {
     try {
@@ -60,25 +65,32 @@ class ProfitSharing {
         return { success: true, feeAmount: 0 };
       }
 
+
       // Calculate 5% fee
       const feeAmount = position.profitLoss * this.feePercentage;
-      
+
       logger.info(
         `Processing profit sharing for position ${positionId}:\n` +
-        `  Profit: $${position.profitLoss.toFixed(2)}\n` +
-        `  Fee (5%): $${feeAmount.toFixed(2)}\n` +
+        `  Profit: ${position.profitLoss.toFixed(2)}\n` +
+        `  Fee (5%): ${feeAmount.toFixed(2)}\n` +
         `  Trader: ${position.copyTrading.trader.username || position.copyTrading.trader.walletAddress}`
       );
 
       // Convert USDC fee to SOL
       const feeInSOL = await this.convertUSDCtoSOL(feeAmount);
-      
+
       if (feeInSOL <= 0) {
         logger.error('Failed to convert fee to SOL');
         return { success: false, error: 'Failed to convert fee amount' };
       }
 
-      // Send fee to trader
+      // Check minimum fee threshold - skip if too small
+      if (feeInSOL < MIN_FEE_SOL) {
+        logger.info(`Fee too small (${feeInSOL.toFixed(6)} SOL < ${MIN_FEE_SOL} SOL), skipping transfer`);
+        return { success: true, feeAmount: 0, skipped: true };
+      }
+
+      // Send fee to trader using real wallet
       const feeTxHash = await this.sendFeeToTrader({
         fromUserId: position.copyTrading.userId,
         toWallet: position.copyTrading.trader.walletAddress,
@@ -90,43 +102,39 @@ class ProfitSharing {
         return { success: false, error: 'Failed to send fee transaction' };
       }
 
-      // Update position with fee information
-      await prisma.position.update({
-        where: { id: positionId },
-        data: {
-          feeAmount,
-          feeTxHash,
-        },
-      });
+      // Verify transaction on-chain before recording
+      const verified = await this.verifyTransaction(feeTxHash);
+      if (!verified) {
+        logger.error(`Fee transaction ${feeTxHash} failed verification`);
+        return { success: false, error: 'Fee transaction failed on-chain verification' };
+      }
 
-      // Update copy trading statistics
-      await prisma.copyTrading.update({
-        where: { id: position.copyTradingId },
-        data: {
-          totalFeesPaid: { increment: feeAmount },
-        },
-      });
+      // Only update database after successful, verified transfer
+      await prisma.$transaction(async (tx) => {
+        await tx.position.update({
+          where: { id: positionId },
+          data: { feeAmount, feeTxHash },
+        });
 
-      // Update trader statistics
-      await prisma.traderProfile.update({
-        where: { id: position.copyTrading.traderId },
-        data: {
-          totalVolume: { increment: position.exitValue || 0 },
-        },
+        await tx.copyTrading.update({
+          where: { id: position.copyTradingId },
+          data: { totalFeesPaid: { increment: feeAmount } },
+        });
+
+        await tx.traderProfile.update({
+          where: { id: position.copyTrading.traderId },
+          data: { totalVolume: { increment: position.exitValue || 0 } },
+        });
       });
 
       logger.info(
         `✅ Profit sharing completed:\n` +
         `  Position: ${positionId}\n` +
-        `  Fee: $${feeAmount.toFixed(2)} (${feeInSOL.toFixed(4)} SOL)\n` +
+        `  Fee: ${feeAmount.toFixed(2)} (${feeInSOL.toFixed(4)} SOL)\n` +
         `  Tx: ${feeTxHash}`
       );
 
-      return {
-        success: true,
-        feeAmount,
-        feeTxHash,
-      };
+      return { success: true, feeAmount, feeTxHash };
     } catch (error) {
       logger.error(`Error processing profit sharing for position ${positionId}:`, error);
       return {
@@ -136,8 +144,36 @@ class ProfitSharing {
     }
   }
 
+
   /**
-   * Send fee to trader's wallet
+   * Verify a transaction succeeded on-chain
+   */
+  private async verifyTransaction(signature: string): Promise<boolean> {
+    try {
+      const txInfo = await this.connection.getTransaction(signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      });
+
+      if (!txInfo) {
+        logger.warn(`Transaction ${signature} not found`);
+        return false;
+      }
+
+      if (txInfo.meta?.err) {
+        logger.error(`Transaction ${signature} failed:`, txInfo.meta.err);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error(`Error verifying transaction ${signature}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Send fee to trader's wallet using custodial wallet
    */
   private async sendFeeToTrader(params: {
     fromUserId: string;
@@ -147,29 +183,23 @@ class ProfitSharing {
     try {
       const { fromUserId, toWallet, amountSOL } = params;
 
-      // Get user's wallet
-      const walletService = getWalletService();
-      const userWalletAddress = await walletService.getUserWalletAddress(fromUserId);
-      // Fallback stub wallet for compilation/runtime safety; replace with real signer in production
-      const userWallet = Keypair.generate();
-      
+      // Get user's custodial wallet - REAL WALLET, NOT STUB
+      const userWallet = await custodialWalletService.getKeypair(fromUserId);
       if (!userWallet) {
-        logger.error('User wallet not found');
+        logger.error(`Custodial wallet not found for user ${fromUserId}`);
         return null;
       }
 
-      // Create transfer transaction
       const traderPubkey = new PublicKey(toWallet);
       const lamports = Math.floor(amountSOL * LAMPORTS_PER_SOL);
 
       // Check user's SOL balance
       const balance = await this.connection.getBalance(userWallet.publicKey);
-      const requiredBalance = lamports + 5000; // Add 5000 lamports for transaction fee
+      const requiredBalance = lamports + 5000; // Amount + tx fee
 
       if (balance < requiredBalance) {
         logger.error(
-          `Insufficient SOL balance for fee payment. ` +
-          `Required: ${requiredBalance / LAMPORTS_PER_SOL} SOL, ` +
+          `Insufficient SOL balance for fee. Required: ${requiredBalance / LAMPORTS_PER_SOL} SOL, ` +
           `Available: ${balance / LAMPORTS_PER_SOL} SOL`
         );
         return null;
@@ -184,20 +214,15 @@ class ProfitSharing {
         })
       );
 
-      // Get recent blockhash
       const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = userWallet.publicKey;
 
-      // Sign and send
       const signature = await sendAndConfirmTransaction(
         this.connection,
         transaction,
         [userWallet],
-        {
-          commitment: 'confirmed',
-          preflightCommitment: 'confirmed',
-        }
+        { commitment: 'confirmed', preflightCommitment: 'confirmed' }
       );
 
       logger.info(`Fee sent to trader: ${signature}`);
@@ -209,40 +234,36 @@ class ProfitSharing {
   }
 
   /**
-   * Convert USDC amount to SOL
+   * Convert USDC amount to SOL using Jupiter price
    */
   private async convertUSDCtoSOL(usdcAmount: number): Promise<number> {
     try {
-      // Get SOL price in USDC
       const solMint = 'So11111111111111111111111111111111111111112';
       const solPrice = await jupiterSwap.getPrice(solMint);
-      
+
       if (!solPrice || solPrice <= 0) {
-        // Fallback to a default price if API fails
         logger.warn('Failed to get SOL price, using fallback price of $150');
         return usdcAmount / 150;
       }
 
       const solAmount = usdcAmount / solPrice;
-      logger.info(`Converted $${usdcAmount.toFixed(2)} USDC to ${solAmount.toFixed(4)} SOL at $${solPrice.toFixed(2)}/SOL`);
-      
+      logger.info(`Converted ${usdcAmount.toFixed(2)} USDC to ${solAmount.toFixed(4)} SOL at $${solPrice.toFixed(2)}/SOL`);
       return solAmount;
     } catch (error) {
       logger.error('Error converting USDC to SOL:', error);
-      // Use a fallback price
       return usdcAmount / 150;
     }
   }
 
+
   /**
-   * Calculate total fees for a user
+   * Calculate total fees paid by a user
    */
   async getUserTotalFees(userId: string): Promise<number> {
     const result = await prisma.copyTrading.aggregate({
       where: { userId },
       _sum: { totalFeesPaid: true },
     });
-
     return result._sum.totalFeesPaid || 0;
   }
 
@@ -257,7 +278,6 @@ class ProfitSharing {
       },
       _sum: { feeAmount: true },
     });
-
     return result._sum.feeAmount || 0;
   }
 
@@ -284,58 +304,17 @@ class ProfitSharing {
       totalPositionsWithFees: totalPositions,
       avgFeePerPosition: avgFeePerPosition._avg.feeAmount || 0,
       feePercentage: this.feePercentage * 100,
+      minFeeThresholdSOL: MIN_FEE_SOL,
     };
   }
 
   /**
-   * Process refund if needed (e.g., if fee transaction failed but was recorded)
+   * Get the fee percentage (for testing/display)
    */
-  async processRefund(positionId: string): Promise<boolean> {
-    try {
-      const position = await prisma.position.findUnique({
-        where: { id: positionId },
-        include: { copyTrading: true },
-      });
-
-      if (!position || !position.feeAmount || !position.feeTxHash) {
-        return false;
-      }
-
-      // Check if transaction actually succeeded
-      const txInfo = await this.connection.getTransaction(position.feeTxHash, {
-        commitment: 'confirmed',
-      });
-
-      if (txInfo && !txInfo.meta?.err) {
-        // Transaction succeeded, no refund needed
-        return false;
-      }
-
-      // Transaction failed, remove fee record
-      await prisma.position.update({
-        where: { id: positionId },
-        data: {
-          feeAmount: null,
-          feeTxHash: null,
-        },
-      });
-
-      // Update copy trading stats
-      await prisma.copyTrading.update({
-        where: { id: position.copyTradingId },
-        data: {
-          totalFeesPaid: { decrement: position.feeAmount },
-        },
-      });
-
-      logger.info(`Refunded fee for position ${positionId}: $${position.feeAmount}`);
-      return true;
-    } catch (error) {
-      logger.error(`Error processing refund for position ${positionId}:`, error);
-      return false;
-    }
+  getFeePercentage(): number {
+    return this.feePercentage;
   }
 }
 
-// Export singleton instance
 export const profitSharing = new ProfitSharing();
+export { ProfitSharing, MIN_FEE_SOL };

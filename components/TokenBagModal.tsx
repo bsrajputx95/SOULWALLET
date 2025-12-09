@@ -16,6 +16,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { NeonCard } from './NeonCard';
 import { NeonButton } from './NeonButton';
 import { NeonInput } from './NeonInput';
+import { logger } from '../lib/client-logger';
 
 interface Token {
   symbol: string;
@@ -80,12 +81,12 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
   const handleSell = (token: Token, percentage: number) => {
     // In a real app, this would call the sell API
-    console.log(`Selling ${percentage}% of ${token.symbol}`);
+    logger.debug(`Selling ${percentage}% of ${token.symbol}`);
   };
 
   const handleBuyMore = (token: Token) => {
     // In a real app, this would navigate to buy screen
-    console.log(
+    logger.debug(
       `Buying more ${token.symbol} with amount ${confirmedBuyAmount || '(unset)'} USDC and slippage ${confirmedSlippage}%`
     );
   };

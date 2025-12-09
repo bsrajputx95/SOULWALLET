@@ -2,6 +2,9 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+// Helper function for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 const TOP_TRADERS = [
   {
     walletAddress: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
@@ -176,6 +179,23 @@ const TOP_TRADERS = [
 ];
 
 async function seedTraders() {
+  // Production safety check
+  if (process.env.NODE_ENV === 'production') {
+    console.log('⚠️  WARNING: Running trader seed script in production');
+    console.log('⚠️  This will create/update 10 featured traders');
+    console.log('⚠️  Press Ctrl+C to cancel, or wait 5 seconds to continue...');
+    await delay(5000);
+  }
+
+  // Verify database connection
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('✅ Database connection verified');
+  } catch (error) {
+    console.error('❌ Database connection failed:', error);
+    process.exit(1);
+  }
+
   console.log('🌱 Seeding top traders...');
   
   for (const trader of TOP_TRADERS) {
@@ -200,11 +220,18 @@ async function seedTraders() {
           isActive: true,
         },
       });
-    } catch (error) {
-      console.error(`❌ Failed to seed trader ${trader.username}:`, error);
+    } catch (error: any) {
+      console.error(`❌ Failed to seed trader ${trader.username} (${trader.walletAddress}):`, error.message);
     }
   }
   
+  // Seed Summary
+  console.log('📊 Seed Summary:');
+  const traderCount = await prisma.traderProfile.count({ where: { isFeatured: true } });
+  const monitoredCount = await prisma.monitoredWallet.count({ where: { isActive: true } });
+  console.log(`   Featured Traders: ${traderCount}`);
+  console.log(`   Monitored Wallets: ${monitoredCount}`);
+
   console.log('✅ All traders seeded successfully!');
 }
 

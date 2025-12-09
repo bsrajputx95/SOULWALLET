@@ -2,11 +2,94 @@ import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
 import { marketData } from '../../lib/services/marketData';
 
 const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+
+// Helper to fetch SPL token balances
+interface TokenBalance {
+  mint: string;
+  balance: number;
+  decimals: number;
+}
+
+async function getSPLTokenBalances(publicKey: PublicKey): Promise<TokenBalance[]> {
+  try {
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+      publicKey,
+      { programId: TOKEN_PROGRAM_ID }
+    );
+
+    return tokenAccounts.value
+      .map(account => {
+        const info = account.account.data.parsed.info;
+        return {
+          mint: info.mint as string,
+          balance: parseFloat(info.tokenAmount.uiAmountString || '0'),
+          decimals: info.tokenAmount.decimals as number,
+        };
+      })
+      .filter(token => token.balance > 0); // Only include tokens with balance
+  } catch (error) {
+    logger.warn('Failed to fetch SPL token balances:', error);
+    return [];
+  }
+}
+
+// Helper to get token prices in batch
+async function getTokenPrices(mints: string[]): Promise<Record<string, number>> {
+  const prices: Record<string, number> = {};
+  
+  // Check cache first
+  const cachedPrices = await prisma.tokenPrice.findMany({
+    where: { tokenMint: { in: mints } },
+  });
+  
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  const mintsToFetch: string[] = [];
+  
+  for (const mint of mints) {
+    const cached = cachedPrices.find(p => p.tokenMint === mint);
+    if (cached && cached.updatedAt > fiveMinutesAgo) {
+      prices[mint] = cached.priceUSD;
+    } else {
+      mintsToFetch.push(mint);
+    }
+  }
+  
+  // Fetch missing prices from DexScreener
+  for (const mint of mintsToFetch) {
+    try {
+      const tokenData = await marketData.getToken(mint);
+      if (tokenData?.pairs?.[0]?.priceUsd) {
+        const price = parseFloat(tokenData.pairs[0].priceUsd);
+        prices[mint] = price;
+        
+        // Update cache
+        await prisma.tokenPrice.upsert({
+          where: { tokenMint: mint },
+          create: {
+            tokenMint: mint,
+            tokenSymbol: tokenData.pairs[0].baseToken?.symbol || 'UNKNOWN',
+            priceUSD: price,
+          },
+          update: {
+            priceUSD: price,
+            updatedAt: new Date(),
+          },
+        }).catch(() => {}); // Ignore cache update errors
+      }
+    } catch (error) {
+      // Skip tokens we can't price
+      logger.debug(`Could not fetch price for ${mint}`);
+    }
+  }
+  
+  return prices;
+}
 
 export const portfolioRouter = router({
   /**
@@ -15,11 +98,18 @@ export const portfolioRouter = router({
   getOverview: protectedProcedure
     .query(async ({ ctx }) => {
       try {
+        // Handle no wallet gracefully - return zero balance
         if (!ctx.user.walletAddress) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'No wallet address found',
-          });
+          return {
+            totalValue: 0,
+            solBalance: 0,
+            solPrice: 0,
+            change24h: 0,
+            change24hValue: 0,
+            recentTransactions: [],
+            walletConnected: false,
+            tokenCount: 0,
+          };
         }
 
         const publicKey = new PublicKey(ctx.user.walletAddress);
@@ -27,6 +117,9 @@ export const portfolioRouter = router({
         // Get SOL balance
         const solBalance = await connection.getBalance(publicKey);
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
+
+        // Get SPL token balances
+        const splTokens = await getSPLTokenBalances(publicKey);
 
         // Get real SOL price from cache or DexScreener
         let solPrice = 100; // Default fallback price
@@ -72,7 +165,23 @@ export const portfolioRouter = router({
           logger.warn('Error fetching SOL price, using default', error);
         }
         
-        const totalValue = solBalanceFormatted * solPrice;
+        // Calculate SOL value
+        const solValue = solBalanceFormatted * solPrice;
+
+        // Get prices for all SPL tokens and calculate total value
+        let splTokensValue = 0;
+        if (splTokens.length > 0) {
+          const tokenMints = splTokens.map(t => t.mint);
+          const tokenPrices = await getTokenPrices(tokenMints);
+          
+          for (const token of splTokens) {
+            const price = tokenPrices[token.mint] || 0;
+            splTokensValue += token.balance * price;
+          }
+        }
+
+        // Total portfolio value = SOL + all SPL tokens
+        const totalValue = solValue + splTokensValue;
 
         // Get recent transactions for activity
         const recentTransactions = await prisma.transaction.findMany({
@@ -111,6 +220,9 @@ export const portfolioRouter = router({
           change24h,          // ✅ Real 24h change percentage
           change24hValue,     // ✅ Real 24h change in USD
           recentTransactions,
+          walletConnected: true,
+          tokenCount: splTokens.length + 1, // +1 for SOL
+          splTokensValue,     // Value of all SPL tokens
         };
       } catch (error) {
         if (error instanceof TRPCError) {
@@ -244,28 +356,62 @@ export const portfolioRouter = router({
           take: input.limit,
         });
 
-        // If no snapshots exist, create one
+        // If no snapshots exist, create one with full portfolio value
         if (snapshots.length === 0 && ctx.user.walletAddress) {
           try {
             const publicKey = new PublicKey(ctx.user.walletAddress);
+            const solMint = 'So11111111111111111111111111111111111111112';
+            
+            // Get SOL balance
             const solBalance = await connection.getBalance(publicKey);
             const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
-            const solPrice = 100; // Mock price
-            const totalValue = solBalanceFormatted * solPrice;
+            
+            // Get SPL token balances
+            const splTokens = await getSPLTokenBalances(publicKey);
+            
+            // Get all prices
+            const allMints = [solMint, ...splTokens.map(t => t.mint)];
+            const prices = await getTokenPrices(allMints);
+            
+            const solPrice = prices[solMint] || 100;
+            const solValue = solBalanceFormatted * solPrice;
+            
+            // Build tokens object for snapshot
+            const tokens: Record<string, { symbol: string; balance: number; value: number }> = {
+              SOL: {
+                symbol: 'SOL',
+                balance: solBalanceFormatted,
+                value: solValue,
+              },
+            };
+            
+            let totalValue = solValue;
+            
+            for (const token of splTokens) {
+              const price = prices[token.mint] || 0;
+              const value = token.balance * price;
+              totalValue += value;
+              
+              const cachedInfo = await prisma.tokenPrice.findUnique({
+                where: { tokenMint: token.mint },
+              });
+              
+              tokens[token.mint] = {
+                symbol: cachedInfo?.tokenSymbol || 'UNKNOWN',
+                balance: token.balance,
+                value,
+              };
+            }
 
             const newSnapshot = await prisma.portfolioSnapshot.create({
               data: {
                 userId: ctx.user.id,
                 totalValueUSD: totalValue,
-                tokens: {
-                  SOL: {
-                    symbol: 'SOL',
-                    balance: solBalanceFormatted,
-                    value: totalValue,
-                  },
-                },
+                tokens,
               },
             });
+
+            logger.info(`Created initial portfolio snapshot for user ${ctx.user.id}: $${totalValue.toFixed(2)}`);
 
             return {
               snapshots: [newSnapshot],
@@ -372,42 +518,94 @@ export const portfolioRouter = router({
     }),
 
   /**
-   * Get asset breakdown (for future token support)
+   * Get asset breakdown with all tokens
    */
   getAssetBreakdown: protectedProcedure
     .query(async ({ ctx }) => {
       try {
+        // Handle no wallet gracefully
         if (!ctx.user.walletAddress) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'No wallet address found',
-          });
+          return {
+            assets: [],
+            totalValue: 0,
+            walletConnected: false,
+          };
         }
 
         const publicKey = new PublicKey(ctx.user.walletAddress);
+        const solMint = 'So11111111111111111111111111111111111111112';
         
         // Get SOL balance
         const solBalance = await connection.getBalance(publicKey);
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
-        const solPrice = 100; // Mock price
+
+        // Get SPL token balances
+        const splTokens = await getSPLTokenBalances(publicKey);
+
+        // Get all token prices (including SOL)
+        const allMints = [solMint, ...splTokens.map(t => t.mint)];
+        const prices = await getTokenPrices(allMints);
+        
+        const solPrice = prices[solMint] || 100;
         const solValue = solBalanceFormatted * solPrice;
 
-        // For now, only SOL is supported
-        // In the future, you would also fetch SPL token balances
-        const assets = [
-          {
-            symbol: 'SOL',
-            name: 'Solana',
-            balance: solBalanceFormatted,
-            price: solPrice,
-            value: solValue,
-            percentage: 100,
-          },
-        ];
+        // Build assets array
+        const assets: Array<{
+          symbol: string;
+          name: string;
+          mint: string;
+          balance: number;
+          price: number;
+          value: number;
+          percentage: number;
+        }> = [];
+
+        // Add SOL
+        assets.push({
+          symbol: 'SOL',
+          name: 'Solana',
+          mint: solMint,
+          balance: solBalanceFormatted,
+          price: solPrice,
+          value: solValue,
+          percentage: 0, // Will calculate after total
+        });
+
+        // Add SPL tokens
+        for (const token of splTokens) {
+          const price = prices[token.mint] || 0;
+          const value = token.balance * price;
+          
+          // Get token info from cache if available
+          const cachedInfo = await prisma.tokenPrice.findUnique({
+            where: { tokenMint: token.mint },
+          });
+
+          assets.push({
+            symbol: cachedInfo?.tokenSymbol || 'UNKNOWN',
+            name: cachedInfo?.tokenSymbol || 'Unknown Token',
+            mint: token.mint,
+            balance: token.balance,
+            price,
+            value,
+            percentage: 0,
+          });
+        }
+
+        // Calculate total value and percentages
+        const totalValue = assets.reduce((sum, asset) => sum + asset.value, 0);
+        
+        for (const asset of assets) {
+          asset.percentage = totalValue > 0 ? (asset.value / totalValue) * 100 : 0;
+        }
+
+        // Sort by value descending
+        assets.sort((a, b) => b.value - a.value);
 
         return {
           assets,
-          totalValue: solValue,
+          totalValue,
+          walletConnected: true,
         };
       } catch (error) {
         if (error instanceof TRPCError) {

@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  TouchableOpacity, 
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Image } from 'react-native';
+  Image,
+  Alert
+} from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Mail, Lock, LogIn } from 'lucide-react-native';
@@ -22,24 +24,82 @@ import { SocialButton } from '../../components/SocialButton';
 import { GlowingText } from '../../components/GlowingText';
 import { useAuth } from '../../hooks/auth-store';
 
+// Local logo asset
+const logoImage = require('../../assets/images/icon-rounded.png');
+
 export default function LoginScreen() {
   const router = useRouter();
   const { login, isLoading, error } = useAuth();
-  
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Validate form before submission
+  const validateForm = (): boolean => {
+    setValidationError(null);
+
+    if (!email.trim()) {
+      setValidationError('Email or username is required');
+      return false;
+    }
+
+    if (!password) {
+      setValidationError('Password is required');
+      return false;
+    }
+
+    // Basic email validation if it looks like an email
+    if (email.includes('@')) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email.trim())) {
+        setValidationError('Please enter a valid email address');
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  // Handle social button press - show "Coming Soon"
+  const handleSocialPress = (provider: string) => {
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    Alert.alert(
+      'Coming Soon',
+      `${provider} login will be available in a future update.`,
+      [{ text: 'OK' }]
+    );
+  };
 
   const handleLogin = async () => {
+    // Validate form first
+    if (!validateForm()) {
+      return;
+    }
+
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    
-    const success = await login(email, password, rememberMe);
-    if (success) {
-      router.replace('/(tabs)');
-    } else {
-      // Clear password on login error for security
+
+    try {
+      const success = await login(email.trim(), password, rememberMe);
+      if (success) {
+        router.replace('/(tabs)');
+      } else {
+        // Clear password on login error for security
+        setPassword('');
+      }
+    } catch (err) {
+      // Handle network errors with user-friendly message
+      const errorMessage = err instanceof Error ? err.message.toLowerCase() : '';
+      if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('connection')) {
+        setValidationError('No internet connection. Please check your network and try again.');
+      } else {
+        setValidationError('Login failed. Please try again.');
+      }
       setPassword('');
     }
   };
@@ -55,21 +115,24 @@ export default function LoginScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.logoContainer}>
-          <Image 
-            source={{ uri: 'https://r2-pub.rork.com/attachments/q78x34dzrm35cfaz7pqli' }} 
+          <Image
+            source={logoImage}
             style={styles.logoImage}
+            accessibilityLabel="Soul Wallet Logo"
           />
         </View>
 
         <View style={styles.formContainer}>
-          <GlowingText 
-            text="WELCOME BACK" 
-            fontSize={24} 
+          <GlowingText
+            text="WELCOME BACK"
+            fontSize={24}
             style={styles.title}
           />
           <Text style={styles.subtitle}>Log in to continue</Text>
 
-          {error && <Text style={styles.errorText}>{error}</Text>}
+          {(error || validationError) && (
+            <Text style={styles.errorText}>{error || validationError}</Text>
+          )}
 
           {__DEV__ && (
             <View style={styles.devHintContainer}>
@@ -82,19 +145,29 @@ export default function LoginScreen() {
             label="Username/Email"
             placeholder="Enter your username or email"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              setValidationError(null);
+            }}
             autoCapitalize="none"
             keyboardType="email-address"
             leftIcon={<Mail size={20} color={COLORS.textSecondary} />}
+            accessibilityLabel="Email or username input"
+            accessibilityHint="Enter your email address or username"
           />
 
           <NeonInput
             label="Password"
             placeholder="Enter your password"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+              setPassword(text);
+              setValidationError(null);
+            }}
             isPassword
             leftIcon={<Lock size={20} color={COLORS.textSecondary} />}
+            accessibilityLabel="Password input"
+            accessibilityHint="Enter your password"
           />
 
           <View style={styles.rememberContainer}>
@@ -134,11 +207,17 @@ export default function LoginScreen() {
               title="Google"
               icon={<Text style={styles.socialIcon}>G</Text>}
               style={styles.socialButton}
+              onPress={() => handleSocialPress('Google')}
+              accessibilityLabel="Sign in with Google"
+              accessibilityHint="Google login coming soon"
             />
             <SocialButton
               title="Apple"
               icon={<Text style={styles.socialIcon}>A</Text>}
               style={styles.socialButton}
+              onPress={() => handleSocialPress('Apple')}
+              accessibilityLabel="Sign in with Apple"
+              accessibilityHint="Apple login coming soon"
             />
           </View>
 
@@ -167,43 +246,53 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background },
+    backgroundColor: COLORS.background
+  },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20 },
+    paddingBottom: 20
+  },
   logoContainer: {
     alignItems: 'center',
     marginTop: 60,
-    marginBottom: 20 },
+    marginBottom: 20
+  },
   logoImage: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    marginBottom: 24 },
+    marginBottom: 24
+  },
   formContainer: {
-    paddingHorizontal: 24 },
+    paddingHorizontal: 24
+  },
   title: {
     textAlign: 'center',
-    marginBottom: 8 },
+    marginBottom: 8
+  },
   subtitle: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 16,
     textAlign: 'center',
-    marginBottom: 32 },
+    marginBottom: 32
+  },
   errorText: {
     ...FONTS.sfProMedium,
     color: COLORS.error,
     textAlign: 'center',
-    marginBottom: 16 },
+    marginBottom: 16
+  },
   rememberContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24 },
+    marginBottom: 24
+  },
   rememberMeContainer: {
     flexDirection: 'row',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   checkbox: {
     width: 20,
     height: 20,
@@ -212,65 +301,82 @@ const styles = StyleSheet.create({
     borderColor: COLORS.textSecondary,
     marginRight: 8,
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   checkboxChecked: {
     backgroundColor: COLORS.solana,
-    borderColor: COLORS.solana },
+    borderColor: COLORS.solana
+  },
   checkmark: {
     color: COLORS.textPrimary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   rememberMeText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   forgotPasswordText: {
     ...FONTS.sfProMedium,
     color: COLORS.solana,
-    fontSize: 14 },
+    fontSize: 14
+  },
   loginButton: {
-    marginBottom: 24 },
+    marginBottom: 24
+  },
   socialButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16 },
+    marginBottom: 16
+  },
   socialButton: {
     flex: 1,
-    marginHorizontal: 8 },
+    marginHorizontal: 8
+  },
   socialIcon: {
     ...FONTS.sfProBold,
     fontSize: 16,
-    color: COLORS.textPrimary },
+    color: COLORS.textPrimary
+  },
   signupContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16 },
+    marginTop: 16
+  },
   signupText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginRight: 4 },
+    marginRight: 4
+  },
   signupLink: {
     ...FONTS.sfProMedium,
     color: COLORS.solana,
-    fontSize: 14 },
+    fontSize: 14
+  },
   devHintContainer: {
     backgroundColor: COLORS.warning + '15',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: COLORS.warning + '30' },
+    borderColor: COLORS.warning + '30'
+  },
   devHintTitle: {
     ...FONTS.sfProMedium,
     color: COLORS.warning,
     fontSize: 12,
-    marginBottom: 4 },
+    marginBottom: 4
+  },
   devHintText: {
     ...FONTS.monospace,
     color: COLORS.textSecondary,
-    fontSize: 11 },
+    fontSize: 11
+  },
   bottomGlow: {
     height: 4,
     width: '100%',
     position: 'absolute',
-    bottom: 0 } });
+    bottom: 0
+  }
+});

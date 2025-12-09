@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { AuthService } from './auth';
 import type { EmailService } from './email';
+import { logger } from '../logger';
 
 export interface CleanupStats {
   expiredSessions: number;
@@ -57,26 +58,26 @@ export class CleanupService {
    */
   start(): void {
     if (this.isRunning) {
-      console.log('Cleanup service is already running');
+      logger.info('Cleanup service is already running');
       return;
     }
 
     if (!this.config.enableScheduledCleanup) {
-      console.log('Scheduled cleanup is disabled');
+      logger.info('Scheduled cleanup is disabled');
       return;
     }
 
-    console.log(`Starting cleanup service with ${this.config.cleanupIntervalMinutes} minute intervals`);
+    logger.info(`Starting cleanup service with ${this.config.cleanupIntervalMinutes} minute intervals`);
     
     // Run initial cleanup
     this.runCleanup().catch(error => {
-      console.error('Initial cleanup failed:', error);
+      logger.error('Initial cleanup failed:', error);
     });
 
     // Schedule recurring cleanup
     this.cleanupInterval = setInterval(() => {
       this.runCleanup().catch(error => {
-        console.error('Scheduled cleanup failed:', error);
+        logger.error('Scheduled cleanup failed:', error);
       });
     }, this.config.cleanupIntervalMinutes * 60 * 1000);
 
@@ -92,7 +93,7 @@ export class CleanupService {
       this.cleanupInterval = undefined;
     }
     this.isRunning = false;
-    console.log('Cleanup service stopped');
+    logger.info('Cleanup service stopped');
   }
 
   /**
@@ -106,7 +107,7 @@ export class CleanupService {
    * Run a complete cleanup cycle
    */
   async runCleanup(): Promise<CleanupStats> {
-    console.log('Starting cleanup cycle...');
+    logger.info('Starting cleanup cycle...');
     const startTime = Date.now();
 
     try {
@@ -128,11 +129,11 @@ export class CleanupService {
       ]);
 
       const duration = Date.now() - startTime;
-      console.log(`Cleanup completed in ${duration}ms:`, stats);
+      logger.info(`Cleanup completed in ${duration}ms:`, stats);
 
       return stats;
     } catch (error) {
-      console.error('Cleanup cycle failed:', error);
+      logger.error('Cleanup cycle failed:', error);
       throw error;
     }
   }
@@ -293,7 +294,7 @@ export class CleanupService {
       try {
         await this.emailService.sendAccountUnlockedNotification(user.email, 'auto');
       } catch (error) {
-        console.error(`Failed to send unlock notification to ${user.email}:`, error);
+        logger.error(`Failed to send unlock notification to ${user.email}:`, error);
       }
     }
   }

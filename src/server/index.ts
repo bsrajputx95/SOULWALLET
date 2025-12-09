@@ -11,6 +11,7 @@ import { marketRouter } from './routers/market';
 import { userRouter } from './routers/user';
 import { socialRouter } from './routers/social';
 import { tradersRouter } from './routers/traders';
+import { accountRouter } from './routers/account';
 import { logger } from '../lib/logger';
 import { disconnectDatabase, connectDatabase } from '../lib/prisma';
 import { createCleanupService } from '../lib/services/cleanup';
@@ -20,6 +21,10 @@ import prisma from '../lib/prisma';
 import { startTransactionMonitor } from '../services/transactionMonitor';
 import Redis from 'ioredis';
 import { Connection } from '@solana/web3.js';
+import { custodialWalletService } from '../lib/services/custodialWallet';
+import { transactionMonitor } from '../lib/services/transactionMonitor';
+import { priceMonitor } from '../lib/services/priceMonitor';
+import { executionQueue } from '../lib/services/executionQueue';
 
 // Global cleanup service instance
 let cleanupService: ReturnType<typeof createCleanupService> | null = null;
@@ -41,6 +46,7 @@ export const appRouter = router({
   user: userRouter,
   social: socialRouter,
   traders: tradersRouter,
+  account: accountRouter,
 });
 
 /**
@@ -97,25 +103,25 @@ export const apiMetadata = {
 export const routerConfig = {
   // Enable CORS for development
   cors: {
-    origin: process.env.NODE_ENV === 'development' 
-      ? ['http://localhost:3000', 'http://localhost:8081'] 
+    origin: process.env.NODE_ENV === 'development'
+      ? ['http://localhost:3000', 'http://localhost:8081']
       : process.env.ALLOWED_ORIGINS?.split(',') || [],
     credentials: true,
   },
-  
+
   // Request size limits
   limits: {
     bodySize: '10mb',
     parameterLimit: 1000,
   },
-  
+
   // Security headers
   security: {
     helmet: true,
     rateLimit: true,
     csrf: process.env.NODE_ENV === 'production',
   },
-  
+
   // Logging configuration
   logging: {
     level: process.env.LOG_LEVEL || 'info',
@@ -125,11 +131,14 @@ export const routerConfig = {
 
 /**
  * Enhanced environment validation with comprehensive checks
+ * Supported NODE_ENV values: 'development', 'production', 'test'
+ * Note: 'staging' is treated as production-like but with relaxed email requirements
  */
 export const validateEnvironment = async () => {
   const nodeEnv = process.env.NODE_ENV || 'development';
   const isProduction = nodeEnv === 'production';
-  const isStaging = nodeEnv === 'staging';
+  // Staging is treated as production-like environment
+  const isStaging = (process.env.NODE_ENV as string) === 'staging';
 
   // Tracking variables for validation status
   let redisAvailable = false;
@@ -139,7 +148,7 @@ export const validateEnvironment = async () => {
   let swapEnabled = false;
   let simulationMode = false;
 
-  // Startup banner
+  // Startup banner (uses logger for consistency)
   printStartupBanner();
 
   // Common validations for all environments
@@ -151,11 +160,10 @@ export const validateEnvironment = async () => {
   simulationMode = commonStatus.simulationMode;
 
   // Environment-specific validations
-  if (isProduction) {
+  if (isProduction || isStaging) {
+    // Both production and staging use production-level validation
     const prodStatus = await validateProduction();
     solanaAvailable = prodStatus.solanaAvailable;
-  } else if (isStaging) {
-    await validateStaging();
   } else {
     await validateDevelopment();
   }
@@ -170,14 +178,6 @@ export const validateEnvironment = async () => {
     monitoring: sentryConfigured ? 'enabled' : 'disabled',
     features: { send: sendEnabled, swap: swapEnabled, simulation: simulationMode }
   });
-
-  // Startup banner
-  logger.info('='.repeat(60));
-  logger.info('🚀 SoulWallet API Server');
-  logger.info('Version: ' + process.env.npm_package_version);
-  logger.info('Environment: ' + process.env.NODE_ENV);
-  logger.info('Port: ' + process.env.PORT);
-  logger.info('='.repeat(60));
 };
 
 /**
@@ -424,7 +424,7 @@ const validateCommon = async () => {
   } else if (nodeEnv === 'production') {
     logger.warn('Sentry DSN not configured - error tracking disabled');
   }
-  
+
   // Return status flags
   return { redisAvailable, sentryConfigured, sendEnabled, swapEnabled, simulationMode };
 };
@@ -440,19 +440,8 @@ const validateDevelopment = () => {
   }
 };
 
-/**
- * Validations specific to staging environment
- */
-const validateStaging = async () => {
-  logger.info('🧪 Running staging-specific validations');
-  // Stricter than development but not full production
-  if (!process.env.REDIS_URL) {
-    throw new Error('REDIS_URL is required in staging environment');
-  }
-  if (process.env.EMAIL_PROVIDER === 'console') {
-    logger.warn('⚠️  Using console email provider in staging - consider using a real provider');
-  }
-};
+// Note: Staging validation is now handled by validateProduction() with the same rigor
+// The staging environment is treated as production-like for security purposes
 
 /**
  * Validations specific to production environment
@@ -460,7 +449,6 @@ const validateStaging = async () => {
 const validateProduction = async () => {
   logger.info('🚀 Running production-specific validations');
   let solanaAvailable = false;
-  const nodeEnv = process.env.NODE_ENV || 'development';
 
   // 1. Redis Validation
   if (process.env.REDIS_URL) {
@@ -506,6 +494,14 @@ const validateProduction = async () => {
   }
   if (process.env.ENABLE_INTROSPECTION === 'true') {
     logger.warn('⚠️  ENABLE_INTROSPECTION is true in production - consider disabling');
+  }
+  
+  // 3.1 CSRF Protection Check (CRITICAL for production)
+  if (process.env.CSRF_ENABLED !== 'true') {
+    logger.warn('⚠️  CSRF_ENABLED is not "true" in production - CSRF protection is disabled!');
+    logger.warn('⚠️  Set CSRF_ENABLED=true to protect against cross-site request forgery attacks');
+  } else {
+    logger.info('✅ CSRF protection enabled');
   }
 
   // 4. Solana RPC Validation
@@ -557,98 +553,38 @@ const validateProduction = async () => {
   }
   // Email provider validation moved to line 495
 
-  // Validate ALLOWED_ORIGINS contains valid production URLs
-  if (process.env.ALLOWED_ORIGINS) {
-    const origins = process.env.ALLOWED_ORIGINS.split(',');
-    for (const origin of origins) {
-      const trimmed = origin.trim();
-      if (trimmed && !trimmed.startsWith('https://')) {
-        throw new Error(`ALLOWED_ORIGINS must use HTTPS in production: ${trimmed}`);
-      }
-    }
-  }
-
   // Ensure WALLET_ENCRYPTION_KEY is configured and strong
   if (!process.env.WALLET_ENCRYPTION_KEY || process.env.WALLET_ENCRYPTION_KEY.length < 32) {
     throw new Error('WALLET_ENCRYPTION_KEY must be at least 32 characters long in production');
   }
 
-  // Production-specific validation
-  if (nodeEnv === 'production') {
-    if (!process.env.ALLOWED_ORIGINS) {
-      throw new Error('ALLOWED_ORIGINS is required in production');
-    }
-    // Validate all origins use HTTPS
-    const origins = process.env.ALLOWED_ORIGINS.split(',');
-    for (const origin of origins) {
-      if (!origin.trim().startsWith('https://')) {
-        throw new Error(`ALLOWED_ORIGINS must use HTTPS in production: ${origin.trim()}`);
-      }
-    }
-    // Email provider validation moved to line 495
-    if (process.env.FEATURE_SIMULATION_MODE !== 'false') {
-      throw new Error('FEATURE_SIMULATION_MODE must be false in production');
-    }
-    if (process.env.SESSION_FINGERPRINT_STRICT !== 'true') {
-      logger.warn('SESSION_FINGERPRINT_STRICT is not true - consider enabling for better security');
-    }
-    if (process.env.ENABLE_PLAYGROUND === 'true') {
-      logger.warn('ENABLE_PLAYGROUND is true in production - consider disabling');
-    }
-    if (process.env.ENABLE_INTROSPECTION === 'true') {
-      logger.warn('ENABLE_INTROSPECTION is true in production - consider disabling');
-    }
-    if (process.env.LOG_LEVEL !== 'info' && process.env.LOG_LEVEL !== 'warn' && process.env.LOG_LEVEL !== 'error') {
-      logger.warn('LOG_LEVEL should be info, warn, or error in production');
-    }
+  // Validate LOG_LEVEL is appropriate for production
+  if (process.env.LOG_LEVEL !== 'info' && process.env.LOG_LEVEL !== 'warn' && process.env.LOG_LEVEL !== 'error') {
+    logger.warn('LOG_LEVEL should be info, warn, or error in production');
   }
 
-  // Validate Solana RPC configuration
-  const nodeEnvValidation = process.env.NODE_ENV || 'development';
-  if (process.env.EXPO_PUBLIC_SOLANA_RPC_URL) {
-    if (!process.env.EXPO_PUBLIC_SOLANA_RPC_URL.match(/^https?:\/\/[^\s]+$/)) {
-      throw new Error('EXPO_PUBLIC_SOLANA_RPC_URL must be a valid URL');
-    }
-    if (nodeEnvValidation === 'production' && process.env.EXPO_PUBLIC_SOLANA_RPC_URL.includes('api.mainnet-beta.solana.com')) {
-      logger.warn('Using public Solana RPC - recommend premium provider (Helius, QuickNode)');
-    }
-    try {
-      const start = Date.now();
-      const connection = new Connection(process.env.EXPO_PUBLIC_SOLANA_RPC_URL);
-      await connection.getSlot();
-      solanaAvailable = true;
-      logger.info('Solana RPC validation', { available: true, latency: Date.now() - start });
-    } catch (error: any) {
-      logger.warn('Solana RPC connection failed', { error: error.message });
-    }
-  } else {
-    throw new Error('EXPO_PUBLIC_SOLANA_RPC_URL is required');
-  }
-  
   // Return status flags
   return { solanaAvailable };
 };
 
 /**
  * Print startup banner with configuration summary
+ * Uses logger for consistent logging across the service
  */
 const printStartupBanner = () => {
   const version = process.env.npm_package_version || '1.0.0';
   const nodeEnv = process.env.NODE_ENV || 'development';
+  const port = process.env.PORT || '3001';
 
-  console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║                      🚀 SoulWallet API                       ║
-║                                                              ║
-║  Version: ${version.padEnd(50)} ║
-║  Environment: ${nodeEnv.padEnd(46)} ║
-║  Port: ${process.env.PORT || '3001'.padEnd(52)} ║
-║                                                              ║
-║  Validating environment configuration...                     ║
-╚══════════════════════════════════════════════════════════════╝
-  `);
+  logger.info('═'.repeat(60));
+  logger.info('🚀 SoulWallet API Server Starting');
+  logger.info(`Version: ${version}`);
+  logger.info(`Environment: ${nodeEnv}`);
+  logger.info(`Port: ${port}`);
+  logger.info('Validating environment configuration...');
+  logger.info('═'.repeat(60));
 };
-  
+
 /**
  * Initialize the application
  */
@@ -656,42 +592,72 @@ export const initializeApp = async () => {
   try {
     // Validate environment variables
     await validateEnvironment();
-    
+
     // Initialize database connection
     await connectDatabase();
-    
+
     // Initialize rate limiting
     const { initializeRateLimiting } = await import('../lib/middleware/rateLimit');
     await initializeRateLimiting();
-    
+
     // Initialize cleanup service
     const authService = new AuthService();
     const emailService = createEmailService();
     cleanupService = createCleanupService(prisma, authService, emailService);
     cleanupService.start();
-    
+
     logger.info('✅ Application initialized successfully');
     logger.info('🧹 Session cleanup service started');
-    
+
     // Start transaction monitor (if enabled)
     if (process.env.FEATURE_TRANSACTION_MONITORING !== 'false') {
       startTransactionMonitor().catch(err => {
         logger.error('Failed to start transaction monitor:', err);
       });
-      
+
       // Also start transaction status updater
       const { startTransactionStatusUpdater } = await import('../services/transactionStatusUpdater');
       startTransactionStatusUpdater().catch(err => {
         logger.error('Failed to start transaction status updater:', err);
       });
-      
+
       // Start portfolio snapshot service for accurate 24h changes
       const { startPortfolioSnapshotService } = await import('../services/portfolioSnapshotService');
       startPortfolioSnapshotService().catch(err => {
         logger.error('Failed to start portfolio snapshot service:', err);
       });
+
+      // Start cron jobs for background tasks (trader performance snapshots, etc.)
+      const { initializeCronJobs } = await import('./cronJobs');
+      initializeCronJobs();
     }
-    
+
+    // Initialize copy trading services (if enabled)
+    const copyTradingEnabled = process.env.COPY_TRADING_ENABLED === 'true';
+    if (copyTradingEnabled) {
+      try {
+        // Initialize custodial wallet encryption service
+        custodialWalletService.initialize();
+        logger.info('✅ Custodial wallet service initialized');
+
+        // Start transaction monitor (Helius WebSocket for trader detection)
+        await transactionMonitor.start();
+        logger.info('✅ Transaction monitor started (Helius WebSocket)');
+
+        // Start price monitor (5-second SL/TP checking loop)
+        await priceMonitor.start();
+        logger.info('✅ Price monitor started (SL/TP checking)');
+
+        logger.info('🚀 Copy trading services initialized successfully');
+      } catch (error: any) {
+        logger.error('Failed to initialize copy trading services:', error);
+        // Don't throw - allow app to start without copy trading
+        logger.warn('⚠️  Copy trading features will be unavailable');
+      }
+    } else {
+      logger.info('ℹ️  Copy trading disabled (COPY_TRADING_ENABLED != true)');
+    }
+
     return {
       success: true,
       message: 'Application initialized',
@@ -703,7 +669,6 @@ export const initializeApp = async () => {
       stack: error.stack,
       name: error.name
     });
-    console.error('Full error details:', error);
     throw error;
   }
 };
@@ -718,10 +683,10 @@ export const shutdownApp = async () => {
       cleanupService.stop();
       logger.info('🧹 Session cleanup service stopped');
     }
-    
+
     // Disconnect database
     await disconnectDatabase();
-    
+
     logger.info('✅ Application shutdown completed');
   } catch (error) {
     logger.error('❌ Failed to shutdown application:', error);
@@ -739,14 +704,31 @@ export const getCleanupService = () => cleanupService;
  */
 export const gracefulShutdown = async (signal: string) => {
   logger.info(`\n🔄 Received ${signal}. Starting graceful shutdown...`);
-  
+
   try {
+    // Stop copy trading services
+    const copyTradingEnabled = process.env.COPY_TRADING_ENABLED === 'true';
+    if (copyTradingEnabled) {
+      try {
+        await transactionMonitor.stop();
+        logger.info('✅ Transaction monitor stopped');
+        
+        priceMonitor.stop();
+        logger.info('✅ Price monitor stopped');
+        
+        await executionQueue.close();
+        logger.info('✅ Execution queue closed');
+      } catch (error) {
+        logger.error('Error stopping copy trading services:', error);
+      }
+    }
+
     // Close database connections using singleton
     await disconnectDatabase();
-    
+
     logger.info('✅ Database connections closed');
     logger.info('✅ Graceful shutdown completed');
-    
+
     process.exit(0);
   } catch (error) {
     logger.error('❌ Error during graceful shutdown:', error);

@@ -5,28 +5,61 @@ import { AuthService } from '../src/lib/services/auth';
 
 const prisma = new PrismaClient();
 
+// Helper function for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function main() {
+  // Production safety check
+  if (process.env.NODE_ENV === 'production') {
+    console.log('⚠️  WARNING: Running seed script in production environment');
+    console.log('⚠️  This will create test users and data');
+    console.log('⚠️  Press Ctrl+C to cancel, or wait 5 seconds to continue...');
+    await delay(5000);
+  }
+
+  // Verify database connection before seeding
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('✅ Database connection verified');
+  } catch (error) {
+    console.error('❌ Database connection failed:', error);
+    process.exit(1);
+  }
+
   console.log('🌱 Seeding database...');
 
-  // Create test user
-  const hashedPassword = await bcrypt.hash('Test123!@#', 10);
-  
-  const testUser = await prisma.user.upsert({
+  // Create test user (with idempotency check)
+  const existingTestUser = await prisma.user.findFirst({
     where: { email: 'test@soulwallet.dev' },
-    update: {},
-    create: {
-      email: 'test@soulwallet.dev',
-      username: 'testuser',
-      password: hashedPassword,
-      name: 'Test User',
-      walletAddress: null, // Will be created when user sets up wallet
-    },
   });
 
-  console.log('✅ Test user created:');
-  console.log('   Email: test@soulwallet.dev');
-  console.log('   Password: Test123!@#');
-  console.log('   Username:', testUser.username);
+  let testUser;
+  if (existingTestUser) {
+    console.log('ℹ️ Test user already exists, skipping create:', existingTestUser.username);
+    testUser = existingTestUser;
+  } else {
+    const hashedPassword = await bcrypt.hash('Test123!@#', 10);
+    testUser = await prisma.user.create({
+      data: {
+        email: 'test@soulwallet.dev',
+        username: 'testuser',
+        password: hashedPassword,
+        name: 'Test User',
+        walletAddress: null, // Will be created when user sets up wallet
+      },
+    });
+    console.log('✅ Test user created:');
+    console.log('   Email: test@soulwallet.dev');
+    console.log('   Password: Test123!@#');
+    console.log('   Username:', testUser.username);
+  }
+
+  // Seed Summary
+  console.log('📊 Seed Summary:');
+  const userCount = await prisma.user.count();
+  const postCount = await prisma.post.count();
+  console.log(`   Users: ${userCount}`);
+  console.log(`   Posts: ${postCount}`);
 
   console.log('🎉 Database seeded successfully!');
 

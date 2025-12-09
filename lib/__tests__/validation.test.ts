@@ -8,7 +8,7 @@ import {
   sanitizeString,
   sanitizeHTML,
   sanitizeNumericInput,
-} from '../validation';
+} from '../../src/lib/validation';
 
 describe('Validation', () => {
   describe('validateSolanaAddress', () => {

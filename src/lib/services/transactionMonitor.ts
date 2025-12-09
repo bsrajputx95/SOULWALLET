@@ -3,6 +3,7 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import prisma from '../prisma';
 import { logger } from '../logger';
 import { executionQueue } from './executionQueue';
+import { priceMonitor } from './priceMonitor';
 
 interface HeliusTransaction {
   signature: string;
@@ -347,7 +348,8 @@ export class TransactionMonitor {
             continue;
           }
 
-          // Add to execution queue
+          // Add to execution queue - only handle BUY orders here
+          // SELL orders are handled by priceMonitor.handleTraderSell to avoid duplicates
           if (parsed.type === 'BUY') {
             await executionQueue.addBuyOrder({
               userId: copyRelation.userId,
@@ -357,31 +359,17 @@ export class TransactionMonitor {
               detectedTxId,
             });
             copiesCreated++;
-          } else if (parsed.type === 'SELL' && copyRelation.exitWithTrader) {
-            // Find open positions for this token
-            const positions = await prisma.position.findMany({
-              where: {
-                copyTradingId: copyRelation.id,
-                tokenMint: parsed.tokenMint,
-                status: 'OPEN',
-              },
-            });
-
-            for (const position of positions) {
-              await executionQueue.addSellOrder({
-                userId: copyRelation.userId,
-                copyTradingId: copyRelation.id,
-                positionId: position.id,
-                tokenMint: parsed.tokenMint,
-                amount: position.entryAmount,
-                reason: 'TRADER_SOLD',
-              });
-            }
-            copiesCreated += positions.length;
           }
+          // Note: SELL orders with exitWithTrader are handled by priceMonitor.handleTraderSell
+          // This prevents duplicate sell orders from being queued
         } catch (error) {
           logger.error(`Failed to create copy order for user ${copyRelation.userId}:`, error);
         }
+      }
+
+      // Handle SELL transactions through priceMonitor to avoid duplicates
+      if (parsed.type === 'SELL') {
+        await priceMonitor.handleTraderSell(detectedTxId);
       }
 
       // Update detected transaction with copies created count

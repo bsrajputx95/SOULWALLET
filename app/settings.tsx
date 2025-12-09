@@ -31,6 +31,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { NeonCard } from '../components/NeonCard';
 import { NeonButton } from '../components/NeonButton';
 import { useAuth } from '../hooks/auth-store';
+import { logger } from '../lib/client-logger';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -76,7 +77,7 @@ export default function SettingsScreen() {
         );
       }
     } catch (error) {
-      if (__DEV__) console.error('Error sharing:', error);
+      if (__DEV__) logger.error('Error sharing:', error);
       // Fallback: copy to clipboard
       try {
         await Clipboard.setStringAsync(walletData.publicKey);
@@ -86,7 +87,7 @@ export default function SettingsScreen() {
           [{ text: 'OK' }]
         );
       } catch (clipboardError) {
-        if (__DEV__) console.error('Failed to copy to clipboard:', clipboardError);
+        if (__DEV__) logger.error('Failed to copy to clipboard:', clipboardError);
       }
     }
   };

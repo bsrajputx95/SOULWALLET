@@ -1,4 +1,5 @@
 import DOMPurify from 'isomorphic-dompurify';
+import { logger } from './client-logger';
 
 /**
  * Sanitize HTML content to prevent XSS attacks
@@ -26,7 +27,7 @@ export function sanitizeHtml(html: string, allowedTags?: string[]): string {
 
     return DOMPurify.sanitize(html, config);
   } catch (error) {
-    console.error('HTML sanitization error:', error);
+    logger.error('HTML sanitization error:', error);
     // Return empty string on error for safety
     return '';
   }

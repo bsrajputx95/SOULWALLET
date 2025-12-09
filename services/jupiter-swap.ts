@@ -3,6 +3,8 @@
  * Integrates with Jupiter Protocol for token swaps on Solana
  */
 
+import { logger } from '../src/lib/logger';
+
 export interface SwapRoute {
   inputMint: string;
   outputMint: string;
@@ -60,7 +62,7 @@ class JupiterSwapService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error getting Jupiter quote:', error);
+      logger.error('Error getting Jupiter quote', error);
       throw error;
     }
   }
@@ -100,7 +102,7 @@ class JupiterSwapService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error getting swap transaction:', error);
+      logger.error('Error getting swap transaction', error);
       throw error;
     }
   }
@@ -127,7 +129,7 @@ class JupiterSwapService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error getting token list:', error);
+      logger.error('Error getting token list', error);
       throw error;
     }
   }
@@ -153,7 +155,7 @@ class JupiterSwapService {
       const data = await response.json();
       return data.data || {};
     } catch (error) {
-      console.error('Error getting prices:', error);
+      logger.error('Error getting prices from Jupiter', error);
       throw error;
     }
   }
@@ -166,7 +168,7 @@ class JupiterSwapService {
       const quote = await this.getQuote(inputMint, outputMint, '1000000'); // 1 token in base units
       return quote.marketInfos && quote.marketInfos.length > 0;
     } catch (error) {
-      console.warn(`No route found between ${inputMint} and ${outputMint}:`, error);
+      logger.warn(`No route found between ${inputMint} and ${outputMint}`, error);
       return false;
     }
   }

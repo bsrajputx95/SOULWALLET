@@ -1,6 +1,12 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import createContextHook from '@/lib/create-context-hook';
 import { trpc } from '@/lib/trpc';
+import { 
+  MarketFilters, 
+  DEFAULT_FILTERS, 
+  QuickFilterType,
+  countActiveFilters 
+} from '../types/market-filters';
 
 export interface Token {
   id: string;
@@ -10,11 +16,20 @@ export interface Token {
   change24h: number;
   liquidity?: number;
   volume?: number;
-  transactions?: number; // 24h transactions count (mock)
+  marketCap?: number;
+  fdv?: number;
+  transactions?: number;
+  buys24h?: number;
+  sells24h?: number;
+  pairAge?: number; // hours since pair creation
   logo?: string;
+  verified?: boolean;
+  pairToken?: string;
 }
 
-type FilterType = 'volume' | 'liquidity' | 'change' | 'age' | 'verified';
+// QuickFilterType is used for backward compatibility with activeFilters
+
+const PAGE_SIZE = 20;
 
 export const [MarketProvider, useMarket] = createContextHook(() => {
   // ✅ Fetch real SoulMarket tokens from backend
@@ -22,9 +37,111 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
     refetchInterval: 300000, // Refresh every 5 minutes
   });
 
-  // Transform DexScreener data to Token format
-  const tokens = useMemo(() => {
-    if (!soulMarketData || !('pairs' in soulMarketData) || !soulMarketData.pairs) return [];
+  // Filter state
+  const [filters, setFilters] = useState<MarketFilters>(DEFAULT_FILTERS);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [page, setPage] = useState(1);
+
+  // Dummy data for UI testing when no real data is available
+  const DUMMY_TOKENS: Token[] = [
+    {
+      id: 'dummy-sol-1',
+      symbol: 'SOL',
+      name: 'Solana',
+      price: 185.42,
+      change24h: 5.23,
+      liquidity: 2500000,
+      volume: 45000000,
+      marketCap: 85000000000,
+      fdv: 85000000000,
+      transactions: 24000,
+      buys24h: 15000,
+      sells24h: 9000,
+      pairAge: 8760, // 1 year
+      logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+      verified: true,
+      pairToken: 'USDC',
+    },
+    {
+      id: 'dummy-wif-2',
+      symbol: 'WIF',
+      name: 'dogwifhat',
+      price: 2.34,
+      change24h: -3.1,
+      liquidity: 1200000,
+      volume: 8500000,
+      marketCap: 2300000000,
+      fdv: 2300000000,
+      transactions: 8500,
+      buys24h: 4200,
+      sells24h: 4300,
+      pairAge: 720, // 30 days
+      logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm.png',
+      verified: true,
+      pairToken: 'SOL',
+    },
+    {
+      id: 'dummy-jup-3',
+      symbol: 'JUP',
+      name: 'Jupiter',
+      price: 0.87,
+      change24h: 12.5,
+      liquidity: 890000,
+      volume: 3200000,
+      marketCap: 1200000000,
+      fdv: 1500000000,
+      transactions: 12000,
+      buys24h: 8000,
+      sells24h: 4000,
+      pairAge: 2160, // 90 days
+      logo: 'https://static.jup.ag/jup/icon.png',
+      verified: true,
+      pairToken: 'USDC',
+    },
+    {
+      id: 'dummy-bonk-4',
+      symbol: 'BONK',
+      name: 'Bonk',
+      price: 0.000023,
+      change24h: 8.7,
+      liquidity: 650000,
+      volume: 1800000,
+      marketCap: 1500000000,
+      fdv: 2000000000,
+      transactions: 18000,
+      buys24h: 12000,
+      sells24h: 6000,
+      pairAge: 4320, // 180 days
+      logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
+      verified: true,
+      pairToken: 'SOL',
+    },
+    {
+      id: 'dummy-ray-5',
+      symbol: 'RAY',
+      name: 'Raydium',
+      price: 4.85,
+      change24h: 2.7,
+      liquidity: 2200000,
+      volume: 15000000,
+      marketCap: 750000000,
+      fdv: 1000000000,
+      transactions: 15000,
+      buys24h: 9000,
+      sells24h: 6000,
+      pairAge: 17520, // 2 years
+      logo: 'https://raw.githubusercontent.com/raydium-io/media-assets/master/logo/logo-only-icon.svg',
+      verified: true,
+      pairToken: 'USDC',
+    },
+  ];
+
+  // Transform DexScreener data to Token format with extended fields
+  const rawTokens = useMemo(() => {
+    if (!soulMarketData || !('pairs' in soulMarketData) || !soulMarketData.pairs || (soulMarketData.pairs as any[]).length === 0) {
+      // Return dummy data for UI testing when no real data
+      return DUMMY_TOKENS;
+    }
     
     return (soulMarketData.pairs as any[]).map((pair: any) => ({
       id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
@@ -34,10 +151,139 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       change24h: parseFloat(pair.priceChange?.h24 || '0'),
       liquidity: parseFloat(pair.liquidity?.usd || '0'),
       volume: parseFloat(pair.volume?.h24 || '0'),
+      marketCap: parseFloat(pair.marketCap || '0'),
+      fdv: parseFloat(pair.fdv || '0'),
       transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
+      buys24h: pair.txns?.h24?.buys || 0,
+      sells24h: pair.txns?.h24?.sells || 0,
+      pairAge: pair.pairCreatedAt ? Math.floor((Date.now() - pair.pairCreatedAt) / 3600000) : undefined,
       logo: pair.info?.imageUrl,
+      verified: pair.info?.verified || false,
+      pairToken: pair.quoteToken?.symbol,
     }));
   }, [soulMarketData]);
+
+  // Apply all filters
+  const filteredTokens = useMemo(() => {
+    let result = [...rawTokens];
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(token =>
+        token.symbol.toLowerCase().includes(query) ||
+        token.name.toLowerCase().includes(query)
+      );
+    }
+
+    // Quick filters
+    if (filters.quickFilters.includes('volume')) {
+      result = result.filter(t => (t.volume || 0) >= 1000000); // $1M+
+    }
+    if (filters.quickFilters.includes('liquidity')) {
+      result = result.filter(t => (t.liquidity || 0) >= 500000); // $500K+
+    }
+    if (filters.quickFilters.includes('change')) {
+      result = result.filter(t => t.change24h > 0);
+    }
+    if (filters.quickFilters.includes('age')) {
+      result = result.filter(t => (t.pairAge || Infinity) <= 24); // < 24h old
+    }
+    if (filters.quickFilters.includes('verified')) {
+      result = result.filter(t => t.verified);
+    }
+
+    // Range filters - Liquidity
+    if (filters.minLiquidity !== undefined) {
+      result = result.filter(t => (t.liquidity || 0) >= filters.minLiquidity!);
+    }
+    if (filters.maxLiquidity !== undefined) {
+      result = result.filter(t => (t.liquidity || 0) <= filters.maxLiquidity!);
+    }
+
+    // Range filters - Market Cap
+    if (filters.minMarketCap !== undefined) {
+      result = result.filter(t => (t.marketCap || 0) >= filters.minMarketCap!);
+    }
+    if (filters.maxMarketCap !== undefined) {
+      result = result.filter(t => (t.marketCap || 0) <= filters.maxMarketCap!);
+    }
+
+    // Range filters - FDV
+    if (filters.minFDV !== undefined) {
+      result = result.filter(t => (t.fdv || 0) >= filters.minFDV!);
+    }
+    if (filters.maxFDV !== undefined) {
+      result = result.filter(t => (t.fdv || 0) <= filters.maxFDV!);
+    }
+
+    // Range filters - Volume
+    if (filters.minVolume24h !== undefined) {
+      result = result.filter(t => (t.volume || 0) >= filters.minVolume24h!);
+    }
+    if (filters.maxVolume24h !== undefined) {
+      result = result.filter(t => (t.volume || 0) <= filters.maxVolume24h!);
+    }
+
+    // Age filters
+    if (filters.minAgeHours !== undefined) {
+      result = result.filter(t => (t.pairAge || 0) >= filters.minAgeHours!);
+    }
+    if (filters.maxAgeHours !== undefined) {
+      result = result.filter(t => (t.pairAge || Infinity) <= filters.maxAgeHours!);
+    }
+
+    // Transaction filters
+    if (filters.min24hTxns !== undefined) {
+      result = result.filter(t => (t.transactions || 0) >= filters.min24hTxns!);
+    }
+    if (filters.min24hBuys !== undefined) {
+      result = result.filter(t => (t.buys24h || 0) >= filters.min24hBuys!);
+    }
+    if (filters.min24hSells !== undefined) {
+      result = result.filter(t => (t.sells24h || 0) >= filters.min24hSells!);
+    }
+
+    // Pair filter
+    if (filters.pairToken) {
+      result = result.filter(t => 
+        t.pairToken?.toLowerCase() === filters.pairToken!.toLowerCase()
+      );
+    }
+
+    // Sorting
+    if (filters.sortBy) {
+      result.sort((a, b) => {
+        let aVal = 0, bVal = 0;
+        switch (filters.sortBy) {
+          case 'liquidity': aVal = a.liquidity || 0; bVal = b.liquidity || 0; break;
+          case 'volume': aVal = a.volume || 0; bVal = b.volume || 0; break;
+          case 'change': aVal = a.change24h; bVal = b.change24h; break;
+          case 'marketCap': aVal = a.marketCap || 0; bVal = b.marketCap || 0; break;
+          case 'age': aVal = a.pairAge || Infinity; bVal = b.pairAge || Infinity; break;
+          case 'price': aVal = a.price; bVal = b.price; break;
+        }
+        return filters.sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+    }
+
+    return result;
+  }, [rawTokens, searchQuery, filters]);
+
+  // Paginated tokens
+  const paginatedTokens = useMemo(() => {
+    return filteredTokens.slice(0, page * PAGE_SIZE);
+  }, [filteredTokens, page]);
+
+  const hasMore = paginatedTokens.length < filteredTokens.length;
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filters, searchQuery]);
+
+  // Legacy tokens export (now uses filtered + paginated)
+  const tokens = paginatedTokens;
 
   // REMOVED OLD DUMMY DATA
   /*
@@ -286,30 +532,73 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
   */
   
   const isLoading = isLoadingMarket;
-  const [activeFilters, setActiveFilters] = useState<FilterType[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const toggleFilter = useCallback((filter: FilterType) => {
-    setActiveFilters(prev => 
-      prev.includes(filter) 
-        ? prev.filter(f => f !== filter)
-        : [...prev, filter]
-    );
+  // Filter actions
+  const toggleQuickFilter = useCallback((filter: QuickFilterType) => {
+    setFilters((prev: MarketFilters) => ({
+      ...prev,
+      quickFilters: prev.quickFilters.includes(filter)
+        ? prev.quickFilters.filter((f: QuickFilterType) => f !== filter)
+        : [...prev.quickFilters, filter]
+    }));
   }, []);
+
+  const setAdvancedFilters = useCallback((advancedFilters: Partial<MarketFilters>) => {
+    setFilters((prev: MarketFilters) => ({ ...prev, ...advancedFilters }));
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setFilters(DEFAULT_FILTERS);
+    setSearchQuery('');
+  }, []);
+
+  const loadMore = useCallback(() => {
+    if (hasMore) {
+      setPage(p => p + 1);
+    }
+  }, [hasMore]);
 
   const refetch = useCallback(async () => {
     await refetchMarket();
   }, [refetchMarket]);
 
+  // Count active filters for badge
+  const activeFilterCount = countActiveFilters(filters);
+
   const contextValue = useMemo(() => ({
+    // Token data
     tokens,
+    rawTokens,
+    totalCount: filteredTokens.length,
     isLoading,
-    activeFilters,
-    toggleFilter,
+    hasMore,
+    
+    // Filter state
+    filters,
     searchQuery,
+    activeFilterCount,
+    
+    // Filter actions
     setSearchQuery,
+    toggleQuickFilter,
+    setAdvancedFilters,
+    clearFilters,
+    
+    // Pagination
+    loadMore,
+    
+    // Refresh
     refetch,
-  }), [tokens, isLoading, activeFilters, toggleFilter, searchQuery, refetch]);
+    
+    // Legacy compatibility
+    activeFilters: filters.quickFilters,
+    toggleFilter: toggleQuickFilter,
+  }), [
+    tokens, rawTokens, filteredTokens.length, isLoading, hasMore,
+    filters, searchQuery, activeFilterCount,
+    toggleQuickFilter, setAdvancedFilters, clearFilters,
+    loadMore, refetch
+  ]);
 
   return contextValue;
 });

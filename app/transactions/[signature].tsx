@@ -37,6 +37,7 @@ import * as Haptics from 'expo-haptics';
 import { trpc } from '../../lib/trpc';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+import { logger } from '../../lib/client-logger';
 
 export default function TransactionDetailsScreen() {
   const { signature } = useLocalSearchParams<{ signature: string }>();
@@ -79,7 +80,7 @@ export default function TransactionDetailsScreen() {
         );
       }
     } catch (error) {
-      console.error('Error sharing:', error);
+      logger.error('Error sharing transaction:', error);
       // Fallback: copy to clipboard
       try {
         const fallbackText = `Transaction: ${transaction.signature}\nAmount: ${transaction.amount} ${transaction.tokenSymbol || 'SOL'}\nStatus: ${transaction.status}`;
@@ -90,7 +91,7 @@ export default function TransactionDetailsScreen() {
           [{ text: 'OK' }]
         );
       } catch (clipboardError) {
-        console.error('Failed to copy to clipboard:', clipboardError);
+        logger.error('Failed to copy to clipboard:', clipboardError);
       }
     }
   };

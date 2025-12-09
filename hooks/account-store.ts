@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import createContextHook from '@/lib/create-context-hook';
 import { trpc } from '../lib/trpc';
+import { logger } from '../lib/client-logger';
 
 interface UserProfile {
   id: string;
@@ -131,7 +132,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       }
       return result;
     } catch (error) {
-      console.error('Failed to update profile:', error);
+      logger.error('Failed to update profile:', error);
       throw error;
     }
   };
@@ -157,7 +158,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       }
       return result;
     } catch (error) {
-      console.error('Failed to update security settings:', error);
+      logger.error('Failed to update security settings:', error);
       throw error;
     }
   };
@@ -171,7 +172,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       securityQuery.refetch();
       return result;
     } catch (error) {
-      console.error('Failed to reset password:', error);
+      logger.error('Failed to reset password:', error);
       throw error;
     }
   };
@@ -181,7 +182,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       const result = await getPrivateKeyMutation.mutateAsync({ password });
       return result;
     } catch (error) {
-      console.error('Failed to get private key:', error);
+      logger.error('Failed to get private key:', error);
       throw error;
     }
   };
@@ -191,7 +192,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       const result = await getRecoveryPhraseMutation.mutateAsync({ password });
       return result;
     } catch (error) {
-      console.error('Failed to get recovery phrase:', error);
+      logger.error('Failed to get recovery phrase:', error);
       throw error;
     }
   };
@@ -202,7 +203,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       securityQuery.refetch();
       return result;
     } catch (error) {
-      console.error('Failed to generate backup codes:', error);
+      logger.error('Failed to generate backup codes:', error);
       throw error;
     }
   };
@@ -223,7 +224,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       }
       return result;
     } catch (error) {
-      console.error('Failed to upload profile image:', error);
+      logger.error('Failed to upload profile image:', error);
       throw error;
     }
   };
@@ -242,7 +243,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
       }
       return result;
     } catch (error) {
-      console.error('Failed to delete account:', error);
+      logger.error('Failed to delete account:', error);
       throw error;
     }
   };

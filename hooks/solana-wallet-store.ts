@@ -3,6 +3,7 @@ import createContextHook from '@/lib/create-context-hook';
 import { getSecureItem, setSecureItem, deleteSecureItem, SecureStorage } from '@/lib/secure-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trpcClient } from '@/lib/trpc';
+import { logger } from '@/lib/client-logger';
 
 import type {
   ParsedAccountData
@@ -57,24 +58,24 @@ async function createConnection(): Promise<Connection> {
         connection.getVersion(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
       ]);
-      console.log('✅ Connected to RPC:', endpoint);
+      logger.info('Connected to RPC:', endpoint);
       return connection;
     } catch (error) {
-      console.warn('⚠️ RPC failed:', endpoint, error instanceof Error ? error.message : 'Unknown error');
+      logger.warn('RPC failed:', endpoint, error instanceof Error ? error.message : 'Unknown error');
       currentRpcIndex = (currentRpcIndex + 1) % RPC_ENDPOINTS.length;
       attempts++;
     }
   }
   
   // If all endpoints fail, return a connection anyway (offline mode)
-  console.warn('⚠️ All RPC endpoints failed. Running in offline mode.');
+  logger.warn('All RPC endpoints failed. Running in offline mode.');
   return new Connection(RPC_ENDPOINTS[0] || 'https://api.mainnet-beta.solana.com', 'confirmed');
 }
 
 // Dynamically import SPL token functions only on native platforms
 const loadSplTokenFunctions = async () => {
   if (Platform.OS === 'web') {
-    console.log('SPL Token functions disabled on web');
+    logger.info('SPL Token functions disabled on web');
     return;
   }
   
@@ -85,9 +86,9 @@ const loadSplTokenFunctions = async () => {
     createAssociatedTokenAccountInstruction = splToken.createAssociatedTokenAccountInstruction;
     createTransferInstruction = splToken.createTransferInstruction;
     getAccount = splToken.getAccount;
-    console.log('SPL Token functions loaded successfully');
+    logger.info('SPL Token functions loaded successfully');
   } catch (error) {
-    console.warn('SPL Token functions not available:', error);
+    logger.warn('SPL Token functions not available:', error);
   }
 };
 
@@ -165,10 +166,10 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
   const syncWalletAddressToBackend = async (publicKey: string) => {
     try {
       await trpcClient.user.updateWalletAddress.mutate({ walletAddress: publicKey });
-      console.log('✅ Wallet address synced to backend:', publicKey);
+      logger.info('Wallet address synced to backend:', publicKey);
     } catch (error) {
       // Silent fail - backend sync is not critical for wallet functionality
-      if (__DEV__) console.warn('⚠️ Failed to sync wallet to backend:', error);
+      if (__DEV__) logger.warn('Failed to sync wallet to backend:', error);
     }
   };
 
@@ -183,7 +184,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       }
       setState(prev => ({ ...prev, isLoading: false }));
     } catch (error) {
-      if (__DEV__) console.error('Error loading wallet:', error);
+      if (__DEV__) logger.error('Error loading wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       // Silent fail for initial load - user can create/import wallet
     }
@@ -223,10 +224,10 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
       setState(prev => ({ ...prev, wallet, publicKey, isLoading: false, needsUnlock: false }));
       await syncWalletAddressToBackend(publicKey);
-      console.log('New encrypted wallet created:', publicKey);
+      logger.info('New encrypted wallet created:', publicKey);
       return wallet;
     } catch (error) {
-      if (__DEV__) console.error('Error creating encrypted wallet:', error);
+      if (__DEV__) logger.error('Error creating encrypted wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw new Error('Failed to create encrypted wallet. Please try again.');
     }
@@ -257,10 +258,10 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
       await syncWalletAddressToBackend(publicKey);
       await refreshBalances(wallet);
-      console.log('Encrypted wallet imported:', publicKey);
+      logger.info('Encrypted wallet imported:', publicKey);
       return wallet;
     } catch (error) {
-      if (__DEV__) console.error('Error importing encrypted wallet:', error);
+      if (__DEV__) logger.error('Error importing encrypted wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw new Error('Invalid private key or password.');
     }
@@ -315,7 +316,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
             }
           }
         } catch (error) {
-          console.warn('Error loading token balances:', error);
+          logger.warn('Error loading token balances:', error);
         }
       }
       
@@ -329,7 +330,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       }));
       
     } catch (error) {
-      if (__DEV__) console.error('Error refreshing balances:', error);
+      if (__DEV__) logger.error('Error refreshing balances:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       // Silent fail - balances will be retried on next action
     }
@@ -359,7 +360,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       if (!simulation.success) {
         throw new Error(`Simulation failed: ${simulation.error}`);
       }
-      console.log('✅ Simulation passed');
+      logger.info('Simulation passed');
       
       // Estimate fees
       const fee = await estimateTransactionFee(transaction);
@@ -380,7 +381,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Transaction confirmation timeout')), CONFIRMATION_TIMEOUT_MS));
       const signature = await Promise.race([confirmationPromise, timeoutPromise]);
       
-      console.log('✅ Transaction confirmed:', signature);
+      logger.info('Transaction confirmed:', signature);
       
       // Wait for finalization
       await waitForFinalization(signature);
@@ -389,7 +390,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       setState(prev => ({ ...prev, isLoading: false }));
       return signature;
     } catch (error: any) {
-      console.error('❌ Transaction failed:', error);
+      logger.error('Transaction failed:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw new Error(`Transaction failed: ${error.message}`);
     }
@@ -401,7 +402,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       const status = await state.connection.getSignatureStatus(signature);
       
       if (status.value?.confirmationStatus === 'finalized') {
-        console.log('✅ Finalized');
+        logger.info('Finalized');
         return;
       }
       
@@ -411,7 +412,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
-    console.warn('⚠️ Not finalized after max attempts');
+    logger.warn('Not finalized after max attempts');
   };
 
   // Simulate transaction before sending
@@ -494,7 +495,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       );
       return feeCalculator.value || 5000;
     } catch (error) {
-      console.error('Failed to estimate fee:', error);
+      logger.error('Failed to estimate fee:', error);
       return 5000;
     }
   };
@@ -572,7 +573,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Transaction confirmation timeout')), CONFIRMATION_TIMEOUT_MS));
       const signature = await Promise.race([confirmationPromise, timeoutPromise]);
       
-      console.log('Token transfer successful:', signature);
+      logger.info('Token transfer successful:', signature);
       
       // Refresh balances after successful transfer
       await refreshBalances();
@@ -581,7 +582,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       return signature;
       
     } catch (error) {
-      console.error('Error sending token:', error);
+      logger.error('Error sending token:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw error;
     }
@@ -610,10 +611,10 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       });
       
       if (__DEV__) {
-        console.log('Wallet deleted successfully');
+        logger.info('Wallet deleted successfully');
       }
     } catch (error) {
-      console.error('Error deleting wallet:', error);
+      logger.error('Error deleting wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw error;
     }
@@ -640,7 +641,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
         }
       );
       
-      console.log('Swap executed successfully:', signature);
+      logger.info('Swap executed successfully:', signature);
       
       // Refresh balances after successful swap
       await refreshBalances();
@@ -649,7 +650,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       return signature;
       
     } catch (error) {
-      console.error('Error executing swap:', error);
+      logger.error('Error executing swap:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw error;
     }

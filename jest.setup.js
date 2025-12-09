@@ -31,8 +31,5 @@ jest.mock('expo-router', () => ({
 }));
 
 // Silence console warnings in tests
-global.console = {
-  ...console,
-  warn: jest.fn(),
-  error: jest.fn(),
-};
+jest.spyOn(console, 'warn').mockImplementation(() => { });
+jest.spyOn(console, 'error').mockImplementation(() => { });

@@ -18,10 +18,12 @@ import { Search, X, Settings, Plus } from 'lucide-react-native';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { useMarket } from '../../hooks/market-store';
+import { parseFilterValue } from '../../types/market-filters';
 
 // Import TokenCard
 import { TokenCard } from '../../components/TokenCard';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
 
 type MarketTab = 'soulmarket' | 'raydium' | 'pumpfun' | 'bullx' | 'dexscreener';
 
@@ -34,7 +36,13 @@ export default function MarketScreen() {
     toggleFilter, 
     searchQuery, 
     setSearchQuery, 
-    refetch 
+    refetch,
+    setAdvancedFilters,
+    clearFilters,
+    activeFilterCount,
+    hasMore,
+    loadMore,
+    totalCount,
   } = useMarket();
 
   // Responsive padding logic like Home screen
@@ -80,15 +88,9 @@ export default function MarketScreen() {
     setRefreshing(false);
   }, [refetch]);
 
-  // Compute visible tokens based on search query
-  const query = searchQuery.trim().toLowerCase();
-  const visibleTokens = tokens.filter(token => {
-    if (!query) return true;
-    return (
-      token.symbol.toLowerCase().includes(query) ||
-      token.name.toLowerCase().includes(query)
-    );
-  });
+  // Tokens are already filtered in the store, use directly
+  // totalCount shows total filtered results, tokens shows paginated subset
+  const visibleTokens = tokens;
 
   // Handle scroll for header animation with improved behavior
   const handleScroll = Animated.event(
@@ -163,6 +165,13 @@ export default function MarketScreen() {
               </View>
             )}
 
+            {/* Token Count */}
+            {totalCount > 0 && (
+              <Text style={styles.tokenCount}>
+                Showing {visibleTokens.length} of {totalCount} tokens
+              </Text>
+            )}
+
             {/* Tokens List */}
             {visibleTokens.map(token => (
               <TokenCard
@@ -177,25 +186,23 @@ export default function MarketScreen() {
                 {...(token.logo ? { logo: token.logo } : {})}
               />
             ))}
+
+            {/* Load More Button */}
+            {hasMore && (
+              <Pressable style={styles.loadMoreButton} onPress={loadMore}>
+                <Text style={styles.loadMoreText}>Load More</Text>
+              </Pressable>
+            )}
           </View>
         );
       case 'raydium':
+        return <ExternalPlatformWebView platform="raydium" />;
       case 'pumpfun':
+        return <ExternalPlatformWebView platform="pumpfun" />;
       case 'bullx':
+        return <ExternalPlatformWebView platform="bullx" />;
       case 'dexscreener':
-        return (
-          <View style={styles.webViewPlaceholder}>
-            <Text style={styles.webViewTitle}>
-              {activeTab === 'raydium' && 'Raydium'}
-              {activeTab === 'pumpfun' && 'Pump.fun'}
-              {activeTab === 'bullx' && 'BullX'}
-              {activeTab === 'dexscreener' && 'Dexscreener'}
-            </Text>
-            <Text style={styles.webViewDescription}>
-              External platform would load here in a WebView.
-            </Text>
-          </View>
-        );
+        return <ExternalPlatformWebView platform="dexscreener" />;
       default:
         return null;
     }
@@ -247,6 +254,11 @@ export default function MarketScreen() {
               onPress={() => setShowFilters(!showFilters)}
             >
               <Settings size={24} color={COLORS.solana} />
+              {activeFilterCount > 0 && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              )}
             </Pressable>
           </View>
         </View>
@@ -668,6 +680,7 @@ export default function MarketScreen() {
                 <Pressable 
                   style={styles.clearButton}
                   onPress={() => {
+                    // Clear local state
                     setMinLiquidity('');
                     setMaxLiquidity('');
                     setMinMarketCap('');
@@ -681,6 +694,8 @@ export default function MarketScreen() {
                     setMin24hBuys('');
                     setMin24hSells('');
                     setMin24hVolume('');
+                    // Clear store filters
+                    clearFilters();
                   }}
                 >
                   <Text style={styles.clearButtonText}>Clear All</Text>
@@ -689,14 +704,22 @@ export default function MarketScreen() {
                 <Pressable 
                   style={styles.applyButton}
                   onPress={() => {
-                    // Apply filters logic here
-                    if (__DEV__) {
-                      console.log('Applying filters:', {
-                        minLiquidity, maxLiquidity, minMarketCap, maxMarketCap,
-                        minFDV, maxFDV, pairFilter, minAge, maxAge,
-                        min24hTxns, min24hBuys, min24hSells, min24hVolume
-                      });
-                    }
+                    // Apply advanced filters to market store
+                    setAdvancedFilters({
+                      minLiquidity: parseFilterValue(minLiquidity),
+                      maxLiquidity: parseFilterValue(maxLiquidity),
+                      minMarketCap: parseFilterValue(minMarketCap),
+                      maxMarketCap: parseFilterValue(maxMarketCap),
+                      minFDV: parseFilterValue(minFDV),
+                      maxFDV: parseFilterValue(maxFDV),
+                      minAgeHours: parseFilterValue(minAge),
+                      maxAgeHours: parseFilterValue(maxAge),
+                      min24hTxns: parseFilterValue(min24hTxns),
+                      min24hBuys: parseFilterValue(min24hBuys),
+                      min24hSells: parseFilterValue(min24hSells),
+                      minVolume24h: parseFilterValue(min24hVolume),
+                      pairToken: pairFilter.trim() || undefined,
+                    });
                     setShowAdvancedFilters(false);
                   }}
                 >
@@ -988,5 +1011,84 @@ const styles = StyleSheet.create({
     ...FONTS.phantomSemiBold,
     color: COLORS.textPrimary,
     fontSize: 16,
+  },
+  // Loading and empty states
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.xl,
+  },
+  loadingText: {
+    ...FONTS.orbitronMedium,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    marginBottom: SPACING.s,
+  },
+  loadingSubtext: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.xl,
+  },
+  emptyTitle: {
+    ...FONTS.orbitronMedium,
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    marginBottom: SPACING.s,
+  },
+  emptySubtitle: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  // Filter badge
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: COLORS.solana,
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    ...FONTS.sfProMedium,
+    color: COLORS.textPrimary,
+    fontSize: 10,
+  },
+  // Token count
+  tokenCount: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: SPACING.s,
+  },
+  // Load more button
+  loadMoreButton: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    paddingVertical: SPACING.m,
+    marginTop: SPACING.m,
+    marginBottom: SPACING.l,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.solana + '30',
+  },
+  loadMoreText: {
+    ...FONTS.sfProMedium,
+    color: COLORS.solana,
+    fontSize: 14,
   },
 });

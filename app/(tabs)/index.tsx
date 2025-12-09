@@ -38,7 +38,7 @@ export default function HomeScreen() {
   const isSmallScreen = width < 375;
   const { user } = useAuth();
   const isAuthenticated = !!user;
-  const { tokens, totalBalance, dailyPnl, refetch } = useWallet();
+  const { totalBalance, dailyPnl, refetch } = useWallet();
 
   const { 
     wallet: solanaWallet, 
@@ -70,6 +70,15 @@ export default function HomeScreen() {
     }));
   }, [trendingData]);
   
+  // ✅ Custodial wallet for copy trading
+  const { data: custodialWalletData, refetch: refetchCustodialWallet } = trpc.copyTrading.getCustodialBalance.useQuery(undefined, {
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const setupCustodialWalletMutation = trpc.copyTrading.setupCustodialWallet.useMutation();
+
   // ✅ Real copy trading queries and mutations
   const { data: myCopyTradesData } = trpc.copyTrading.getMyCopyTrades.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -112,6 +121,27 @@ export default function HomeScreen() {
   
   const createCopyTrade = async (params: any) => { 
     try {
+      // Check if user has custodial wallet
+      if (!custodialWalletData?.hasWallet) {
+        // Setup custodial wallet first
+        const result = await setupCustodialWalletMutation.mutateAsync();
+        Alert.alert(
+          'Custodial Wallet Created',
+          `Deposit USDC to ${result.publicKey?.slice(0, 8)}...${result.publicKey?.slice(-8)} to start copy trading.`,
+          [{ text: 'OK', onPress: () => refetchCustodialWallet() }]
+        );
+        return;
+      }
+
+      // Check if user has sufficient USDC balance
+      if ((custodialWalletData?.usdcBalance || 0) < params.totalAmount) {
+        Alert.alert(
+          'Insufficient Balance',
+          `You need ${params.totalAmount} USDC but only have ${custodialWalletData?.usdcBalance?.toFixed(2) || 0} USDC.\n\nDeposit to: ${custodialWalletData?.publicKey?.slice(0, 8)}...${custodialWalletData?.publicKey?.slice(-8)}`
+        );
+        return;
+      }
+
       await createCopyTradeMutation.mutateAsync({
         walletAddress: params.targetWalletAddress,
         totalBudget: params.totalAmount,
@@ -165,7 +195,6 @@ export default function HomeScreen() {
       enabled: isAuthenticated && debouncedCoinsSearch.length >= 2,
       staleTime: 60_000,
       refetchOnWindowFocus: false,
-      keepPreviousData: true,
     }
   );
 
@@ -277,6 +306,59 @@ export default function HomeScreen() {
   const handleCopyAddress = async () => {
     await Clipboard.setStringAsync(walletAddress);
     Alert.alert('Copied!', 'Wallet address copied to clipboard');
+  };
+
+  // Validate Solana address
+  const validateSolanaAddress = (address: string): boolean => {
+    if (!address || address.trim().length === 0) return false;
+    try {
+      new PublicKey(address);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Validate copy trade form
+  const validateCopyTradeForm = (): boolean => {
+    const amount = parseFloat(copyAmount);
+    const perTrade = parseFloat(amountPerTrade);
+    const sl = stopLoss ? parseFloat(stopLoss) : undefined;
+    const tp = takeProfit ? parseFloat(takeProfit) : undefined;
+    const slip = maxSlippage ? parseFloat(maxSlippage) : 0.5;
+    if (!selectedTraderWallet || !validateSolanaAddress(selectedTraderWallet)) {
+      Alert.alert('Error', 'Please enter a valid wallet address');
+      return false;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Invalid Input', 'Total amount must be a positive number');
+      return false;
+    }
+    if (isNaN(perTrade) || perTrade <= 0) {
+      Alert.alert('Invalid Input', 'Amount per trade must be a positive number');
+      return false;
+    }
+    if (perTrade > amount) {
+      Alert.alert('Invalid Input', 'Amount per trade cannot exceed total budget');
+      return false;
+    }
+    if (sl !== undefined && (isNaN(sl) || sl > 0 || sl < -100)) {
+      Alert.alert('Invalid Input', 'Stop loss must be between -100% and 0%');
+      return false;
+    }
+    if (tp !== undefined && (isNaN(tp) || tp <= 0 || tp > 1000)) {
+      Alert.alert('Invalid Input', 'Take profit must be between 0% and 1000%');
+      return false;
+    }
+    if (isNaN(slip) || slip <= 0 || slip > 50) {
+      Alert.alert('Invalid Input', 'Max slippage must be between 0% and 50%');
+      return false;
+    }
+    if (typeof totalBalance === 'number' && amount > totalBalance) {
+      Alert.alert('Insufficient Balance', 'Reduce total amount to fit your balance');
+      return false;
+    }
+    return true;
   };
   
   const handleSend = () => {
@@ -403,7 +485,7 @@ export default function HomeScreen() {
                 </Text>
               </View>
             ) : (
-              displayCoins.map(coin => (
+              displayCoins.map((coin: { id: string; symbol: string; name: string; price: number; change24h: number; logo?: string }) => (
                 <TokenCard
                   key={coin.id}
                   symbol={coin.symbol}
@@ -2053,7 +2135,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: SPACING.md,
-    ...FONTS.body,
+    ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
   },
@@ -2067,65 +2149,16 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     marginTop: SPACING.lg,
-    ...FONTS.h3,
+    ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     textAlign: 'center',
+    fontSize: 18,
   },
   emptySubtitle: {
     marginTop: SPACING.s,
-    ...FONTS.body,
+    ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     textAlign: 'center',
     fontSize: 14,
   },
 });
-  const validateSolanaAddress = (address: string): boolean => {
-    if (!address || address.trim().length === 0) return false;
-    try {
-      new PublicKey(address);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const validateCopyTradeForm = (): boolean => {
-    const amount = parseFloat(copyAmount);
-    const perTrade = parseFloat(amountPerTrade);
-    const sl = stopLoss ? parseFloat(stopLoss) : undefined;
-    const tp = takeProfit ? parseFloat(takeProfit) : undefined;
-    const slip = maxSlippage ? parseFloat(maxSlippage) : 0.5;
-    if (!selectedTraderWallet || !validateSolanaAddress(selectedTraderWallet)) {
-      Alert.alert('Error', 'Please enter a valid wallet address');
-      return false;
-    }
-    if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Invalid Input', 'Total amount must be a positive number');
-      return false;
-    }
-    if (isNaN(perTrade) || perTrade <= 0) {
-      Alert.alert('Invalid Input', 'Amount per trade must be a positive number');
-      return false;
-    }
-    if (perTrade > amount) {
-      Alert.alert('Invalid Input', 'Amount per trade cannot exceed total budget');
-      return false;
-    }
-    if (sl !== undefined && (isNaN(sl) || sl > 0 || sl < -100)) {
-      Alert.alert('Invalid Input', 'Stop loss must be between -100% and 0%');
-      return false;
-    }
-    if (tp !== undefined && (isNaN(tp) || tp <= 0 || tp > 1000)) {
-      Alert.alert('Invalid Input', 'Take profit must be between 0% and 1000%');
-      return false;
-    }
-    if (isNaN(slip) || slip <= 0 || slip > 50) {
-      Alert.alert('Invalid Input', 'Max slippage must be between 0% and 50%');
-      return false;
-    }
-    if (typeof totalBalance === 'number' && amount > totalBalance) {
-      Alert.alert('Insufficient Balance', 'Reduce total amount to fit your balance');
-      return false;
-    }
-    return true;
-  };
