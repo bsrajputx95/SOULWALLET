@@ -59,7 +59,7 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (
-    <Stack screenOptions={{ 
+    <Stack screenOptions={{
       headerShown: false,
       contentStyle: { backgroundColor: COLORS.background },
       animation: 'fade',
@@ -85,8 +85,16 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    // Set app ready when fonts load OR after timeout (whichever comes first)
     if (fontsLoaded) {
       setAppIsReady(true);
+    } else {
+      // Timeout fallback - proceed after 5 seconds even if fonts fail
+      const timeout = setTimeout(() => {
+        console.warn('Font loading timeout - proceeding without custom fonts');
+        setAppIsReady(true);
+      }, 5000);
+      return () => clearTimeout(timeout);
     }
   }, [fontsLoaded]);
 
@@ -109,7 +117,7 @@ export default function RootLayout() {
   const onLayoutRootView = useCallback(async () => {
     if (appIsReady) {
       await SplashScreen.hideAsync();
-      
+
       // Complete app startup performance monitoring
       if (__DEV__) {
         performanceMonitor.endTiming('app-startup');
@@ -147,7 +155,7 @@ export default function RootLayout() {
             </WalletProvider>
           </AuthProvider>
         </QueryClientProvider>
-      {/* @ts-ignore */}
+        {/* @ts-ignore */}
       </trpc.Provider>
     </ErrorBoundary>
   );

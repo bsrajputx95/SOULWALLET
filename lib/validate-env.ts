@@ -51,7 +51,7 @@ export function validateEnvironment(): ValidationResult {
   for (const envVar of REQUIRED_ENV_VARS) {
     // eslint-disable-next-line expo/no-dynamic-env-var
     const value = process.env[envVar.key];
-    
+
     if (!value || value.trim() === '') {
       errors.push(
         `❌ Missing required environment variable: ${envVar.key}\n` +
@@ -77,7 +77,7 @@ export function validateEnvironment(): ValidationResult {
   for (const envVar of OPTIONAL_ENV_VARS) {
     // eslint-disable-next-line expo/no-dynamic-env-var
     const value = process.env[envVar.key];
-    
+
     // Only show warning if the env var is not defined or empty
     // If it's set to 'disabled' or has a real value, don't warn
     if (!value || value.trim() === '') {
@@ -124,7 +124,7 @@ export function validateEnvironmentOrThrow(): void {
     ].join('\n');
 
     console.error(errorMessage);
-    
+
     // In development, throw to alert developer
     // In production, log but don't crash - let app show error UI
     if (__DEV__) {
@@ -170,7 +170,17 @@ export function getOptionalEnv(key: string, fallback: string = ''): string {
 
 /**
  * Type-safe environment configuration
+ * Uses lazy getters to avoid throwing at module load time
  */
 export const env: EnvConfig = {
-  EXPO_PUBLIC_API_URL: getRequiredEnv('EXPO_PUBLIC_API_URL'),
+  get EXPO_PUBLIC_API_URL(): string {
+    try {
+      return getRequiredEnv('EXPO_PUBLIC_API_URL');
+    } catch {
+      // Fallback for production builds where env might not be available at module load
+      // This allows the app to at least start and show an error UI
+      console.warn('EXPO_PUBLIC_API_URL not available, using fallback');
+      return process.env.EXPO_PUBLIC_API_URL || 'https://soulwallet-production.up.railway.app';
+    }
+  },
 };
