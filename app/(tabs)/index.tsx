@@ -1,10 +1,10 @@
 import React from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  ScrollView, 
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
   RefreshControl,
   Image,
   useWindowDimensions,
@@ -12,7 +12,8 @@ import {
   TextInput,
   Alert,
   Linking,
-  Pressable } from 'react-native';
+  Pressable
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, Copy, QrCode, Send, ArrowUpDown, ChevronDown, Search } from 'lucide-react-native';
@@ -36,16 +37,33 @@ export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 375;
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const isAuthenticated = !!user;
   const { totalBalance, dailyPnl, refetch } = useWallet();
 
-  const { 
-    wallet: solanaWallet, 
-    publicKey: solanaPublicKey, 
+  // Auth guard - redirect to login if not authenticated
+  React.useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/(auth)/login');
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  // Show nothing while checking auth (splash screen is still visible)
+  if (authLoading) {
+    return null;
+  }
+
+  // If not authenticated, don't render (redirect will happen)
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  const {
+    wallet: solanaWallet,
+    publicKey: solanaPublicKey,
     getAvailableTokens
   } = useSolanaWallet();
-  
+
   // ✅ Fetch trending coins from market
   const { data: trendingData, isLoading: trendingLoading } = trpc.market.trending.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -57,7 +75,7 @@ export default function HomeScreen() {
   // Transform trending data to displayable format
   const topCoins = React.useMemo(() => {
     if (!trendingData?.pairs) return [];
-    
+
     return trendingData.pairs.slice(0, 20).map((pair: any) => ({
       id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
       symbol: pair.baseToken?.symbol || 'UNKNOWN',
@@ -69,7 +87,7 @@ export default function HomeScreen() {
       liquidity: parseFloat(pair.liquidity?.usd || '0'),
     }));
   }, [trendingData]);
-  
+
   // ✅ Custodial wallet for copy trading
   const { data: custodialWalletData, refetch: refetchCustodialWallet } = trpc.copyTrading.getCustodialBalance.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -92,17 +110,17 @@ export default function HomeScreen() {
     refetchInterval: 120_000,
     refetchOnWindowFocus: false,
   });
-  
+
   const copyTradeSettings = myCopyTradesData || [];
-  
+
   // ✅ Fetch recent positions/trades
   const { data: positionsData } = trpc.copyTrading.getPositionHistory.useQuery(
     { limit: 10 },
     { enabled: isAuthenticated, staleTime: 120_000, refetchInterval: 120_000, refetchOnWindowFocus: false }
   );
-  
+
   const copyTrades = positionsData?.positions || [];
-  
+
   const getStats = () => {
     if (!copyStatsData) {
       return { activeCopies: 0, totalTrades: 0, profitLoss: 0, profitLossPercentage: 0 };
@@ -115,11 +133,11 @@ export default function HomeScreen() {
       profitLossPercentage: copyStatsData.winRate || 0,
     };
   };
-  
+
   const createCopyTradeMutation = trpc.copyTrading.startCopying.useMutation();
   const stopCopyTradeMutation = trpc.copyTrading.stopCopying.useMutation();
-  
-  const createCopyTrade = async (params: any) => { 
+
+  const createCopyTrade = async (params: any) => {
     try {
       // Check if user has custodial wallet
       if (!custodialWalletData?.hasWallet) {
@@ -154,8 +172,8 @@ export default function HomeScreen() {
       throw new Error(error.message || 'Failed to create copy trade');
     }
   };
-  
-  const stopCopyTrade = async (copyTradingId: string) => { 
+
+  const stopCopyTrade = async (copyTradingId: string) => {
     try {
       await stopCopyTradeMutation.mutateAsync({ copyTradingId });
       Alert.alert('Success', 'Stopped copy trading');
@@ -163,13 +181,13 @@ export default function HomeScreen() {
       Alert.alert('Error', error.message || 'Failed to stop copy trading');
     }
   };
-  
+
   const isCreating = createCopyTradeMutation.isPending || false;
-  
+
   const [refreshing, setRefreshing] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<'coins' | 'traders' | 'copy'>('coins');
   const [pnlPeriod, setPnlPeriod] = React.useState<'1d' | '7d' | '30d' | '1y'>('1d');
-  
+
   // Search and filter states
   const [coinsSearchQuery, setCoinsSearchQuery] = React.useState('');
   const [tradersSearchQuery, setTradersSearchQuery] = React.useState('');
@@ -184,7 +202,7 @@ export default function HomeScreen() {
     const timer = setTimeout(() => {
       setDebouncedCoinsSearch(coinsSearchQuery);
     }, 300); // 300ms debounce
-    
+
     return () => clearTimeout(timer);
   }, [coinsSearchQuery]);
 
@@ -201,7 +219,7 @@ export default function HomeScreen() {
   // Transform search results
   const searchCoins = React.useMemo(() => {
     if (!searchData?.pairs) return [];
-    
+
     return searchData.pairs.slice(0, 10).map((pair: any) => ({
       id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
       symbol: pair.baseToken?.symbol || 'UNKNOWN',
@@ -245,19 +263,19 @@ export default function HomeScreen() {
   const [stopLoss, setStopLoss] = React.useState('10');
   const [takeProfit, setTakeProfit] = React.useState('30');
   const [maxSlippage, setMaxSlippage] = React.useState('0.5');
-  
+
   // Wallet action modals
   const [showSendModal, setShowSendModal] = React.useState(false);
   const [showReceiveModal, setShowReceiveModal] = React.useState(false);
   const [showSwapModal, setShowSwapModal] = React.useState(false);
-  
+
   // Send form state
   const [sendAddress, setSendAddress] = React.useState('');
   const [sendAmount, setSendAmount] = React.useState('');
   const [selectedToken, setSelectedToken] = React.useState('SOL');
   const [showSendTokenDropdown, setShowSendTokenDropdown] = React.useState(false);
   const [sendTokenSearch, setSendTokenSearch] = React.useState('');
-  
+
   // Swap form state
   const [fromToken, setFromToken] = React.useState('SOL');
   const [toToken, setToToken] = React.useState('USDC');
@@ -268,30 +286,30 @@ export default function HomeScreen() {
   const [fromTokenSearch, setFromTokenSearch] = React.useState('');
   const [toTokenSearch, setToTokenSearch] = React.useState('');
   const [slippage, setSlippage] = React.useState(0.5);
-  
+
   // Use real Solana wallet address or demo address
   const walletAddress = solanaPublicKey || user?.walletAddress || 'DemoWallet1234567890abcdef1234567890abcdef12345678';
-  
+
   // Available tokens for dropdowns - use real Solana tokens if wallet is connected
   const availableTokens = React.useMemo(() => {
     if (solanaWallet) {
       return getAvailableTokens();
     }
-    
+
     // Fallback to demo tokens
     const baseTokens = [
       { symbol: 'SOL', name: 'Solana', logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png', balance: 0, mint: 'So11111111111111111111111111111111111111112', decimals: 9 },
       { symbol: 'USDC', name: 'USD Coin', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png', balance: 0, mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 },
       { symbol: 'WIF', name: 'Dogwifhat', logo: 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link', balance: 0, mint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', decimals: 6 },
     ];
-    
+
     return baseTokens;
   }, [solanaWallet, getAvailableTokens]);
-  
+
   // Filter tokens based on search
   const getFilteredTokens = (search: string) => {
     if (!search) return availableTokens;
-    return availableTokens.filter(token => 
+    return availableTokens.filter(token =>
       token.symbol.toLowerCase().includes(search.toLowerCase()) ||
       token.name.toLowerCase().includes(search.toLowerCase())
     );
@@ -302,7 +320,7 @@ export default function HomeScreen() {
     await refetch();
     setRefreshing(false);
   }, [refetch]);
-  
+
   const handleCopyAddress = async () => {
     await Clipboard.setStringAsync(walletAddress);
     Alert.alert('Copied!', 'Wallet address copied to clipboard');
@@ -360,7 +378,7 @@ export default function HomeScreen() {
     }
     return true;
   };
-  
+
   const handleSend = () => {
     const amt = parseFloat(sendAmount);
     if (!sendAddress || !sendAmount || isNaN(amt) || amt <= 0) {
@@ -371,14 +389,14 @@ export default function HomeScreen() {
       Alert.alert('Invalid Address', 'Please enter a valid Solana wallet address');
       return;
     }
-    
+
     Alert.alert(
       'Confirm Transaction',
       `Send ${sendAmount} ${selectedToken} to ${sendAddress.slice(0, 8)}...${sendAddress.slice(-8)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Send', 
+        {
+          text: 'Send',
           onPress: () => {
             if (__DEV__) console.log('Sending:', { sendAddress, sendAmount, selectedToken });
             setShowSendModal(false);
@@ -390,12 +408,12 @@ export default function HomeScreen() {
       ]
     );
   };
-  
+
   const handleSwap = () => {
     // Navigate to dedicated swap screen for real transaction
     router.push('/swap');
   };
-  
+
   const handleBuy = () => {
     const base = process.env.EXPO_PUBLIC_FIAT_ONRAMP_URL;
     const key = process.env.EXPO_PUBLIC_MOONPAY_KEY;
@@ -408,7 +426,7 @@ export default function HomeScreen() {
       Alert.alert('Error', 'Could not open MoonPay');
     });
   };
-  
+
   // Mock function to estimate swap output
   React.useEffect(() => {
     if (swapAmount && fromToken && toToken) {
@@ -433,262 +451,264 @@ export default function HomeScreen() {
       case 'coins':
         return (
           <ErrorBoundary>
-          <View style={styles.tabContent}>
-            {/* Search with Time Filter Dropdown for Coins */}
-            <View style={styles.searchAndFilterContainer}>
-              <View style={styles.searchWithDropdownContainer}>
-                <View style={styles.searchContainer}>
-                  <Search size={16} color={COLORS.textSecondary} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search coins..."
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={coinsSearchQuery}
-                    onChangeText={setCoinsSearchQuery}
-                    testID="coins-search-input"
-                  />
-                  <TouchableOpacity 
-                    style={styles.timeCycleButton}
-                    onPress={() => {
-                      const periods: ('1d' | '7d' | '1m' | '1y')[] = ['1d', '7d', '1m', '1y'];
-                      const currentIndex = periods.indexOf(coinsTimeFilter);
-                      const nextIndex = (currentIndex + 1) % periods.length;
-                      const nextPeriod = periods[nextIndex];
-                      if (nextPeriod) setCoinsTimeFilter(nextPeriod);
-                    }}
-                  >
-                    <Text style={styles.timeCycleText}>{coinsTimeFilter.toUpperCase()}</Text>
-                  </TouchableOpacity>
-                </View>
+            <View style={styles.tabContent}>
+              {/* Search with Time Filter Dropdown for Coins */}
+              <View style={styles.searchAndFilterContainer}>
+                <View style={styles.searchWithDropdownContainer}>
+                  <View style={styles.searchContainer}>
+                    <Search size={16} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search coins..."
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={coinsSearchQuery}
+                      onChangeText={setCoinsSearchQuery}
+                      testID="coins-search-input"
+                    />
+                    <TouchableOpacity
+                      style={styles.timeCycleButton}
+                      onPress={() => {
+                        const periods: ('1d' | '7d' | '1m' | '1y')[] = ['1d', '7d', '1m', '1y'];
+                        const currentIndex = periods.indexOf(coinsTimeFilter);
+                        const nextIndex = (currentIndex + 1) % periods.length;
+                        const nextPeriod = periods[nextIndex];
+                        if (nextPeriod) setCoinsTimeFilter(nextPeriod);
+                      }}
+                    >
+                      <Text style={styles.timeCycleText}>{coinsTimeFilter.toUpperCase()}</Text>
+                    </TouchableOpacity>
+                  </View>
 
+                </View>
               </View>
+
+              {/* ✅ Display trending market coins or search results */}
+              {isLoadingCoins ? (
+                <View style={styles.loadingContainer}>
+                  <RefreshCw size={32} color={COLORS.primary} />
+                  <Text style={styles.loadingText}>
+                    {debouncedCoinsSearch ? 'Searching market...' : 'Loading trending coins...'}
+                  </Text>
+                </View>
+              ) : displayCoins.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Globe size={48} color={COLORS.textSecondary} style={{ opacity: 0.5 }} />
+                  <Text style={styles.emptyTitle}>
+                    {debouncedCoinsSearch ? 'No coins found' : 'No trending coins'}
+                  </Text>
+                  <Text style={styles.emptySubtitle}>
+                    {debouncedCoinsSearch
+                      ? 'Try a different search term'
+                      : 'Check back later for trending tokens'}
+                  </Text>
+                </View>
+              ) : (
+                displayCoins.map((coin: { id: string; symbol: string; name: string; price: number; change24h: number; logo?: string }) => (
+                  <TokenCard
+                    key={coin.id}
+                    symbol={coin.symbol}
+                    name={coin.name}
+                    price={coin.price}
+                    change={coin.change24h}
+                    {...(coin.logo ? { logo: coin.logo } : {})}
+                  />
+                ))
+              )}
             </View>
-            
-            {/* ✅ Display trending market coins or search results */}
-            {isLoadingCoins ? (
-              <View style={styles.loadingContainer}>
-                <RefreshCw size={32} color={COLORS.primary} />
-                <Text style={styles.loadingText}>
-                  {debouncedCoinsSearch ? 'Searching market...' : 'Loading trending coins...'}
-                </Text>
-              </View>
-            ) : displayCoins.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Globe size={48} color={COLORS.textSecondary} style={{ opacity: 0.5 }} />
-                <Text style={styles.emptyTitle}>
-                  {debouncedCoinsSearch ? 'No coins found' : 'No trending coins'}
-                </Text>
-                <Text style={styles.emptySubtitle}>
-                  {debouncedCoinsSearch 
-                    ? 'Try a different search term' 
-                    : 'Check back later for trending tokens'}
-                </Text>
-              </View>
-            ) : (
-              displayCoins.map((coin: { id: string; symbol: string; name: string; price: number; change24h: number; logo?: string }) => (
-                <TokenCard
-                  key={coin.id}
-                  symbol={coin.symbol}
-                  name={coin.name}
-                  price={coin.price}
-                  change={coin.change24h}
-                  {...(coin.logo ? { logo: coin.logo } : {})}
-                />
-              ))
-            )}
-          </View>
           </ErrorBoundary>
         );
       case 'traders':
         return (
           <ErrorBoundary>
-          <View style={styles.tabContent}>
-            {/* Search with Time Filter Dropdown for Traders */}
-            <View style={styles.searchAndFilterContainer}>
-              <View style={styles.searchWithDropdownContainer}>
-                <View style={styles.searchContainer}>
-                  <Search size={16} color={COLORS.textSecondary} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search traders..."
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={tradersSearchQuery}
-                    onChangeText={setTradersSearchQuery}
-                    testID="traders-search-input"
-                  />
-                  <TouchableOpacity 
-                    style={styles.timeCycleButton}
-                    onPress={() => {
-                      const periods: ('1d' | '7d' | '1m' | '1y')[] = ['1d', '7d', '1m', '1y'];
-                      const currentIndex = periods.indexOf(tradersTimeFilter);
-                      const nextIndex = (currentIndex + 1) % periods.length;
-                      const nextPeriod = periods[nextIndex];
-                      if (nextPeriod) setTradersTimeFilter(nextPeriod);
-                    }}
-                  >
-                    <Text style={styles.timeCycleText}>{tradersTimeFilter.toUpperCase()}</Text>
-                  </TouchableOpacity>
-                </View>
+            <View style={styles.tabContent}>
+              {/* Search with Time Filter Dropdown for Traders */}
+              <View style={styles.searchAndFilterContainer}>
+                <View style={styles.searchWithDropdownContainer}>
+                  <View style={styles.searchContainer}>
+                    <Search size={16} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search traders..."
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={tradersSearchQuery}
+                      onChangeText={setTradersSearchQuery}
+                      testID="traders-search-input"
+                    />
+                    <TouchableOpacity
+                      style={styles.timeCycleButton}
+                      onPress={() => {
+                        const periods: ('1d' | '7d' | '1m' | '1y')[] = ['1d', '7d', '1m', '1y'];
+                        const currentIndex = periods.indexOf(tradersTimeFilter);
+                        const nextIndex = (currentIndex + 1) % periods.length;
+                        const nextPeriod = periods[nextIndex];
+                        if (nextPeriod) setTradersTimeFilter(nextPeriod);
+                      }}
+                    >
+                      <Text style={styles.timeCycleText}>{tradersTimeFilter.toUpperCase()}</Text>
+                    </TouchableOpacity>
+                  </View>
 
+                </View>
               </View>
+
+              {/* ✅ Display real traders from Birdeye or search results */}
+              {(tradersLoading || searchedTradersLoading) ? (
+                <View style={styles.loadingContainer}>
+                  <RefreshCw size={32} color={COLORS.primary} />
+                  <Text style={styles.loadingText}>{debouncedTradersSearch.length >= 3 ? 'Searching traders...' : 'Loading top traders...'}</Text>
+                </View>
+              ) : (debouncedTradersSearch.length >= 3 ? (searchedTradersData?.data || []).length === 0 : topTraders.length === 0) ? (
+                <View style={styles.emptyContainer}>
+                  <Globe size={48} color={COLORS.textSecondary} style={{ opacity: 0.5 }} />
+                  <Text style={styles.emptyTitle}>{debouncedTradersSearch.length >= 3 ? 'No traders found' : 'No traders available'}</Text>
+                  <Text style={styles.emptySubtitle}>{debouncedTradersSearch.length >= 3 ? 'Try a different search term' : 'Check back later for top performers'}</Text>
+                </View>
+              ) : (
+                (debouncedTradersSearch.length >= 3 ? (searchedTradersData?.data || []) : topTraders)
+                  .filter((trader: any) =>
+                    trader.name.toLowerCase().includes(tradersSearchQuery.toLowerCase()) ||
+                    trader.walletAddress.toLowerCase().includes(tradersSearchQuery.toLowerCase())
+                  )
+                  .map((trader: any) => (
+                    <TraderCard
+                      key={trader.id || trader.walletAddress}
+                      username={trader.name || trader.username}
+                      roi={trader.roi}
+                      period={tradersTimeFilter}
+                      isVerified={trader.verified ?? trader.isVerified}
+                      onPress={() => {
+                        // ✅ Redirect to Birdeye wallet page
+                        const birdeyeUrl = `https://birdeye.so/profile/${trader.walletAddress}?chain=solana`;
+                        Linking.openURL(birdeyeUrl).catch((err) => {
+                          Alert.alert('Error', 'Could not open Birdeye profile');
+                          if (__DEV__) console.error('Failed to open Birdeye:', err);
+                        });
+                      }}
+                      onCopyPress={() => {
+                        setSelectedTrader(trader.name || trader.username);
+                        setSelectedTraderWallet(trader.walletAddress);
+                        setShowCopyModal(true);
+                      }}
+                    />
+                  ))
+              )}
             </View>
-            
-            {/* ✅ Display real traders from Birdeye or search results */}
-            {(tradersLoading || searchedTradersLoading) ? (
-              <View style={styles.loadingContainer}>
-                <RefreshCw size={32} color={COLORS.primary} />
-                <Text style={styles.loadingText}>{debouncedTradersSearch.length >= 3 ? 'Searching traders...' : 'Loading top traders...'}</Text>
-              </View>
-            ) : (debouncedTradersSearch.length >= 3 ? (searchedTradersData?.data || []).length === 0 : topTraders.length === 0) ? (
-              <View style={styles.emptyContainer}>
-                <Globe size={48} color={COLORS.textSecondary} style={{ opacity: 0.5 }} />
-                <Text style={styles.emptyTitle}>{debouncedTradersSearch.length >= 3 ? 'No traders found' : 'No traders available'}</Text>
-                <Text style={styles.emptySubtitle}>{debouncedTradersSearch.length >= 3 ? 'Try a different search term' : 'Check back later for top performers'}</Text>
-              </View>
-            ) : (
-              (debouncedTradersSearch.length >= 3 ? (searchedTradersData?.data || []) : topTraders)
-                .filter((trader: any) => 
-                  trader.name.toLowerCase().includes(tradersSearchQuery.toLowerCase()) ||
-                  trader.walletAddress.toLowerCase().includes(tradersSearchQuery.toLowerCase())
-                )
-                .map((trader: any) => (
-                  <TraderCard
-                    key={trader.id || trader.walletAddress}
-                    username={trader.name || trader.username}
-                    roi={trader.roi}
-                    period={tradersTimeFilter}
-                    isVerified={trader.verified ?? trader.isVerified}
-                    onPress={() => {
-                      // ✅ Redirect to Birdeye wallet page
-                      const birdeyeUrl = `https://birdeye.so/profile/${trader.walletAddress}?chain=solana`;
-                      Linking.openURL(birdeyeUrl).catch((err) => {
-                        Alert.alert('Error', 'Could not open Birdeye profile');
-                        if (__DEV__) console.error('Failed to open Birdeye:', err);
-                      });
-                    }}
-                    onCopyPress={() => {
-                      setSelectedTrader(trader.name || trader.username);
-                      setSelectedTraderWallet(trader.walletAddress);
-                      setShowCopyModal(true);
-                    }}
-                  />
-                ))
-            )}
-          </View>
           </ErrorBoundary>
         );
       case 'copy':
         const stats = getStats();
-        
+
         return (
           <ErrorBoundary>
-          <View style={styles.copyTradeContainer}>
-            <Text style={styles.copyTradeTitle}>Copy Trading</Text>
-            <Text style={styles.copyTradeDescription}>
-              Follow top traders and automatically copy their trades in real-time.
-            </Text>
-            
-            {/* Copy Trading Stats */}
-            <View style={styles.statsContainer}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{stats.activeCopies}</Text>
-                <Text style={styles.statLabel}>Active Copies</Text>
+            <View style={styles.copyTradeContainer}>
+              <Text style={styles.copyTradeTitle}>Copy Trading</Text>
+              <Text style={styles.copyTradeDescription}>
+                Follow top traders and automatically copy their trades in real-time.
+              </Text>
+
+              {/* Copy Trading Stats */}
+              <View style={styles.statsContainer}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{stats.activeCopies}</Text>
+                  <Text style={styles.statLabel}>Active Copies</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{stats.totalTrades}</Text>
+                  <Text style={styles.statLabel}>Total Trades</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: stats.profitLoss >= 0 ? COLORS.success : COLORS.error }]}>
+                    {stats.profitLossPercentage >= 0 ? '+' : ''}{stats.profitLossPercentage.toFixed(1)}%
+                  </Text>
+                  <Text style={styles.statLabel}>P&L</Text>
+                </View>
               </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{stats.totalTrades}</Text>
-                <Text style={styles.statLabel}>Total Trades</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: stats.profitLoss >= 0 ? COLORS.success : COLORS.error }]}>
-                  {stats.profitLossPercentage >= 0 ? '+' : ''}{stats.profitLossPercentage.toFixed(1)}%
-                </Text>
-                <Text style={styles.statLabel}>P&L</Text>
-              </View>
-            </View>
-            
-            {/* Active Copy Settings */}
-            {copyTradeSettings.length > 0 && (
-              <View style={styles.activeCopiesContainer}>
-                <Text style={styles.activeCopiesTitle}>Active Copy Trades</Text>
-                {copyTradeSettings.map((setting: any) => (
-                  <View key={setting.id} style={styles.activeCopyItem}>
-                    <View style={styles.activeCopyInfo}>
-                      <Text style={styles.activeCopyWallet}>
-                        {setting.trader?.username || `${setting.trader?.walletAddress.slice(0, 8)}...${setting.trader?.walletAddress.slice(-8)}`}
-                      </Text>
-                      <Text style={styles.activeCopyAmount}>${setting.amountPerTrade}/trade</Text>
-                    </View>
-                    <TouchableOpacity 
-                      style={styles.stopCopyButton}
-                      onPress={() => stopCopyTrade(setting.id)}
-                    >
-                      <Text style={styles.stopCopyText}>Stop</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            )}
-            
-            {/* Manual Copy Setup */}
-            <View style={styles.copyTradeForm}>
-              <Text style={styles.formLabel}>Quick Setup</Text>
-              <TouchableOpacity 
-                style={styles.quickSetupButton}
-                onPress={() => {
-                  setSelectedTrader('Manual Setup');
-                  setSelectedTraderWallet('');
-                  setShowCopyModal(true);
-                }}
-              >
-                <Text style={styles.quickSetupText}>Set Up Copy Trading</Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* Recent Copy Trades */}
-            {copyTrades.length > 0 && (
-              <View style={styles.recentTradesContainer}>
-                <Text style={styles.recentTradesTitle}>Recent Copy Trades</Text>
-                {copyTrades.slice(0, 5).map((position: any) => (
-                  <View key={position.id} style={styles.recentTradeItem}>
-                    <View style={styles.recentTradeInfo}>
-                      <Text style={styles.recentTradeTokens}>
-                        {position.tokenSymbol} • ${position.entryValue.toFixed(2)}
-                      </Text>
-                      <Text style={styles.recentTradeTime}>
-                        {new Date(position.entryTimestamp).toLocaleString()}
-                      </Text>
-                      {position.exitTimestamp && (
-                        <Text style={[styles.recentTradePnL, { 
-                          color: position.profitLoss >= 0 ? COLORS.success : COLORS.error 
-                        }]}>
-                          {position.profitLoss >= 0 ? '+' : ''}{position.profitLoss.toFixed(2)} ({position.roi.toFixed(1)}%)
+
+              {/* Active Copy Settings */}
+              {copyTradeSettings.length > 0 && (
+                <View style={styles.activeCopiesContainer}>
+                  <Text style={styles.activeCopiesTitle}>Active Copy Trades</Text>
+                  {copyTradeSettings.map((setting: any) => (
+                    <View key={setting.id} style={styles.activeCopyItem}>
+                      <View style={styles.activeCopyInfo}>
+                        <Text style={styles.activeCopyWallet}>
+                          {setting.trader?.username || `${setting.trader?.walletAddress.slice(0, 8)}...${setting.trader?.walletAddress.slice(-8)}`}
                         </Text>
-                      )}
+                        <Text style={styles.activeCopyAmount}>${setting.amountPerTrade}/trade</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.stopCopyButton}
+                        onPress={() => stopCopyTrade(setting.id)}
+                      >
+                        <Text style={styles.stopCopyText}>Stop</Text>
+                      </TouchableOpacity>
                     </View>
-                    <View style={[
-                      styles.recentTradeStatus,
-                      { backgroundColor: 
-                        position.status === 'CLOSED' ? COLORS.success + '20' :
-                        position.status === 'OPEN' ? COLORS.primary + '20' :
-                        COLORS.error + '20'
-                      }
-                    ]}>
-                      <Text style={[
-                        styles.recentTradeStatusText,
-                        { color: 
-                          position.status === 'CLOSED' ? COLORS.success :
-                          position.status === 'OPEN' ? COLORS.primary :
-                          COLORS.error
+                  ))}
+                </View>
+              )}
+
+              {/* Manual Copy Setup */}
+              <View style={styles.copyTradeForm}>
+                <Text style={styles.formLabel}>Quick Setup</Text>
+                <TouchableOpacity
+                  style={styles.quickSetupButton}
+                  onPress={() => {
+                    setSelectedTrader('Manual Setup');
+                    setSelectedTraderWallet('');
+                    setShowCopyModal(true);
+                  }}
+                >
+                  <Text style={styles.quickSetupText}>Set Up Copy Trading</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Recent Copy Trades */}
+              {copyTrades.length > 0 && (
+                <View style={styles.recentTradesContainer}>
+                  <Text style={styles.recentTradesTitle}>Recent Copy Trades</Text>
+                  {copyTrades.slice(0, 5).map((position: any) => (
+                    <View key={position.id} style={styles.recentTradeItem}>
+                      <View style={styles.recentTradeInfo}>
+                        <Text style={styles.recentTradeTokens}>
+                          {position.tokenSymbol} • ${position.entryValue.toFixed(2)}
+                        </Text>
+                        <Text style={styles.recentTradeTime}>
+                          {new Date(position.entryTimestamp).toLocaleString()}
+                        </Text>
+                        {position.exitTimestamp && (
+                          <Text style={[styles.recentTradePnL, {
+                            color: position.profitLoss >= 0 ? COLORS.success : COLORS.error
+                          }]}>
+                            {position.profitLoss >= 0 ? '+' : ''}{position.profitLoss.toFixed(2)} ({position.roi.toFixed(1)}%)
+                          </Text>
+                        )}
+                      </View>
+                      <View style={[
+                        styles.recentTradeStatus,
+                        {
+                          backgroundColor:
+                            position.status === 'CLOSED' ? COLORS.success + '20' :
+                              position.status === 'OPEN' ? COLORS.primary + '20' :
+                                COLORS.error + '20'
                         }
                       ]}>
-                        {position.status}
-                      </Text>
+                        <Text style={[
+                          styles.recentTradeStatusText,
+                          {
+                            color:
+                              position.status === 'CLOSED' ? COLORS.success :
+                                position.status === 'OPEN' ? COLORS.primary :
+                                  COLORS.error
+                          }
+                        ]}>
+                          {position.status}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
+                  ))}
+                </View>
+              )}
+            </View>
           </ErrorBoundary>
         );
       default:
@@ -720,7 +740,7 @@ export default function HomeScreen() {
                   </View>
                 )}
               </View>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.userInfo}
                 onPress={() => router.push('/account')}
               >
@@ -730,27 +750,27 @@ export default function HomeScreen() {
                     <View style={styles.connectedDot} />
                   )}
                   <Text style={styles.walletAddress}>
-                    {solanaPublicKey 
-                      ? `${solanaPublicKey.slice(0, 4)}...${solanaPublicKey.slice(-4)}` 
-                      : user?.walletAddress 
+                    {solanaPublicKey
+                      ? `${solanaPublicKey.slice(0, 4)}...${solanaPublicKey.slice(-4)}`
+                      : user?.walletAddress
                         ? `${user.walletAddress.slice(0, 4)}...${user.walletAddress.slice(-4)}`
                         : 'Connect wallet'}
                   </Text>
                 </View>
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.actionButtons}>
               <TouchableOpacity style={styles.headerActionButton}>
                 <Globe size={24} color={COLORS.solana} />
               </TouchableOpacity>
             </View>
           </View>
-          
+
           <View style={styles.walletCardContainer}>
             <WalletCard balance={totalBalance} dailyPnl={dailyPnl} pnlPeriod={pnlPeriod} onPeriodChange={setPnlPeriod} />
           </View>
-          
+
           <View style={styles.quickActionsContainer}>
             <View style={styles.quickActionsRow}>
               <QuickActionButton
@@ -783,7 +803,7 @@ export default function HomeScreen() {
               />
             </View>
           </View>
-          
+
           <View style={styles.tabsContainer}>
             <View style={styles.tabsHeader}>
               <TouchableOpacity
@@ -800,7 +820,7 @@ export default function HomeScreen() {
                   TRENDING
                 </Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={[
                   styles.tab,
@@ -815,7 +835,7 @@ export default function HomeScreen() {
                   TOP TRADERS
                 </Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={[
                   styles.tab,
@@ -831,12 +851,12 @@ export default function HomeScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-            
+
             {renderTabContent()}
           </View>
         </ScrollView>
       </ErrorBoundary>
-      
+
       {/* Copy Trading Modal */}
       <Modal
         visible={showCopyModal}
@@ -845,22 +865,22 @@ export default function HomeScreen() {
         onRequestClose={() => setShowCopyModal(false)}
       >
         <Pressable style={styles.modalOverlay} onPress={() => setShowCopyModal(false)} accessibilityRole="button" accessibilityLabel="Dismiss copy trading modal">
-          <Pressable style={[styles.modalContainer, { width: width * 0.9, maxWidth: 400, maxHeight: '90%' }]}>            
+          <Pressable style={[styles.modalContainer, { width: width * 0.9, maxWidth: 400, maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Copy @{selectedTrader}</Text>
               <TouchableOpacity onPress={() => setShowCopyModal(false)}>
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
               <Text style={styles.modalDescription}>
-                {selectedTrader === 'Manual Setup' ? 
+                {selectedTrader === 'Manual Setup' ?
                   'Enter wallet address and trading parameters' :
                   `Set up copy trading parameters for @${selectedTrader}`
                 }
               </Text>
-              
+
               {selectedTrader === 'Manual Setup' && (
                 <View style={styles.inputSection}>
                   <Text style={styles.inputLabel}>Wallet Address to Copy</Text>
@@ -876,7 +896,7 @@ export default function HomeScreen() {
                   </View>
                 </View>
               )}
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Total Amount (USDC)</Text>
                 <View style={styles.inputContainer}>
@@ -891,7 +911,7 @@ export default function HomeScreen() {
                   />
                 </View>
               </View>
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Amount per Trade (USDC)</Text>
                 <View style={styles.inputContainer}>
@@ -906,7 +926,7 @@ export default function HomeScreen() {
                   />
                 </View>
               </View>
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Stop Loss (%)</Text>
                 <View style={styles.inputContainer}>
@@ -921,7 +941,7 @@ export default function HomeScreen() {
                   <Text style={styles.inputSuffix}>%</Text>
                 </View>
               </View>
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Take Profit (%)</Text>
                 <View style={styles.inputContainer}>
@@ -951,13 +971,13 @@ export default function HomeScreen() {
                   <Text style={styles.inputSuffix}>%</Text>
                 </View>
               </View>
-              
+
               <TouchableOpacity style={styles.exitWithTraderButton}>
                 <Text style={styles.exitWithTraderText}>Exit with Trader</Text>
                 <Text style={styles.exitWithTraderSubtext}>Automatically exit when trader exits</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={[styles.startCopyButton, isCreating ? { opacity: 0.7 } : null]}
                 disabled={isCreating}
                 onPress={async () => {
@@ -969,7 +989,8 @@ export default function HomeScreen() {
                       amountPerTrade: parseFloat(amountPerTrade),
                       stopLoss: stopLoss ? parseFloat(stopLoss) : undefined,
                       takeProfit: takeProfit ? parseFloat(takeProfit) : undefined,
-                      maxSlippage: maxSlippage ? parseFloat(maxSlippage) : 0.5 });
+                      maxSlippage: maxSlippage ? parseFloat(maxSlippage) : 0.5
+                    });
                     Alert.alert('Success', `Started copying ${selectedTrader || 'wallet'}!`);
                     setShowCopyModal(false);
                     setSelectedTrader(null);
@@ -1000,7 +1021,7 @@ export default function HomeScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-      
+
       {/* Send Modal */}
       <Modal
         visible={showSendModal}
@@ -1016,20 +1037,20 @@ export default function HomeScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.modalContent}>
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Token</Text>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.dropdownButton}
                   onPress={() => setShowSendTokenDropdown(!showSendTokenDropdown)}
                 >
                   <View style={styles.dropdownButtonContent}>
                     <View style={styles.tokenInfo}>
                       {availableTokens.find(t => t.symbol === selectedToken)?.logo && (
-                        <Image 
-                          source={{ uri: availableTokens.find(t => t.symbol === selectedToken)?.logo }} 
-                          style={styles.tokenLogo} 
+                        <Image
+                          source={{ uri: availableTokens.find(t => t.symbol === selectedToken)?.logo }}
+                          style={styles.tokenLogo}
                         />
                       )}
                       <Text style={styles.dropdownButtonText}>
@@ -1039,7 +1060,7 @@ export default function HomeScreen() {
                     <ChevronDown size={20} color={COLORS.textSecondary} />
                   </View>
                 </TouchableOpacity>
-                
+
                 {showSendTokenDropdown && (
                   <View style={styles.dropdownContainer}>
                     <View style={styles.modalSearchContainer}>
@@ -1078,7 +1099,7 @@ export default function HomeScreen() {
                   </View>
                 )}
               </View>
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Recipient Address</Text>
                 <View style={styles.inputContainer}>
@@ -1092,7 +1113,7 @@ export default function HomeScreen() {
                   />
                 </View>
               </View>
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Amount</Text>
                 <View style={styles.inputContainer}>
@@ -1107,8 +1128,8 @@ export default function HomeScreen() {
                   <Text style={styles.inputSuffix}>{selectedToken}</Text>
                 </View>
               </View>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleSend}
               >
@@ -1124,7 +1145,7 @@ export default function HomeScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-      
+
       {/* Receive Modal */}
       <Modal
         visible={showReceiveModal}
@@ -1140,26 +1161,26 @@ export default function HomeScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.modalContent}>
               <Text style={styles.modalDescription}>
                 Share this address to receive SOL and Solana tokens
               </Text>
-              
+
               <View style={styles.qrContainer}>
                 <View style={styles.qrPlaceholder}>
                   <QrCode size={120} color={COLORS.solana} />
                 </View>
               </View>
-              
+
               <View style={styles.addressContainer}>
                 <Text style={styles.addressLabel}>Your Solana Address</Text>
                 <View style={styles.addressBox}>
                   <Text style={styles.addressText}>{walletAddress}</Text>
                 </View>
               </View>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleCopyAddress}
               >
@@ -1175,7 +1196,7 @@ export default function HomeScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-      
+
       {/* Swap Modal */}
       <Modal
         visible={showSwapModal}
@@ -1191,7 +1212,7 @@ export default function HomeScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
               <View style={styles.swapContainer}>
                 <View style={styles.swapSection}>
@@ -1205,15 +1226,15 @@ export default function HomeScreen() {
                       onChangeText={setSwapAmount}
                       keyboardType="numeric"
                     />
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.swapTokenButton}
                       onPress={() => setShowFromTokenDropdown(!showFromTokenDropdown)}
                     >
                       <View style={styles.tokenInfo}>
                         {availableTokens.find(t => t.symbol === fromToken)?.logo && (
-                          <Image 
-                            source={{ uri: availableTokens.find(t => t.symbol === fromToken)?.logo }} 
-                            style={styles.tokenLogoSmall} 
+                          <Image
+                            source={{ uri: availableTokens.find(t => t.symbol === fromToken)?.logo }}
+                            style={styles.tokenLogoSmall}
                           />
                         )}
                         <Text style={styles.swapTokenText}>{fromToken}</Text>
@@ -1221,7 +1242,7 @@ export default function HomeScreen() {
                       <ChevronDown size={16} color={COLORS.textSecondary} />
                     </TouchableOpacity>
                   </View>
-                  
+
                   {showFromTokenDropdown && (
                     <View style={styles.swapDropdownContainer}>
                       <View style={styles.modalSearchContainer}>
@@ -1260,9 +1281,9 @@ export default function HomeScreen() {
                     </View>
                   )}
                 </View>
-                
+
                 <View style={styles.swapArrow}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.swapArrowButton}
                     onPress={() => {
                       const temp = fromToken;
@@ -1273,20 +1294,20 @@ export default function HomeScreen() {
                     <ArrowUpDown size={20} color={COLORS.solana} />
                   </TouchableOpacity>
                 </View>
-                
+
                 <View style={styles.swapSection}>
                   <Text style={styles.inputLabel}>To</Text>
                   <View style={styles.swapInputContainer}>
                     <Text style={styles.swapOutput}>{estimatedOutput}</Text>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.swapTokenButton}
                       onPress={() => setShowToTokenDropdown(!showToTokenDropdown)}
                     >
                       <View style={styles.tokenInfo}>
                         {availableTokens.find(t => t.symbol === toToken)?.logo && (
-                          <Image 
-                            source={{ uri: availableTokens.find(t => t.symbol === toToken)?.logo }} 
-                            style={styles.tokenLogoSmall} 
+                          <Image
+                            source={{ uri: availableTokens.find(t => t.symbol === toToken)?.logo }}
+                            style={styles.tokenLogoSmall}
                           />
                         )}
                         <Text style={styles.swapTokenText}>{toToken}</Text>
@@ -1294,7 +1315,7 @@ export default function HomeScreen() {
                       <ChevronDown size={16} color={COLORS.textSecondary} />
                     </TouchableOpacity>
                   </View>
-                  
+
                   {showToTokenDropdown && (
                     <View style={styles.swapDropdownContainer}>
                       <View style={styles.modalSearchContainer}>
@@ -1371,8 +1392,8 @@ export default function HomeScreen() {
                 <Text style={styles.swapInfoText}>Minimum received at {slippage}%: {minReceived} {toToken}</Text>
                 <Text style={styles.swapInfoText}>Network: Solana</Text>
               </View>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleSwap}
               >
@@ -1395,69 +1416,84 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background },
+    backgroundColor: COLORS.background
+  },
   scrollView: {
-    flex: 1 },
+    flex: 1
+  },
   scrollContent: {
     paddingBottom: 0,
-    flexGrow: 1 },
+    flexGrow: 1
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SPACING.xs,
     paddingVertical: SPACING.m,
-    minHeight: 60 },
+    minHeight: 60
+  },
   profileContainer: {
     flexDirection: 'row',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   avatarContainer: {
-    marginRight: SPACING.s },
+    marginRight: SPACING.s
+  },
   avatar: {
     width: 40,
     height: 40,
-    borderRadius: 20 },
+    borderRadius: 20
+  },
   defaultAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: COLORS.solana + '50',
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   avatarText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3 },
+    textShadowRadius: 3
+  },
   userInfo: {
-    justifyContent: 'center' },
+    justifyContent: 'center'
+  },
   username: {
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
     fontSize: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3 },
+    textShadowRadius: 3
+  },
   walletAddressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6 },
+    gap: 6
+  },
   connectedDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.success },
+    backgroundColor: COLORS.success
+  },
   walletAddress: {
     ...FONTS.monospace,
     color: COLORS.textSecondary,
     fontSize: 12,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2 },
+    textShadowRadius: 2
+  },
   actionButtons: {
-    flexDirection: 'row' },
+    flexDirection: 'row'
+  },
   headerActionButton: {
     width: 40,
     height: 40,
@@ -1465,30 +1501,37 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: SPACING.s },
+    marginLeft: SPACING.s
+  },
   iconContainer: {
     position: 'relative',
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   walletCardContainer: {
     paddingHorizontal: SPACING.xs,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   quickActionsContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   quickActionsRow: {
     flexDirection: 'row',
     paddingHorizontal: SPACING.xs,
     justifyContent: 'space-between',
     alignItems: 'center',
-    flexWrap: 'wrap' },
+    flexWrap: 'wrap'
+  },
   quickActionButton: {
     flex: 1,
     marginHorizontal: SPACING.xs,
     minWidth: 70,
-    maxWidth: 90 },
+    maxWidth: 90
+  },
   tabsContainer: {
     flex: 1,
-    marginBottom: 0 },
+    marginBottom: 0
+  },
   tabsHeader: {
     flexDirection: 'row',
     marginBottom: SPACING.s,
@@ -1496,16 +1539,19 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: 4,
-    minHeight: 44 },
+    minHeight: 44
+  },
   tab: {
     flex: 1,
     paddingVertical: SPACING.s,
     alignItems: 'center',
     borderRadius: BORDER_RADIUS.small,
     justifyContent: 'center',
-    minHeight: 36 },
+    minHeight: 36
+  },
   activeTab: {
-    backgroundColor: COLORS.solana + '20' },
+    backgroundColor: COLORS.solana + '20'
+  },
 
   tabText: {
     ...FONTS.phantomMedium,
@@ -1513,20 +1559,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2 },
+    textShadowRadius: 2
+  },
   activeTabText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
 
 
   tabContent: {
     paddingHorizontal: SPACING.xs,
-    paddingBottom: 0 },
+    paddingBottom: 0
+  },
   searchAndFilterContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   searchWithDropdownContainer: {
     position: 'relative',
     zIndex: 1000,
-    elevation: 1000 },
+    elevation: 1000
+  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1536,14 +1587,16 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.s,
     marginBottom: SPACING.s,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   searchInput: {
     ...FONTS.phantomRegular,
     flex: 1,
     color: COLORS.textPrimary,
     fontSize: 14,
     marginLeft: SPACING.s,
-    paddingVertical: SPACING.xs },
+    paddingVertical: SPACING.xs
+  },
   timeFilterContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1551,22 +1604,27 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.medium,
     padding: 4,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   timeFilterButton: {
     flex: 1,
     paddingVertical: SPACING.s,
     paddingHorizontal: SPACING.s,
     alignItems: 'center',
     borderRadius: BORDER_RADIUS.small,
-    marginHorizontal: 2 },
+    marginHorizontal: 2
+  },
   activeTimeFilterButton: {
-    backgroundColor: COLORS.solana + '20' },
+    backgroundColor: COLORS.solana + '20'
+  },
   timeFilterText: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   activeTimeFilterText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   timeCycleButton: {
     backgroundColor: COLORS.solana + '20',
     borderRadius: BORDER_RADIUS.small,
@@ -1576,15 +1634,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.solana + '30',
     minWidth: 50,
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   timeCycleText: {
     ...FONTS.phantomBold,
     color: COLORS.solana,
-    fontSize: 12 },
+    fontSize: 12
+  },
   copyTradeContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m },
+    padding: SPACING.m
+  },
   copyTradeTitle: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
@@ -1592,18 +1653,21 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.s,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3 },
+    textShadowRadius: 3
+  },
   copyTradeDescription: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   copyTradeForm: {},
   formLabel: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   copyInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1611,28 +1675,34 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.small,
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.m,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   copyInputPrefix: {
     ...FONTS.monospace,
     color: COLORS.textSecondary,
     fontSize: 16,
-    marginRight: SPACING.xs },
+    marginRight: SPACING.xs
+  },
   inputValue: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
-    fontSize: 16 },
+    fontSize: 16
+  },
   sliderContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   sliderTrack: {
     height: 6,
     backgroundColor: COLORS.background,
     borderRadius: 3,
     marginVertical: SPACING.s,
-    position: 'relative' },
+    position: 'relative'
+  },
   sliderFill: {
     height: 6,
     backgroundColor: COLORS.solana,
-    borderRadius: 3 },
+    borderRadius: 3
+  },
   sliderThumb: {
     position: 'absolute',
     width: 20,
@@ -1640,21 +1710,25 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: COLORS.solana,
     top: -7,
-    marginLeft: -10 },
+    marginLeft: -10
+  },
   sliderValue: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 14,
-    textAlign: 'right' },
+    textAlign: 'right'
+  },
   startCopyingButton: {
     borderRadius: BORDER_RADIUS.medium,
     overflow: 'hidden',
-    marginTop: SPACING.m },
+    marginTop: SPACING.m
+  },
   startCopyingGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: SPACING.m },
+    paddingVertical: SPACING.m
+  },
   startCopyingText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
@@ -1662,32 +1736,38 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.s,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3 },
+    textShadowRadius: 3
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.l },
+    padding: SPACING.l
+  },
   modalContainer: {
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.large,
     maxHeight: '90%',
     borderWidth: 1,
-    borderColor: COLORS.solana + '30' },
+    borderColor: COLORS.solana + '30'
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: SPACING.l,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBackground },
+    borderBottomColor: COLORS.cardBackground
+  },
   modalTitle: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
-    fontSize: 20 },
+    fontSize: 20
+  },
   modalContent: {
-    padding: SPACING.l },
+    padding: SPACING.l
+  },
   modalScrollContent: {
     paddingBottom: SPACING.l
   },
@@ -1696,14 +1776,17 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 16,
     marginBottom: SPACING.l,
-    lineHeight: 24 },
+    lineHeight: 24
+  },
   inputSection: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   inputLabel: {
     ...FONTS.phantomSemiBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1711,75 +1794,91 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.medium,
     paddingHorizontal: SPACING.m,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   inputPrefix: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     fontSize: 18,
-    marginRight: SPACING.s },
+    marginRight: SPACING.s
+  },
   inputSuffix: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     fontSize: 18,
-    marginLeft: SPACING.s },
+    marginLeft: SPACING.s
+  },
   input: {
     ...FONTS.phantomRegular,
     flex: 1,
     color: COLORS.textPrimary,
     fontSize: 18,
-    paddingVertical: SPACING.m },
+    paddingVertical: SPACING.m
+  },
   startCopyButton: {
     borderRadius: BORDER_RADIUS.medium,
     overflow: 'hidden',
-    marginTop: SPACING.l },
+    marginTop: SPACING.l
+  },
   startCopyGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: SPACING.m },
+    paddingVertical: SPACING.m
+  },
   startCopyText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginLeft: SPACING.s },
+    marginLeft: SPACING.s
+  },
   exitWithTraderButton: {
     backgroundColor: COLORS.solana + '20',
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
     borderWidth: 1,
-    borderColor: COLORS.solana + '30' },
+    borderColor: COLORS.solana + '30'
+  },
   exitWithTraderText: {
     ...FONTS.phantomBold,
     color: COLORS.solana,
     fontSize: 16,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   exitWithTraderSubtext: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   tokenSelector: {
     flexDirection: 'row',
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.small,
     padding: 2,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   tokenOption: {
     flex: 1,
     paddingVertical: SPACING.s,
     paddingHorizontal: SPACING.m,
     borderRadius: BORDER_RADIUS.small,
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   selectedTokenOption: {
-    backgroundColor: COLORS.solana + '20' },
+    backgroundColor: COLORS.solana + '20'
+  },
   tokenOptionText: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   selectedTokenOptionText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   qrContainer: {
     alignItems: 'center',
-    marginVertical: SPACING.l },
+    marginVertical: SPACING.l
+  },
   qrPlaceholder: {
     width: 160,
     height: 160,
@@ -1788,43 +1887,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.solana + '30' },
+    borderColor: COLORS.solana + '30'
+  },
   addressContainer: {
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   addressLabel: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   addressBox: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   addressText: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 12,
-    textAlign: 'center' },
+    textAlign: 'center'
+  },
   actionButton: {
     borderRadius: BORDER_RADIUS.medium,
     overflow: 'hidden',
-    marginTop: SPACING.m },
+    marginTop: SPACING.m
+  },
   actionGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: SPACING.m },
+    paddingVertical: SPACING.m
+  },
   actionText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginLeft: SPACING.s },
+    marginLeft: SPACING.s
+  },
   swapContainer: {
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   swapSection: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   swapInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1832,22 +1941,26 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   swapInput: {
     ...FONTS.phantomRegular,
     flex: 1,
     color: COLORS.textPrimary,
     fontSize: 18,
-    marginRight: SPACING.m },
+    marginRight: SPACING.m
+  },
   swapOutput: {
     ...FONTS.phantomRegular,
     flex: 1,
     color: COLORS.textPrimary,
     fontSize: 18,
-    marginRight: SPACING.m },
+    marginRight: SPACING.m
+  },
   swapArrow: {
     alignItems: 'center',
-    marginVertical: SPACING.s },
+    marginVertical: SPACING.s
+  },
   swapArrowButton: {
     width: 40,
     height: 40,
@@ -1856,28 +1969,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.solana + '30' },
+    borderColor: COLORS.solana + '30'
+  },
   swapInfo: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   swapInfoText: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 12,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   slippageContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   slippageLabel: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     fontSize: 12,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   slippageOptions: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap' },
+    flexWrap: 'wrap'
+  },
   slippageChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -1886,16 +2005,20 @@ const styles = StyleSheet.create({
     borderColor: COLORS.solana + '30',
     backgroundColor: COLORS.background,
     marginRight: SPACING.xs,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   activeSlippageChip: {
     backgroundColor: COLORS.solana + '20',
-    borderColor: COLORS.solana + '40' },
+    borderColor: COLORS.solana + '40'
+  },
   slippageChipText: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   activeSlippageChipText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   slippageInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1904,93 +2027,111 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderWidth: 1,
     borderColor: COLORS.solana + '20',
-    height: 32 },
+    height: 32
+  },
   slippageInput: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     width: 56,
     paddingVertical: 0,
-    fontSize: 12 },
+    fontSize: 12
+  },
   slippagePercent: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     marginLeft: 4,
-    fontSize: 12 },
+    fontSize: 12
+  },
   dropdownButton: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     borderWidth: 1,
     borderColor: COLORS.solana + '20',
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   dropdownButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.m },
+    paddingVertical: SPACING.m
+  },
   dropdownButtonText: {
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginLeft: SPACING.s },
+    marginLeft: SPACING.s
+  },
   dropdownContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     borderWidth: 1,
     borderColor: COLORS.solana + '20',
     marginBottom: SPACING.m,
-    maxHeight: 200 },
+    maxHeight: 200
+  },
   swapDropdownContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     borderWidth: 1,
     borderColor: COLORS.solana + '20',
     marginTop: SPACING.s,
-    maxHeight: 150 },
+    maxHeight: 150
+  },
   modalSearchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.s,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10' },
+    borderBottomColor: COLORS.solana + '10'
+  },
   modalSearchInput: {
     ...FONTS.phantomRegular,
     flex: 1,
     color: COLORS.textPrimary,
     fontSize: 14,
     marginLeft: SPACING.s,
-    paddingVertical: SPACING.xs },
+    paddingVertical: SPACING.xs
+  },
   dropdownList: {
-    maxHeight: 150 },
+    maxHeight: 150
+  },
   swapDropdownList: {
-    maxHeight: 100 },
+    maxHeight: 100
+  },
   dropdownItem: {
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.s,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10' },
+    borderBottomColor: COLORS.solana + '10'
+  },
   tokenInfo: {
     flexDirection: 'row',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   tokenLogo: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    marginRight: SPACING.s },
+    marginRight: SPACING.s
+  },
   tokenLogoSmall: {
     width: 20,
     height: 20,
     borderRadius: 10,
-    marginRight: SPACING.xs },
+    marginRight: SPACING.xs
+  },
   tokenSymbol: {
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   tokenName: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   swapTokenButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1998,12 +2139,14 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.small,
     paddingHorizontal: SPACING.s,
     paddingVertical: SPACING.xs,
-    minWidth: 80 },
+    minWidth: 80
+  },
   swapTokenText: {
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
     fontSize: 14,
-    marginRight: SPACING.xs },
+    marginRight: SPACING.xs
+  },
   // Copy Trading Styles
   statsContainer: {
     flexDirection: 'row',
@@ -2011,57 +2154,69 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   statItem: {
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   statValue: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 18,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   statLabel: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   activeCopiesContainer: {
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   activeCopiesTitle: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   activeCopyItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: SPACING.s,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10' },
+    borderBottomColor: COLORS.solana + '10'
+  },
   activeCopyInfo: {
-    flex: 1 },
+    flex: 1
+  },
   activeCopyWallet: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 14,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   activeCopyAmount: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   stopCopyButton: {
     backgroundColor: COLORS.error + '20',
     borderRadius: BORDER_RADIUS.small,
     paddingHorizontal: SPACING.s,
     paddingVertical: SPACING.xs,
     borderWidth: 1,
-    borderColor: COLORS.error + '30' },
+    borderColor: COLORS.error + '30'
+  },
   stopCopyText: {
     ...FONTS.phantomMedium,
     color: COLORS.error,
-    fontSize: 12 },
+    fontSize: 12
+  },
   quickSetupButton: {
     backgroundColor: COLORS.solana + '20',
     borderRadius: BORDER_RADIUS.medium,
@@ -2069,58 +2224,70 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.s,
     borderWidth: 1,
-    borderColor: COLORS.solana + '30' },
+    borderColor: COLORS.solana + '30'
+  },
   quickSetupText: {
     ...FONTS.phantomBold,
     color: COLORS.solana,
-    fontSize: 16 },
+    fontSize: 16
+  },
   testTradeButton: {
     backgroundColor: COLORS.warning + '20',
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.s,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.warning + '30' },
+    borderColor: COLORS.warning + '30'
+  },
   testTradeText: {
     ...FONTS.phantomMedium,
     color: COLORS.warning,
-    fontSize: 14 },
+    fontSize: 14
+  },
   recentTradesContainer: {
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginTop: SPACING.m },
+    marginTop: SPACING.m
+  },
   recentTradesTitle: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   recentTradeItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: SPACING.s,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10' },
+    borderBottomColor: COLORS.solana + '10'
+  },
   recentTradeInfo: {
-    flex: 1 },
+    flex: 1
+  },
   recentTradeTokens: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 12,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   recentTradeTime: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 11 },
+    fontSize: 11
+  },
   recentTradePnL: {
     ...FONTS.phantomMedium,
     fontSize: 12,
-    marginTop: 2 },
+    marginTop: 2
+  },
   recentTradeStatus: {
     paddingHorizontal: SPACING.s,
     paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.small },
+    borderRadius: BORDER_RADIUS.small
+  },
   recentTradeStatusText: {
     ...FONTS.phantomBold,
     fontSize: 10,
