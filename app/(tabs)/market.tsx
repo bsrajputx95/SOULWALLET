@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  Pressable, 
-  ScrollView, 
+import {
+  StyleSheet,
+  View,
+  Text,
+  Pressable,
+  ScrollView,
   RefreshControl,
   TextInput,
   useWindowDimensions,
@@ -29,13 +29,13 @@ type MarketTab = 'soulmarket' | 'raydium' | 'pumpfun' | 'bullx' | 'dexscreener';
 
 export default function MarketScreen() {
   const { width } = useWindowDimensions();
-  const { 
-    tokens, 
+  const {
+    tokens,
     isLoading,
-    activeFilters, 
-    toggleFilter, 
-    searchQuery, 
-    setSearchQuery, 
+    activeFilters,
+    toggleFilter,
+    searchQuery,
+    setSearchQuery,
     refetch,
     setAdvancedFilters,
     clearFilters,
@@ -49,14 +49,14 @@ export default function MarketScreen() {
   const isSmallScreen = width < 375;
   const isLargeScreen = width > 768;
   const responsivePadding = isSmallScreen ? SPACING.xs : isLargeScreen ? SPACING.m : SPACING.s;
-  
+
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<MarketTab>('soulmarket');
   const [showFilters, setShowFilters] = useState(false);
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isHeaderHidden, setIsHeaderHidden] = useState(false);
-  
+
   // Advanced filter states
   const [minLiquidity, setMinLiquidity] = useState('');
   const [maxLiquidity, setMaxLiquidity] = useState('');
@@ -81,7 +81,7 @@ export default function MarketScreen() {
   const headerTranslateY = useRef(new Animated.Value(0)).current;
   const scrollDirection = useRef<'up' | 'down' | null>(null);
   const headerHidden = useRef(false);
-  
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -101,11 +101,11 @@ export default function MarketScreen() {
         const currentScrollY = event.nativeEvent.contentOffset.y;
         const scrollDiff = currentScrollY - lastScrollY.current;
         const currentDirection = scrollDiff > 0 ? 'down' : 'up';
-        
+
         // Only trigger animation if scroll direction changed or significant scroll distance
         if (currentDirection !== scrollDirection.current || Math.abs(scrollDiff) > 5) {
           scrollDirection.current = currentDirection;
-          
+
           if (currentDirection === 'down' && currentScrollY > SCROLL_THRESHOLD) {
             // Hide header when scrolling down past threshold (only if not already hidden)
             if (!headerHidden.current) {
@@ -133,7 +133,7 @@ export default function MarketScreen() {
             }
           }
         }
-        
+
         lastScrollY.current = currentScrollY;
       },
     }
@@ -158,8 +158,8 @@ export default function MarketScreen() {
                   {searchQuery ? 'No tokens found' : 'No tokens available'}
                 </Text>
                 <Text style={styles.emptySubtitle}>
-                  {searchQuery 
-                    ? 'Try a different search term' 
+                  {searchQuery
+                    ? 'Try a different search term'
                     : 'Quality tokens will appear here'}
                 </Text>
               </View>
@@ -209,11 +209,11 @@ export default function MarketScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={[]}>
-      <Animated.View 
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <Animated.View
         style={[
-          styles.combinedHeader, 
-          { 
+          styles.combinedHeader,
+          {
             paddingHorizontal: responsivePadding,
             position: 'absolute',
             top: 0,
@@ -227,7 +227,7 @@ export default function MarketScreen() {
         {/* Top Header Section */}
         <View style={styles.header}>
           <View style={styles.dropdown}>
-            <Pressable 
+            <Pressable
               style={styles.dropdownButton}
               onPress={() => { if (__DEV__) console.log('Open dropdown'); }}
             >
@@ -241,15 +241,15 @@ export default function MarketScreen() {
               <Text style={styles.dropdownIcon}>▼</Text>
             </Pressable>
           </View>
-          
+
           <View style={styles.headerButtons}>
-            <Pressable 
+            <Pressable
               style={styles.filterButton}
               onPress={() => setShowSearchBar(!showSearchBar)}
             >
               <Search size={24} color={COLORS.solana} />
             </Pressable>
-            <Pressable 
+            <Pressable
               style={styles.filterButton}
               onPress={() => setShowFilters(!showFilters)}
             >
@@ -284,7 +284,7 @@ export default function MarketScreen() {
                 SoulMarket
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.tab,
@@ -299,7 +299,7 @@ export default function MarketScreen() {
                 Raydium
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.tab,
@@ -314,7 +314,7 @@ export default function MarketScreen() {
                 Pump.fun
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.tab,
@@ -329,7 +329,7 @@ export default function MarketScreen() {
                 BullX
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.tab,
@@ -349,13 +349,13 @@ export default function MarketScreen() {
       </Animated.View>
       {showSearchBar && (
         <View style={[
-          styles.filtersContainer, 
-          { 
-            paddingHorizontal: responsivePadding, 
+          styles.filtersContainer,
+          {
+            paddingHorizontal: responsivePadding,
             marginTop: isHeaderHidden ? 0 : HEADER_HEIGHT,
             marginBottom: SPACING.s,
           }
-        ]}> 
+        ]}>
           <View style={styles.searchContainer}>
             <Search size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
             <TextInput
@@ -373,7 +373,7 @@ export default function MarketScreen() {
           </View>
         </View>
       )}
-      
+
       {showFilters && (
         <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding, marginTop: showSearchBar ? 0 : (isHeaderHidden ? 0 : HEADER_HEIGHT) }]}>
           <View style={styles.searchContainer}>
@@ -391,9 +391,9 @@ export default function MarketScreen() {
               </Pressable>
             )}
           </View>
-          
-          <ScrollView 
-            horizontal 
+
+          <ScrollView
+            horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.filterChipsContainer}
           >
@@ -411,7 +411,7 @@ export default function MarketScreen() {
                 Volume {'>'}$1M
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.filterChip,
@@ -426,7 +426,7 @@ export default function MarketScreen() {
                 Liquidity {'>'}$500K
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.filterChip,
@@ -441,7 +441,7 @@ export default function MarketScreen() {
                 24h Change {'>'}0%
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.filterChip,
@@ -456,7 +456,7 @@ export default function MarketScreen() {
                 New Listings
               </Text>
             </Pressable>
-            
+
             <Pressable
               style={[
                 styles.filterChip,
@@ -471,9 +471,9 @@ export default function MarketScreen() {
                 Verified Only
               </Text>
             </Pressable>
-            
 
-            
+
+
             <Pressable
               style={styles.addFilterChip}
               onPress={() => setShowAdvancedFilters(true)}
@@ -484,13 +484,13 @@ export default function MarketScreen() {
           </ScrollView>
         </View>
       )}
-      
+
       <ErrorBoundary>
         <ScrollView
           style={styles.content}
           contentContainerStyle={[
-            styles.contentContainer, 
-            { 
+            styles.contentContainer,
+            {
               paddingHorizontal: responsivePadding,
               paddingTop: (showSearchBar || showFilters) ? 0 : HEADER_HEIGHT + SPACING.s
             }
@@ -505,7 +505,7 @@ export default function MarketScreen() {
           {renderTabContent()}
         </ScrollView>
       </ErrorBoundary>
-      
+
       {/* Advanced Filters Modal */}
       <Modal
         visible={showAdvancedFilters}
@@ -521,7 +521,7 @@ export default function MarketScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </Pressable>
             </View>
-            
+
             <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
               {/* Liquidity */}
               <View style={styles.filterSection}>
@@ -544,7 +544,7 @@ export default function MarketScreen() {
                   />
                 </View>
               </View>
-              
+
               {/* Market Cap */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Market Cap</Text>
@@ -566,7 +566,7 @@ export default function MarketScreen() {
                   />
                 </View>
               </View>
-              
+
               {/* FDV */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>FDV (Fully Diluted Valuation)</Text>
@@ -588,7 +588,7 @@ export default function MarketScreen() {
                   />
                 </View>
               </View>
-              
+
               {/* Pair */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Pair</Text>
@@ -600,7 +600,7 @@ export default function MarketScreen() {
                   onChangeText={setPairFilter}
                 />
               </View>
-              
+
               {/* Age */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Age (hours)</Text>
@@ -624,7 +624,7 @@ export default function MarketScreen() {
                   />
                 </View>
               </View>
-              
+
               {/* 24h Transactions */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>24h Transactions</Text>
@@ -637,7 +637,7 @@ export default function MarketScreen() {
                   keyboardType="numeric"
                 />
               </View>
-              
+
               {/* 24h Buys */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>24h Buys</Text>
@@ -650,7 +650,7 @@ export default function MarketScreen() {
                   keyboardType="numeric"
                 />
               </View>
-              
+
               {/* 24h Sells */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>24h Sells</Text>
@@ -663,7 +663,7 @@ export default function MarketScreen() {
                   keyboardType="numeric"
                 />
               </View>
-              
+
               {/* 24h Volume */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>24h Volume</Text>
@@ -675,9 +675,9 @@ export default function MarketScreen() {
                   onChangeText={setMin24hVolume}
                 />
               </View>
-              
+
               <View style={styles.modalButtons}>
-                <Pressable 
+                <Pressable
                   style={styles.clearButton}
                   onPress={() => {
                     // Clear local state
@@ -700,8 +700,8 @@ export default function MarketScreen() {
                 >
                   <Text style={styles.clearButtonText}>Clear All</Text>
                 </Pressable>
-                
-                <Pressable 
+
+                <Pressable
                   style={styles.applyButton}
                   onPress={() => {
                     // Apply advanced filters to market store
