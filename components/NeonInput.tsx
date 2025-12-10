@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import type {
   TextInputProps,
-  TextStyle} from 'react-native';
+  TextStyle
+} from 'react-native';
 import {
   StyleSheet,
   TextInput,
@@ -21,7 +22,8 @@ interface NeonInputProps extends Omit<TextInputProps, 'style'> {
   style?: TextStyle;
 }
 
-export const NeonInput: React.FC<NeonInputProps> = ({
+// Memoized to prevent re-renders when parent state changes
+export const NeonInput: React.FC<NeonInputProps> = memo(({
   label,
   error,
   leftIcon,
@@ -72,7 +74,7 @@ export const NeonInput: React.FC<NeonInputProps> = ({
       {error && <Text style={styles.errorText}>{error}</Text>}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
