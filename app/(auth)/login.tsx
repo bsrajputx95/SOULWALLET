@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -27,6 +27,11 @@ import { useAuth } from '../../hooks/auth-store';
 // Local logo asset
 const logoImage = require('../../assets/images/icon-rounded.png');
 
+// Memoized icons to prevent re-renders
+const EmailIcon = <Mail size={20} color={COLORS.textSecondary} />;
+const LockIcon = <Lock size={20} color={COLORS.textSecondary} />;
+const LoginIcon = <LogIn size={20} color={COLORS.textPrimary} />;
+
 export default function LoginScreen() {
   const router = useRouter();
   const { login, isLoading, error } = useAuth();
@@ -36,10 +41,23 @@ export default function LoginScreen() {
   const [rememberMe, setRememberMe] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Validate form before submission
-  const validateForm = (): boolean => {
+  // Memoized callbacks to prevent re-renders
+  const handleEmailChange = useCallback((text: string) => {
+    setEmail(text);
     setValidationError(null);
+  }, []);
 
+  const handlePasswordChange = useCallback((text: string) => {
+    setPassword(text);
+    setValidationError(null);
+  }, []);
+
+  const toggleRememberMe = useCallback(() => {
+    setRememberMe(prev => !prev);
+  }, []);
+
+  // Validate form before submission
+  const validateForm = useCallback((): boolean => {
     if (!email.trim()) {
       setValidationError('Email or username is required');
       return false;
@@ -60,10 +78,10 @@ export default function LoginScreen() {
     }
 
     return true;
-  };
+  }, [email, password]);
 
   // Handle social button press - show "Coming Soon"
-  const handleSocialPress = (provider: string) => {
+  const handleSocialPress = useCallback((provider: string) => {
     if (Platform.OS !== 'web') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     }
@@ -72,9 +90,9 @@ export default function LoginScreen() {
       `${provider} login will be available in a future update.`,
       [{ text: 'OK' }]
     );
-  };
+  }, []);
 
-  const handleLogin = async () => {
+  const handleLogin = useCallback(async () => {
     // Validate form first
     if (!validateForm()) {
       return;
@@ -102,18 +120,21 @@ export default function LoginScreen() {
       }
       setPassword('');
     }
-  };
+  }, [email, password, rememberMe, validateForm, login, router]);
+
+  // Memoize error display to prevent unnecessary re-renders
+  const errorMessage = error || validationError;
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 50 : 0}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="none"
       >
         <View style={styles.logoContainer}>
           <Image
@@ -131,8 +152,8 @@ export default function LoginScreen() {
           />
           <Text style={styles.subtitle}>Log in to continue</Text>
 
-          {(error || validationError) && (
-            <Text style={styles.errorText}>{error || validationError}</Text>
+          {errorMessage && (
+            <Text style={styles.errorText}>{errorMessage}</Text>
           )}
 
           {__DEV__ && (
@@ -146,13 +167,12 @@ export default function LoginScreen() {
             label="Username/Email"
             placeholder="Enter your username or email"
             value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              setValidationError(null);
-            }}
+            onChangeText={handleEmailChange}
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
-            leftIcon={<Mail size={20} color={COLORS.textSecondary} />}
+            leftIcon={EmailIcon}
+            blurOnSubmit={false}
             accessibilityLabel="Email or username input"
             accessibilityHint="Enter your email address or username"
           />
@@ -161,12 +181,10 @@ export default function LoginScreen() {
             label="Password"
             placeholder="Enter your password"
             value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              setValidationError(null);
-            }}
+            onChangeText={handlePasswordChange}
             isPassword
-            leftIcon={<Lock size={20} color={COLORS.textSecondary} />}
+            leftIcon={LockIcon}
+            blurOnSubmit={false}
             accessibilityLabel="Password input"
             accessibilityHint="Enter your password"
           />
@@ -174,7 +192,7 @@ export default function LoginScreen() {
           <View style={styles.rememberContainer}>
             <TouchableOpacity
               style={styles.rememberMeContainer}
-              onPress={() => setRememberMe(!rememberMe)}
+              onPress={toggleRememberMe}
             >
               <View style={[
                 styles.checkbox,
@@ -194,7 +212,7 @@ export default function LoginScreen() {
 
           <NeonButton
             title="Login"
-            icon={<LogIn size={20} color={COLORS.textPrimary} />}
+            icon={LoginIcon}
             onPress={handleLogin}
             loading={isLoading}
             fullWidth
@@ -247,52 +265,75 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background
+    backgroundColor: COLORS.background,
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20
+    paddingHorizontal: 24,
+    paddingTop: 50,
+    paddingBottom: 30,
   },
   logoContainer: {
     alignItems: 'center',
-    marginTop: 60,
-    marginBottom: 20
+    marginBottom: 24,
   },
   logoImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    marginBottom: 24
+    width: 100,
+    height: 100,
+    resizeMode: 'contain',
   },
   formContainer: {
-    paddingHorizontal: 24
+    flex: 1,
   },
   title: {
     textAlign: 'center',
-    marginBottom: 8
+    marginBottom: 8,
   },
   subtitle: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
-    fontSize: 16,
     textAlign: 'center',
-    marginBottom: 32
+    marginBottom: 24,
+    fontSize: 14,
   },
   errorText: {
     ...FONTS.sfProMedium,
     color: COLORS.error,
     textAlign: 'center',
-    marginBottom: 16
+    marginBottom: 16,
+    fontSize: 14,
+    padding: 12,
+    backgroundColor: COLORS.error + '20',
+    borderRadius: 8,
+  },
+  devHintContainer: {
+    backgroundColor: COLORS.cardBackground,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '50',
+  },
+  devHintTitle: {
+    ...FONTS.sfProMedium,
+    color: COLORS.solana,
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  devHintText: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
   },
   rememberContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24
+    marginBottom: 24,
   },
   rememberMeContainer: {
     flexDirection: 'row',
-    alignItems: 'center'
+    alignItems: 'center',
   },
   checkbox: {
     width: 20,
@@ -302,82 +343,67 @@ const styles = StyleSheet.create({
     borderColor: COLORS.textSecondary,
     marginRight: 8,
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
   },
   checkboxChecked: {
     backgroundColor: COLORS.solana,
-    borderColor: COLORS.solana
+    borderColor: COLORS.solana,
   },
   checkmark: {
     color: COLORS.textPrimary,
-    fontSize: 12
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   rememberMeText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
-    fontSize: 14
+    fontSize: 14,
   },
   forgotPasswordText: {
     ...FONTS.sfProMedium,
     color: COLORS.solana,
-    fontSize: 14
+    fontSize: 14,
   },
   loginButton: {
-    marginBottom: 24
+    marginTop: 8,
+    marginBottom: 24,
   },
   socialButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16
+    gap: 12,
+    marginBottom: 24,
   },
   socialButton: {
     flex: 1,
-    marginHorizontal: 8
   },
   socialIcon: {
     ...FONTS.sfProBold,
-    fontSize: 16,
-    color: COLORS.textPrimary
+    fontSize: 18,
+    color: COLORS.textPrimary,
   },
   signupContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16
+    alignItems: 'center',
+    gap: 4,
   },
   signupText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginRight: 4
   },
   signupLink: {
     ...FONTS.sfProMedium,
     color: COLORS.solana,
-    fontSize: 14
-  },
-  devHintContainer: {
-    backgroundColor: COLORS.warning + '15',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.warning + '30'
-  },
-  devHintTitle: {
-    ...FONTS.sfProMedium,
-    color: COLORS.warning,
-    fontSize: 12,
-    marginBottom: 4
-  },
-  devHintText: {
-    ...FONTS.monospace,
-    color: COLORS.textSecondary,
-    fontSize: 11
+    fontSize: 14,
   },
   bottomGlow: {
-    height: 4,
-    width: '100%',
     position: 'absolute',
-    bottom: 0
-  }
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 100,
+    opacity: 0.1,
+  },
 });

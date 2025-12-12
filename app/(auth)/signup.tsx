@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -29,6 +29,12 @@ import { useAuth } from '../../hooks/auth-store';
 // Local logo asset
 const logoImage = require('../../assets/images/icon-rounded.png');
 
+// Memoized icons to prevent re-renders - defined outside component
+const UserIcon = <User size={20} color={COLORS.textSecondary} />;
+const EmailIcon = <Mail size={20} color={COLORS.textSecondary} />;
+const LockIcon = <Lock size={20} color={COLORS.textSecondary} />;
+const SignupIcon = <UserPlus size={20} color={COLORS.textPrimary} />;
+
 export default function SignupScreen() {
   const router = useRouter();
   const { signup, isLoading, error } = useAuth();
@@ -39,7 +45,28 @@ export default function SignupScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const validateForm = () => {
+  // Memoized callbacks to prevent re-renders
+  const handleUsernameChange = useCallback((text: string) => {
+    setUsername(text);
+    setValidationError(null);
+  }, []);
+
+  const handleEmailChange = useCallback((text: string) => {
+    setEmail(text);
+    setValidationError(null);
+  }, []);
+
+  const handlePasswordChange = useCallback((text: string) => {
+    setPassword(text);
+    setValidationError(null);
+  }, []);
+
+  const handleConfirmPasswordChange = useCallback((text: string) => {
+    setConfirmPassword(text);
+    setValidationError(null);
+  }, []);
+
+  const validateForm = useCallback(() => {
     if (!username || !email || !password || !confirmPassword) {
       setValidationError('All fields are required');
       return false;
@@ -78,10 +105,10 @@ export default function SignupScreen() {
 
     setValidationError(null);
     return true;
-  };
+  }, [username, email, password, confirmPassword]);
 
   // Handle social button press - show "Coming Soon"
-  const handleSocialPress = (provider: string) => {
+  const handleSocialPress = useCallback((provider: string) => {
     if (Platform.OS !== 'web') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     }
@@ -90,9 +117,19 @@ export default function SignupScreen() {
       `${provider} signup will be available in a future update.`,
       [{ text: 'OK' }]
     );
-  };
+  }, []);
 
-  const handleSignup = async () => {
+  // Helper to handle network errors
+  const handleNetworkError = useCallback((err: unknown) => {
+    const errorMessage = err instanceof Error ? err.message.toLowerCase() : '';
+    if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('connection')) {
+      setValidationError('No internet connection. Please check your network and try again.');
+    } else {
+      setValidationError('Signup failed. Please try again.');
+    }
+  }, []);
+
+  const handleSignup = useCallback(async () => {
     if (!validateForm()) return;
 
     if (Platform.OS !== 'web') {
@@ -139,28 +176,21 @@ export default function SignupScreen() {
     } catch (err) {
       handleNetworkError(err);
     }
-  };
+  }, [username, email, password, confirmPassword, validateForm, signup, router, handleNetworkError]);
 
-  // Helper to handle network errors
-  const handleNetworkError = (err: unknown) => {
-    const errorMessage = err instanceof Error ? err.message.toLowerCase() : '';
-    if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('connection')) {
-      setValidationError('No internet connection. Please check your network and try again.');
-    } else {
-      setValidationError('Signup failed. Please try again.');
-    }
-  };
+  // Memoize error display
+  const errorMessage = error || validationError;
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 50 : 0}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="none"
       >
         <View style={styles.logoContainer}>
           <Image
@@ -178,20 +208,19 @@ export default function SignupScreen() {
           />
           <Text style={styles.subtitle}>Join the trading revolution</Text>
 
-          {(error || validationError) && (
-            <Text style={styles.errorText}>{error || validationError}</Text>
+          {errorMessage && (
+            <Text style={styles.errorText}>{errorMessage}</Text>
           )}
 
           <NeonInput
             label="Username"
             placeholder="Choose a username"
             value={username}
-            onChangeText={(text) => {
-              setUsername(text);
-              setValidationError(null);
-            }}
+            onChangeText={handleUsernameChange}
             autoCapitalize="none"
-            leftIcon={<User size={20} color={COLORS.textSecondary} />}
+            autoCorrect={false}
+            leftIcon={UserIcon}
+            blurOnSubmit={false}
             accessibilityLabel="Username input"
             accessibilityHint="Choose a username with 3-20 characters"
           />
@@ -200,13 +229,12 @@ export default function SignupScreen() {
             label="Email"
             placeholder="Enter your email"
             value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              setValidationError(null);
-            }}
+            onChangeText={handleEmailChange}
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
-            leftIcon={<Mail size={20} color={COLORS.textSecondary} />}
+            leftIcon={EmailIcon}
+            blurOnSubmit={false}
             accessibilityLabel="Email input"
             accessibilityHint="Enter your email address"
           />
@@ -215,12 +243,10 @@ export default function SignupScreen() {
             label="Password"
             placeholder="Create a password"
             value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              setValidationError(null);
-            }}
+            onChangeText={handlePasswordChange}
             isPassword
-            leftIcon={<Lock size={20} color={COLORS.textSecondary} />}
+            leftIcon={LockIcon}
+            blurOnSubmit={false}
             accessibilityLabel="Password input"
             accessibilityHint="Create a secure password"
           />
@@ -238,19 +264,17 @@ export default function SignupScreen() {
             label="Confirm Password"
             placeholder="Confirm your password"
             value={confirmPassword}
-            onChangeText={(text) => {
-              setConfirmPassword(text);
-              setValidationError(null);
-            }}
+            onChangeText={handleConfirmPasswordChange}
             isPassword
-            leftIcon={<Lock size={20} color={COLORS.textSecondary} />}
+            leftIcon={LockIcon}
+            blurOnSubmit={false}
             accessibilityLabel="Confirm password input"
             accessibilityHint="Re-enter your password to confirm"
           />
 
           <NeonButton
             title="Sign Up"
-            icon={<UserPlus size={20} color={COLORS.textPrimary} />}
+            icon={SignupIcon}
             onPress={handleSignup}
             loading={isLoading}
             fullWidth
@@ -306,21 +330,22 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20
+    paddingHorizontal: 24,
+    paddingTop: 40,
+    paddingBottom: 30
   },
   logoContainer: {
     alignItems: 'center',
-    marginTop: 40,
     marginBottom: 20
   },
   logoImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    marginBottom: 24
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    resizeMode: 'contain'
   },
   formContainer: {
-    paddingHorizontal: 24
+    flex: 1
   },
   title: {
     textAlign: 'center',
@@ -329,7 +354,7 @@ const styles = StyleSheet.create({
   subtitle: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
-    fontSize: 16,
+    fontSize: 14,
     textAlign: 'center',
     marginBottom: 24
   },
@@ -337,7 +362,11 @@ const styles = StyleSheet.create({
     ...FONTS.sfProMedium,
     color: COLORS.error,
     textAlign: 'center',
-    marginBottom: 16
+    marginBottom: 16,
+    fontSize: 14,
+    padding: 12,
+    backgroundColor: COLORS.error + '20',
+    borderRadius: 8
   },
   passwordHint: {
     ...FONTS.sfProRegular,
@@ -345,35 +374,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 8,
     marginBottom: 16,
-    lineHeight: 16
+    lineHeight: 18
   },
   signupButton: {
-    marginVertical: 24
+    marginTop: 8,
+    marginBottom: 24
   },
   socialButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16
+    gap: 12,
+    marginBottom: 24
   },
   socialButton: {
-    flex: 1,
-    marginHorizontal: 8
+    flex: 1
   },
   socialIcon: {
     ...FONTS.sfProBold,
-    fontSize: 16,
+    fontSize: 18,
     color: COLORS.textPrimary
   },
   loginContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16
+    alignItems: 'center',
+    gap: 4
   },
   loginText: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
-    fontSize: 14,
-    marginRight: 4
+    fontSize: 14
   },
   loginLink: {
     ...FONTS.sfProMedium,
@@ -381,9 +411,11 @@ const styles = StyleSheet.create({
     fontSize: 14
   },
   bottomGlow: {
-    height: 4,
-    width: '100%',
     position: 'absolute',
-    bottom: 0
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 100,
+    opacity: 0.1
   }
 });
