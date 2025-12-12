@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "soulwallet",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "jsEngine": "hermes",
     "splash": {
       "image": "./assets/images/splash.png",
@@ -27,7 +27,7 @@
       },
       "package": "io.soulwallet.app",
       "allowBackup": false,
-      "softwareKeyboardLayoutMode": "pan",
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.VIBRATE",
