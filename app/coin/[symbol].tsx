@@ -93,7 +93,7 @@ export default function CoinDetailsScreen() {
   const {
     data: apiData,
     isLoading: isLoadingApi,
-    error: tokenError,
+    error: apiError,
     refetch: refetchApi
   } = trpc.market.getTokenDetails.useQuery(
     { symbol: symbol?.toUpperCase() || '' },
@@ -160,57 +160,45 @@ export default function CoinDetailsScreen() {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 640;
 
-  // Calculate sentiment from real transaction data when available
-  const getSentiment = useCallback((tf: '1h' | '1d' | '1w' | '1m' | '1y') => {
-    // Use real 24h transaction data if available
-    if (apiData?.txns24h && (tf === '1h' || tf === '1d')) {
-      const { buys, sells, total } = apiData.txns24h;
-      if (total > 0) {
-        const buyPercent = Math.round((buys / total) * 100);
-        const sellPercent = Math.round((sells / total) * 100);
-        // Estimate holding as remainder (simplified)
-        const holdingPercent = Math.max(0, 100 - buyPercent - sellPercent);
-        return { 
-          holding: holdingPercent, 
-          selling: sellPercent, 
-          buying: buyPercent,
-          isReal: true 
-        };
-      }
+  const getMockSentiment = useCallback((tf: '1h' | '1d' | '1w' | '1m' | '1y') => {
+    // Simple deterministic mock based on timeframe for consistent UI
+    switch (tf) {
+      case '1h':
+        return { holding: 40, selling: 10, buying: 50 };
+      case '1d':
+        return { holding: 45, selling: 15, buying: 40 };
+      case '1w':
+        return { holding: 52, selling: 18, buying: 30 };
+      case '1m':
+        return { holding: 48, selling: 22, buying: 30 };
+      case '1y':
+        return { holding: 35, selling: 25, buying: 40 };
+      default:
+        return { holding: 40, selling: 10, buying: 50 };
     }
-    // Fallback: estimate from price change direction
-    const priceChange = tf === '1h' ? (apiData?.priceChange1h || 0) : (apiData?.priceChange24h || 0);
-    if (priceChange > 5) return { holding: 30, selling: 10, buying: 60, isReal: false };
-    if (priceChange > 0) return { holding: 40, selling: 15, buying: 45, isReal: false };
-    if (priceChange > -5) return { holding: 45, selling: 25, buying: 30, isReal: false };
-    return { holding: 35, selling: 40, buying: 25, isReal: false };
-  }, [apiData]);
+  }, []);
 
-  const sentiment = getSentiment(sentimentTimeframe);
+  const sentiment = getMockSentiment(sentimentTimeframe);
 
-  // Get real stat changes based on price change data from API
-  const getStatChanges = useCallback((tf: Timeframe) => {
-    // Use real price change data when available
-    if (apiData) {
-      const priceChange = tf === '1h' ? apiData.priceChange1h 
-        : tf === '1d' ? apiData.priceChange24h 
-        : apiData.priceChange7d || apiData.priceChange24h;
-      
-      // Estimate other metrics based on price change (correlated in crypto)
-      // These are approximations since DexScreener doesn't provide historical data
-      const multiplier = tf === '1h' ? 0.3 : tf === '1d' ? 1 : tf === '1w' ? 2.5 : tf === '1m' ? 5 : 12;
-      return { 
-        marketCap: priceChange * multiplier,
-        volume: priceChange * multiplier * 1.2, // Volume typically more volatile
-        liquidity: priceChange * multiplier * 0.5, // Liquidity less volatile
-        holders: Math.abs(priceChange) * multiplier * 0.1, // Holders always positive growth estimate
-        isReal: tf === '1h' || tf === '1d' || tf === '1w'
-      };
+  const getMockStatChanges = useCallback((tf: Timeframe) => {
+    // Deterministic mock deltas per timeframe; positive/negative for realism
+    switch (tf) {
+      case '1h':
+        return { marketCap: 0.6, volume: 1.2, liquidity: 0.3, holders: 0.1 };
+      case '1d':
+        return { marketCap: 2.4, volume: 3.1, liquidity: 1.0, holders: 0.6 };
+      case '1w':
+        return { marketCap: 6.8, volume: 9.2, liquidity: 3.5, holders: 2.1 };
+      case '1m':
+        return { marketCap: 14.2, volume: 18.5, liquidity: 7.4, holders: 5.0 };
+      case '1y':
+        return { marketCap: 65.0, volume: 80.0, liquidity: 35.0, holders: 28.0 };
+      default:
+        return { marketCap: 0, volume: 0, liquidity: 0, holders: 0 };
     }
-    return { marketCap: 0, volume: 0, liquidity: 0, holders: 0, isReal: false };
-  }, [apiData]);
+  }, []);
 
-  const statChanges = getStatChanges(sentimentTimeframe);
+  const statChanges = getMockStatChanges(sentimentTimeframe);
 
   const cycleTimeframe = useCallback(() => {
     const idx = TF_ORDER.indexOf(sentimentTimeframe);
@@ -347,26 +335,16 @@ export default function CoinDetailsScreen() {
     setTopTraders(mockTopTraders);
   }, [coinData]);
 
-  // Load mock data when coin data is available and refresh every 30 seconds
+  // Load mock data when coin data is available
   useEffect(() => {
-    if (!coinData) return;
-    
-    loadMockData();
-    
-    // Set up interval to refresh transactions and traders every 30 seconds
-    const refreshInterval = setInterval(() => {
+    if (coinData) {
       loadMockData();
-    }, 30000);
-    
-    // Cleanup interval on unmount or when coinData changes
-    return () => clearInterval(refreshInterval);
+    }
   }, [coinData, loadMockData]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await refetchApi();
-    // Also refresh transactions and traders data
-    loadMockData();
     setRefreshing(false);
   };
 
@@ -422,19 +400,13 @@ export default function CoinDetailsScreen() {
       <View style={styles.loadingContainer}>
         <Text style={styles.errorTitle}>Token Not Found</Text>
         <Text style={styles.errorText}>
-          {tokenError?.message || `Could not find data for ${symbol?.toUpperCase()}`}
+          {`Could not find data for ${symbol?.toUpperCase()}`}
         </Text>
         <NeonButton
           title="Go Back"
           onPress={() => router.back()}
           style={{ marginTop: SPACING.m }}
         />
-        <TouchableOpacity
-          style={{ marginTop: SPACING.m }}
-          onPress={() => Linking.openURL(`https://dexscreener.com/solana?q=${symbol}`)}
-        >
-          <Text style={styles.viewAllLink}>Search on DexScreener →</Text>
-        </TouchableOpacity>
       </View>
     );
   }
@@ -717,44 +689,15 @@ export default function CoinDetailsScreen() {
           <NeonCard style={styles.chartCard}>
             <View style={styles.chartPlaceholder}>
               <Activity color={COLORS.solana} size={48} />
-              <Text style={styles.chartPlaceholderText}>Price Chart</Text>
-              <Text style={styles.chartSubtext}>
-                ${formatPrice(coinData.price)} ({coinData.change24h >= 0 ? '+' : ''}{coinData.change24h.toFixed(2)}% 24h)
-              </Text>
-              <TouchableOpacity
-                style={styles.viewChartButton}
-                onPress={() => {
-                  const chartUrl = coinData.contractAddress
-                    ? `https://dexscreener.com/solana/${coinData.contractAddress}`
-                    : `https://dexscreener.com/solana`;
-                  Linking.openURL(chartUrl);
-                }}
-              >
-                <ExternalLink color={COLORS.solana} size={16} />
-                <Text style={styles.viewChartText}>View Full Chart on DexScreener</Text>
-              </TouchableOpacity>
+              <Text style={styles.chartPlaceholderText}>TradingView Chart</Text>
+              <Text style={styles.chartSubtext}>Real-time price chart will be integrated here</Text>
             </View>
           </NeonCard>
         )}
 
         {activeTab === 'trades' && (
           <NeonCard style={styles.tradesCard}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Transactions</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  const txUrl = coinData.contractAddress
-                    ? `https://solscan.io/token/${coinData.contractAddress}#txs`
-                    : 'https://solscan.io';
-                  Linking.openURL(txUrl);
-                }}
-              >
-                <Text style={styles.viewAllLink}>View on Solscan →</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.dataDisclaimer}>
-              Simulated transactions based on 24h activity ({coinData.txns24h?.total || 0} total)
-            </Text>
+            <Text style={styles.sectionTitle}>Recent Transactions</Text>
             {transactions.slice(0, 20).map((tx) => (
               <View key={tx.id} style={styles.transactionItem}>
                 <View style={styles.transactionLeft}>
@@ -794,22 +737,7 @@ export default function CoinDetailsScreen() {
 
         {activeTab === 'holders' && (
           <NeonCard style={styles.holdersCard}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Top Traders</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  const holdersUrl = coinData.contractAddress
-                    ? `https://solscan.io/token/${coinData.contractAddress}#holders`
-                    : 'https://solscan.io';
-                  Linking.openURL(holdersUrl);
-                }}
-              >
-                <Text style={styles.viewAllLink}>View Holders →</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.dataDisclaimer}>
-              Simulated trader data • Real holder data available on Solscan
-            </Text>
+            <Text style={styles.sectionTitle}>Top Traders</Text>
             {topTraders.map((trader, index) => (
               <View key={trader.id} style={styles.traderItem}>
                 <View style={styles.traderLeft}>
@@ -888,18 +816,12 @@ export default function CoinDetailsScreen() {
           </NeonCard>
         )}
 
-        {/* More Info - Opens DexScreener */}
+        {/* More Info */}
         <View style={styles.moreInfoContainer}>
           <NeonButton
-            title="More Info on DexScreener"
+            title="More Info"
             variant="secondary"
-            onPress={() => {
-              // Open DexScreener page for this token
-              const dexScreenerUrl = coinData.contractAddress 
-                ? `https://dexscreener.com/solana/${coinData.contractAddress}`
-                : `https://dexscreener.com/solana`;
-              Linking.openURL(dexScreenerUrl);
-            }}
+            onPress={() => { }}
           />
         </View>
       </ScrollView>
@@ -1348,21 +1270,6 @@ const styles = StyleSheet.create({
     marginTop: SPACING.s,
     textAlign: 'center',
   },
-  viewChartButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.solana + '20',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    borderRadius: BORDER_RADIUS.medium,
-    marginTop: SPACING.m,
-  },
-  viewChartText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.solana,
-    fontSize: 14,
-    marginLeft: SPACING.s,
-  },
   tradesCard: {
     margin: SPACING.m,
     marginTop: 0,
@@ -1371,27 +1278,10 @@ const styles = StyleSheet.create({
     margin: SPACING.m,
     marginTop: 0,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.xs,
-  },
   sectionTitle: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-  },
-  viewAllLink: {
-    ...FONTS.phantomMedium,
-    color: COLORS.solana,
-    fontSize: 12,
-  },
-  dataDisclaimer: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontStyle: 'italic',
     marginBottom: SPACING.m,
   },
   transactionItem: {
