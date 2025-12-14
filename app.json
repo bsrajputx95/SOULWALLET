@@ -59,7 +59,7 @@
         "origin": "https://rork.com/"
       },
       "eas": {
-        "projectId": "501a2cb4-c7d1-4233-bed7-aa47db621eae"
+        "projectId": "c2e823d7-85e1-44f5-a355-be7371a75cc7"
       }
     },
     "owner": "soul-wallet",
@@ -67,7 +67,7 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/501a2cb4-c7d1-4233-bed7-aa47db621eae"
+      "url": "https://u.expo.dev/c2e823d7-85e1-44f5-a355-be7371a75cc7"
     }
   }
 }
