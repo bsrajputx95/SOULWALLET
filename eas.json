@@ -12,7 +12,7 @@
         "buildType": "apk"
       }
     },
-    "beta-apk": {
+    "apk": {
       "distribution": "internal",
       "node": "22.11.0",
       "android": {
@@ -23,10 +23,7 @@
         "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
         "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
         "EXPO_PUBLIC_DEV_MODE": "false",
-        "EXPO_PUBLIC_LOG_LEVEL": "warn",
-        "EXPO_PUBLIC_SENTRY_DSN": "${EXPO_PUBLIC_SENTRY_DSN}",
-        "SENTRY_ORG": "${SENTRY_ORG}",
-        "SENTRY_PROJECT": "soulwallet-mobile"
+        "EXPO_PUBLIC_LOG_LEVEL": "info"
       }
     },
     "preview": {
@@ -40,10 +37,7 @@
         "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
         "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
         "EXPO_PUBLIC_DEV_MODE": "false",
-        "EXPO_PUBLIC_LOG_LEVEL": "warn",
-        "EXPO_PUBLIC_SENTRY_DSN": "${EXPO_PUBLIC_SENTRY_DSN}",
-        "SENTRY_ORG": "${SENTRY_ORG}",
-        "SENTRY_PROJECT": "soulwallet-mobile"
+        "EXPO_PUBLIC_LOG_LEVEL": "warn"
       }
     },
     "production": {
@@ -58,18 +52,7 @@
         "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
         "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
         "EXPO_PUBLIC_DEV_MODE": "false",
-        "EXPO_PUBLIC_LOG_LEVEL": "warn",
-        "EXPO_PUBLIC_SENTRY_DSN": "${EXPO_PUBLIC_SENTRY_DSN}",
-        "SENTRY_ORG": "${SENTRY_ORG}",
-        "SENTRY_PROJECT": "soulwallet-mobile"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "android": {
-        "serviceAccountKeyPath": "./google-services-key.json",
-        "track": "internal"
+        "EXPO_PUBLIC_LOG_LEVEL": "warn"
       }
     }
   }
