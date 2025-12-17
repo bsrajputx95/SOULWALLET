@@ -120,7 +120,7 @@
     "@react-navigation/native": "^7.0.14",
     "@sentry/node": "^8.37.1",
     "@sentry/react-native": "~7.2.0",
-    "@solana/spl-token": "^0.1.8",
+    "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.2",
     "@tanstack/react-query": "^5.83.0",
     "@trpc/client": "^11.6.0",
