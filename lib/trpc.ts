@@ -1,5 +1,6 @@
 import { createTRPCReact } from "@trpc/react-query";
 import { httpLink } from "@trpc/client";
+import superjson from 'superjson';
 import { SecureStorage } from './secure-storage';
 import Constants from 'expo-constants';
 import type { AppRouter } from '../src/server/types';
@@ -32,6 +33,9 @@ const getBaseUrl = (): string => {
 };
 
 export const trpcClient = trpc.createClient({
+  // CRITICAL: Must use same transformer as server (superjson)
+  // Without this, the client can't decode server responses
+  transformer: superjson,
   links: [
     httpLink({
       url: `${getBaseUrl()}/api/trpc`,
