@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { COLORS } from '../constants/colors';
 
@@ -29,29 +29,31 @@ interface StrengthResult {
  * - 3-4: Fair (yellow)
  * - 5: Good (green)
  * - 6: Strong (green)
+ * 
+ * Memoized to prevent parent re-renders during typing
  */
-export function PasswordStrengthMeter({ password }: Props) {
-  const getStrength = (pwd: string): StrengthResult => {
+const PasswordStrengthMeterComponent = ({ password }: Props) => {
+  // Memoize strength calculation to prevent recalculating on every parent render
+  const strength = useMemo((): StrengthResult => {
     let score = 0;
-    
+
     // Length checks
-    if (pwd.length >= 8) score++;
-    if (pwd.length >= 12) score++;
-    
+    if (password.length >= 8) score++;
+    if (password.length >= 12) score++;
+
     // Character type checks
-    if (/[a-z]/.test(pwd)) score++;
-    if (/[A-Z]/.test(pwd)) score++;
-    if (/\d/.test(pwd)) score++;
-    if (/[^a-zA-Z\d]/.test(pwd)) score++;
-    
+    if (/[a-z]/.test(password)) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/\d/.test(password)) score++;
+    if (/[^a-zA-Z\d]/.test(password)) score++;
+
     // Determine label and color based on score
     if (score <= 2) return { score, label: 'Weak', color: COLORS.error };
     if (score <= 4) return { score, label: 'Fair', color: COLORS.warning };
     if (score <= 5) return { score, label: 'Good', color: COLORS.success };
     return { score, label: 'Strong', color: COLORS.success };
-  };
+  }, [password]);
 
-  const strength = getStrength(password);
   const percentage = (strength.score / 6) * 100;
 
   // Don't render if no password entered
@@ -60,14 +62,14 @@ export function PasswordStrengthMeter({ password }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.barContainer}>
-        <View 
+        <View
           style={[
-            styles.bar, 
-            { 
-              width: `${percentage}%`, 
-              backgroundColor: strength.color 
+            styles.bar,
+            {
+              width: `${percentage}%`,
+              backgroundColor: strength.color
             }
-          ]} 
+          ]}
         />
       </View>
       <Text style={[styles.label, { color: strength.color }]}>
@@ -75,7 +77,10 @@ export function PasswordStrengthMeter({ password }: Props) {
       </Text>
     </View>
   );
-}
+};
+
+// Memoize component to prevent re-renders when props haven't changed
+export const PasswordStrengthMeter = React.memo(PasswordStrengthMeterComponent);
 
 const styles = StyleSheet.create({
   container: {

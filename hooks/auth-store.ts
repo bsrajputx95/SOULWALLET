@@ -28,7 +28,7 @@ export interface User {
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false); // Changed from true to false
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const loadUser = async () => {
     try {
-      setIsLoading(true);
+      // Don't set isLoading during silent restoration
       const token = await SecureStorage.getToken();
       const storedUser = await SecureStorage.getUserData();
 
@@ -61,9 +61,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setError('Failed to load user data');
       logger.error('Failed to load user:', err);
       captureException(err instanceof Error ? err : new Error('Failed to load user'), { context: 'loadUser' });
-    } finally {
-      setIsLoading(false);
     }
+    // No finally block setting isLoading to false - keep it false
   };
 
   const login = async (identifier: string, password: string, rememberMe: boolean = false) => {
@@ -157,7 +156,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setError(errorMessage);
       logger.error('Signup error:', err);
       captureException(err instanceof Error ? err : new Error(errorMessage), { context: 'signup' });
-      return false;
+      // THROW the error so signup screen can catch and display it
+      throw new Error(errorMessage);
     } finally {
       setIsLoading(false);
     }

@@ -14,6 +14,7 @@ react {
     hermesCommand = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsolutePath() + "/sdks/hermesc/%OS-BIN%/hermesc"
     codegenDir = new File(["node", "--print", "require.resolve('@react-native/codegen/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
 
+    enableBundleCompression = (findProperty('android.enableBundleCompression') ?: false).toBoolean()
     // Use Expo CLI to bundle the app, this ensures the Metro config
     // works correctly with Expo projects.
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
@@ -63,9 +64,9 @@ react {
 }
 
 /**
- * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ * Set this to true in release builds to optimize the app using [R8](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization).
  */
-def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInReleaseBuilds') ?: false).toBoolean()
+def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -78,11 +79,7 @@ def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInRelea
  * give correct results when using with locales other than en-US. Note that
  * this variant is about 6MiB larger per architecture than default.
  */
-def jscFlavor = 'org.webkit:android-jsc:+'
-
-// ABI version codes for APK splits
-// Each architecture gets a unique version code suffix
-project.ext.abiCodes = ['armeabi-v7a': 1, 'arm64-v8a': 2, 'x86': 3, 'x86_64': 4]
+def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -95,19 +92,11 @@ android {
         applicationId 'io.soulwallet.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // Version managed by scripts/bump-version.js
         versionCode 1
         versionName "1.0.0"
-    }
 
-    // Disable unused build features for smaller APK
-    buildFeatures {
-        buildConfig true
-        aidl false
-        renderScript false
-        shaders false
+        buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
-
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -115,105 +104,31 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            // Production keystore configured via EAS Build credentials
-            // See: https://docs.expo.dev/app-signing/app-credentials/
-            // EAS Build will inject the signing config automatically
-            // For local builds, configure via gradle.properties or environment variables:
-            //   SOULWALLET_UPLOAD_STORE_FILE=/path/to/keystore.jks
-            //   SOULWALLET_UPLOAD_STORE_PASSWORD=your_store_password
-            //   SOULWALLET_UPLOAD_KEY_ALIAS=your_key_alias
-            //   SOULWALLET_UPLOAD_KEY_PASSWORD=your_key_password
-            
-            if (project.hasProperty('SOULWALLET_UPLOAD_STORE_FILE')) {
-                storeFile file(SOULWALLET_UPLOAD_STORE_FILE)
-                storePassword SOULWALLET_UPLOAD_STORE_PASSWORD
-                keyAlias SOULWALLET_UPLOAD_KEY_ALIAS
-                keyPassword SOULWALLET_UPLOAD_KEY_PASSWORD
-            } else {
-                // EAS Build injects signing config at build time
-                // For local release builds without EAS, the build will fail here
-                // which is the intended behavior to prevent debug-signed releases
-                def keystorePropertiesFile = rootProject.file("keystore.properties")
-                if (keystorePropertiesFile.exists()) {
-                    def keystoreProperties = new Properties()
-                    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-                    storeFile file(keystoreProperties['storeFile'])
-                    storePassword keystoreProperties['storePassword']
-                    keyAlias keystoreProperties['keyAlias']
-                    keyPassword keystoreProperties['keyPassword']
-                }
-            }
-        }
     }
-
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // CRITICAL: Release builds MUST use release signing config
-            // Never fall back to debug keystore - this ensures production builds
-            // are always properly signed. If release signing is not configured,
-            // the build will fail (which is the intended behavior).
-            signingConfig signingConfigs.release
-            
-            // Enable resource shrinking (removes unused resources)
-            shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
-            
-            // Enable code minification (ProGuard/R8)
-            minifyEnabled enableProguardInReleaseBuilds
-            
-            // ProGuard configuration files
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
-            
-            // Enable PNG crunching for smaller images
-            crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            signingConfig signingConfigs.debug
+            def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
+            shrinkResources enableShrinkResources.toBoolean()
+            minifyEnabled enableMinifyInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
+            crunchPngs enablePngCrunchInRelease.toBoolean()
         }
     }
-
-    // APK splits configuration - generates separate APKs per architecture
-    // This reduces individual APK size by 60-70% (from ~50MB to ~15-20MB)
-    splits {
-        abi {
-            enable true
-            reset()
-            include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
-            universalApk true  // Generate universal APK for testing
-        }
-    }
-
-    // App bundle configuration for Play Store
-    bundle {
-        language {
-            enableSplit = false  // Include all languages
-        }
-        density {
-            enableSplit = true   // Split by screen density
-        }
-        abi {
-            enableSplit = true   // Split by architecture
-        }
-    }
-
     packagingOptions {
         jniLibs {
-            useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
+            def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
+            useLegacyPackaging enableLegacyPackaging.toBoolean()
         }
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
-    }
-}
-
-// Version code automation for APK splits
-// Each ABI gets a unique version code to allow parallel uploads to Play Store
-android.applicationVariants.all { variant ->
-    variant.outputs.each { output ->
-        def abiVersionCode = project.ext.abiCodes.get(output.getFilter(com.android.build.OutputFile.ABI))
-        if (abiVersionCode != null) {
-            output.versionCodeOverride = android.defaultConfig.versionCode * 1000 + abiVersionCode
-        }
     }
 }
 
@@ -247,15 +162,15 @@ dependencies {
 
     if (isGifEnabled) {
         // For animated gif support
-        implementation("com.facebook.fresco:animated-gif:${reactAndroidLibs.versions.fresco.get()}")
+        implementation("com.facebook.fresco:animated-gif:${expoLibs.versions.fresco.get()}")
     }
 
     if (isWebpEnabled) {
         // For webp support
-        implementation("com.facebook.fresco:webpsupport:${reactAndroidLibs.versions.fresco.get()}")
+        implementation("com.facebook.fresco:webpsupport:${expoLibs.versions.fresco.get()}")
         if (isWebpAnimatedEnabled) {
             // Animated webp support
-            implementation("com.facebook.fresco:animated-webp:${reactAndroidLibs.versions.fresco.get()}")
+            implementation("com.facebook.fresco:animated-webp:${expoLibs.versions.fresco.get()}")
         }
     }
 

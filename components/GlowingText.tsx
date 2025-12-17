@@ -12,7 +12,7 @@ interface GlowingTextProps extends TextProps {
   intensity?: 'low' | 'medium' | 'high';
 }
 
-export const GlowingText: React.FC<GlowingTextProps> = ({
+const GlowingTextComponent: React.FC<GlowingTextProps> = ({
   text,
   color = COLORS.solana,
   fontSize = 24,
@@ -35,12 +35,6 @@ export const GlowingText: React.FC<GlowingTextProps> = ({
   };
 
   const getTextShadow = () => {
-    const shadowOpacity = {
-      low: 0.5,
-      medium: 0.7,
-      high: 0.9,
-    };
-
     const shadowRadius = {
       low: 2,
       medium: 4,
@@ -69,6 +63,9 @@ export const GlowingText: React.FC<GlowingTextProps> = ({
     </Text>
   );
 };
+
+// Memoize component to prevent re-renders when parent re-renders
+export const GlowingText = React.memo(GlowingTextComponent);
 
 const styles = StyleSheet.create({
   text: {

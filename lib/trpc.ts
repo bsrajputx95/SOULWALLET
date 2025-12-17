@@ -12,10 +12,10 @@ const getBaseUrl = (): string => {
   if (__DEV__) {
     return 'http://localhost:3001';
   }
-  
+
   // In production, use environment variable
   const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-  
+
   if (apiUrl) {
     return apiUrl;
   }
@@ -27,7 +27,7 @@ const getBaseUrl = (): string => {
     '🚨 EXPO_PUBLIC_API_URL is not configured!\n' +
     'API calls will fail. Please set this environment variable.'
   );
-  
+
   return '';
 };
 
@@ -39,8 +39,15 @@ export const trpcClient = trpc.createClient({
         const token = await SecureStorage.getToken();
         const headers: Record<string, string> = {};
         if (token) headers.authorization = `Bearer ${token}`;
-        const appVersion = (Constants as any)?.expoConfig?.version || (Constants as any)?.manifest?.version;
-        if (appVersion) headers['x-mobile-app-version'] = String(appVersion);
+
+        // Get app version
+        const appVersion = (Constants as any)?.expoConfig?.version || (Constants as any)?.manifest?.version || '1.0.0';
+
+        // CRITICAL: Mobile apps MUST send x-mobile-app-version header
+        // Backend requires this to allow mobile app requests (bypasses origin validation)
+        // Without this header, the backend will reject with "Null origin not allowed" 403 error
+        headers['x-mobile-app-version'] = String(appVersion);
+
         if (Platform.OS === 'web' && typeof document !== 'undefined') {
           const cookies = document.cookie || '';
           const match = cookies.split(';').map(s => s.trim()).find(s => s.startsWith('csrf_token='));
@@ -57,7 +64,7 @@ export const trpcClient = trpc.createClient({
               const data = await res.json();
               csrf = data?.token;
               if (csrf) await SecureStorage.setCsrfToken(csrf);
-            } catch {}
+            } catch { }
           }
           if (csrf) headers['x-csrf-token'] = csrf;
         }

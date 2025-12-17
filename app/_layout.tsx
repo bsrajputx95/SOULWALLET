@@ -7,14 +7,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React from "react";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts, Orbitron_400Regular, Orbitron_500Medium, Orbitron_700Bold } from '@expo-google-fonts/orbitron';
 import { View, StyleSheet, Platform } from "react-native";
 import { COLORS } from "../constants/colors";
 import { trpc, trpcClient } from "../lib/trpc";
-
-
 
 // Providers
 import { AuthProvider } from "../hooks/auth-store";
@@ -43,14 +41,16 @@ if (__DEV__) {
   performanceMonitor.startTiming('app-startup');
   trackBundleSize();
 }
-if (__DEV__) {
-  try {
-    validateEnvironmentOrThrow();
-  } catch (error) {
-    // Log error but continue in development (allows working without backend)
-    console.error(error);
-  }
-}
+// TEMPORARILY DISABLED: Environment validation causing splash screen freeze
+// Will re-enable after fixing .env configuration
+// if (__DEV__) {
+//   try {
+//     validateEnvironmentOrThrow();
+//   } catch (error) {
+//     // Log error but continue in development (allows working without backend)
+//     console.error(error);
+//   }
+// }
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -85,18 +85,33 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    // Set app ready when fonts load OR after timeout (whichever comes first)
     if (fontsLoaded) {
       setAppIsReady(true);
     } else {
-      // Timeout fallback - proceed after 5 seconds even if fonts fail
+      // Proceed after 2 seconds if fonts fail to load
       const timeout = setTimeout(() => {
         console.warn('Font loading timeout - proceeding without custom fonts');
         setAppIsReady(true);
-      }, 5000);
+      }, 2000);
       return () => clearTimeout(timeout);
     }
   }, [fontsLoaded]);
+
+  // Hide splash screen when app is ready
+  useEffect(() => {
+    if (appIsReady) {
+      SplashScreen.hideAsync()
+        .then(() => {
+          if (__DEV__) {
+            performanceMonitor.endTiming('app-startup');
+            performanceMonitor.logSummary();
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to hide splash screen:', error);
+        });
+    }
+  }, [appIsReady]);
 
   // Hide browser scrollbar globally (web only)
   useEffect(() => {
@@ -114,18 +129,6 @@ export default function RootLayout() {
     };
   }, []);
 
-  const onLayoutRootView = useCallback(async () => {
-    if (appIsReady) {
-      await SplashScreen.hideAsync();
-
-      // Complete app startup performance monitoring
-      if (__DEV__) {
-        performanceMonitor.endTiming('app-startup');
-        performanceMonitor.logSummary();
-      }
-    }
-  }, [appIsReady]);
-
   if (!appIsReady) {
     return null;
   }
@@ -142,7 +145,7 @@ export default function RootLayout() {
                   <AccountProvider>
                     <MarketProvider>
                       <NotificationBadgeProvider>
-                        <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
+                        <GestureHandlerRootView style={{ flex: 1 }}>
                           <View style={styles.container}>
                             <RootLayoutNav />
                           </View>
