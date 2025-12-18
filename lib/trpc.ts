@@ -33,11 +33,10 @@ const getBaseUrl = (): string => {
 };
 
 export const trpcClient = trpc.createClient({
-  // CRITICAL: Must use same transformer as server (superjson)
-  // Without this, the client can't decode server responses
-  transformer: superjson,
   links: [
     httpLink({
+      // CRITICAL: In tRPC v11, transformer MUST be passed to httpLink, not createClient
+      transformer: superjson,
       url: `${getBaseUrl()}/api/trpc`,
       headers: async () => {
         const token = await SecureStorage.getToken();
@@ -83,7 +82,10 @@ export const trpcClient = trpc.createClient({
 
         const refreshClient = trpc.createClient({
           links: [
-            httpLink({ url: `${getBaseUrl()}/api/trpc` } as any),
+            httpLink({
+              url: `${getBaseUrl()}/api/trpc`,
+              transformer: superjson,
+            } as any),
           ],
         });
 
