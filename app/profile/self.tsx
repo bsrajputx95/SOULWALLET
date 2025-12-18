@@ -22,6 +22,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
 import { SocialPost } from '../../components/SocialPost';
 import { useAuth } from '../../hooks/auth-store';
+import { trpc } from '../../lib/trpc';
 
 export default function SelfProfileScreen() {
   const router = useRouter();
@@ -40,20 +41,23 @@ export default function SelfProfileScreen() {
     setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
-  // Mock data
+  // Fetch real profile data from API
+  const profileQuery = trpc.user.getProfile.useQuery(undefined);
+
+  // Use real data from API or fallback to defaults
   const stats = {
-    followers: 2140,
-    following: 184,
-    copyTraders: 57,
-    roi30d: 42.7,
-    vipSubs: 214,
+    followers: profileQuery.data?.stats?.followersCount || 0,
+    following: profileQuery.data?.stats?.followingCount || 0,
+    copyTraders: profileQuery.data?.stats?.copyTradersCount || 0,
+    roi30d: profileQuery.data?.stats?.roi || 0,
+    vipSubs: profileQuery.data?.stats?.vipSubscribersCount || 0,
   };
 
   const tradingSummary = {
-    pnl24h: 820.34,
-    winRate: 74,
-    maxDrawdown: -8.1,
-    followerEquity: 84210.34,
+    pnl24h: profileQuery.data?.tradingStats?.pnl24h || 0,
+    winRate: profileQuery.data?.tradingStats?.winRate || 0,
+    maxDrawdown: profileQuery.data?.tradingStats?.maxDrawdown || 0,
+    followerEquity: profileQuery.data?.tradingStats?.followerEquity || 0,
   };
 
 
@@ -112,34 +116,30 @@ export default function SelfProfileScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <ArrowLeft size={24} color={COLORS.textPrimary} />
-        </TouchableOpacity>
-        
         <View style={styles.profileInfo}>
-          <View style={styles.profileHeader}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {user?.username?.charAt(0).toUpperCase() || 'U'}
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {user?.username?.charAt(0).toUpperCase() || 'U'}
+            </Text>
+          </View>
+          <View style={styles.userDetails}>
+            <View style={styles.nameRow}>
+              <Text style={styles.displayName} numberOfLines={1}>
+                {user?.username ? (user.username.length > 12 ? user.username.slice(0, 12) + '...' : user.username) : 'user'}
               </Text>
-            </View>
-            <View style={styles.userDetails}>
-              <View style={styles.nameRow}>
-                <Text style={styles.displayName}>{user?.username || 'user'}</Text>
-                {user?.isVerified && <Shield size={16} color={COLORS.solana} style={styles.verifiedIcon} />}
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>ELITE</Text>
-                </View>
+              {user?.isVerified && <Shield size={16} color={COLORS.solana} style={styles.verifiedIcon} />}
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>ELITE</Text>
               </View>
-              <Text style={styles.username}>@{user?.username || 'user'}.sol</Text>
             </View>
+            <Text style={styles.username}>@{user?.username || 'user'}.sol</Text>
           </View>
         </View>
-        
-        <TouchableOpacity style={styles.settingsButton}>
+
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => router.push('/account')}
+        >
           <Settings size={24} color={COLORS.solana} />
         </TouchableOpacity>
       </View>
@@ -233,16 +233,16 @@ export default function SelfProfileScreen() {
 
         {/* VIP Setup and Get Verified */}
         <View style={styles.actionButtonsContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.actionButton}
             onPress={() => setShowVipSetup(true)}
           >
             <DollarSign size={20} color={COLORS.binance} />
             <Text style={styles.actionButtonText}>Enable VIP</Text>
           </TouchableOpacity>
-          
+
           {!user?.isVerified && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.actionButton}
               onPress={() => setShowVerification(true)}
             >
@@ -269,7 +269,7 @@ export default function SelfProfileScreen() {
                 Public
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.tab,
@@ -284,10 +284,10 @@ export default function SelfProfileScreen() {
                 VIP
               </Text>
             </TouchableOpacity>
-            
+
 
           </View>
-          
+
           <View style={styles.tabContent}>
             {renderTabContent()}
           </View>
@@ -303,7 +303,7 @@ export default function SelfProfileScreen() {
           <Plus size={24} color={COLORS.textPrimary} />
         </LinearGradient>
       </TouchableOpacity>
-      
+
       {/* VIP Setup Modal */}
       <Modal
         visible={showVipSetup}
@@ -319,12 +319,12 @@ export default function SelfProfileScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.modalContent}>
               <Text style={styles.modalDescription}>
                 Enable VIP to post private, premium-only content that subscribers pay to access.
               </Text>
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>VIP Price (USDC)</Text>
                 <View style={styles.priceInputContainer}>
@@ -340,7 +340,7 @@ export default function SelfProfileScreen() {
                 </View>
                 <Text style={styles.inputHint}>Min: $5, Max: $999</Text>
               </View>
-              
+
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>Duration</Text>
                 <View style={styles.radioContainer}>
@@ -356,7 +356,7 @@ export default function SelfProfileScreen() {
                     </View>
                     <Text style={styles.radioText}>Monthly</Text>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={styles.radioOption}
                     onPress={() => setVipDuration('lifetime')}
@@ -371,12 +371,12 @@ export default function SelfProfileScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
-              
+
               <Text style={styles.warningText}>
                 ⚠️ VIP content is hidden unless users pay for access. This helps you monetize your trading insights.
               </Text>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.enableButton}
                 onPress={() => {
                   if (__DEV__) console.log('Enabling VIP:', { price: vipPrice, duration: vipDuration });
@@ -389,7 +389,7 @@ export default function SelfProfileScreen() {
           </View>
         </View>
       </Modal>
-      
+
       {/* Verification Modal */}
       <Modal
         visible={showVerification}
@@ -405,14 +405,14 @@ export default function SelfProfileScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.modalContent}>
               <View style={styles.verificationOption}>
                 <Text style={styles.optionTitle}>✅ Option 1: Pay 10 SOL instantly</Text>
                 <Text style={styles.optionDescription}>
                   Get verified immediately by paying 10 SOL (~$1,500)
                 </Text>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.optionButton}
                   onPress={() => {
                     if (__DEV__) console.log('Instant verification selected');
@@ -422,7 +422,7 @@ export default function SelfProfileScreen() {
                   <Text style={styles.optionButtonText}>Choose This Option</Text>
                 </TouchableOpacity>
               </View>
-              
+
               <View style={styles.verificationOption}>
                 <Text style={styles.optionTitle}>🔥 Option 2: Organic Growth</Text>
                 <Text style={styles.optionDescription}>
@@ -431,7 +431,7 @@ export default function SelfProfileScreen() {
                   • 200+ VIP subscribers
                   • Active trading history
                 </Text>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.optionButton}
                   onPress={() => {
                     if (__DEV__) console.log('Organic verification selected');
@@ -441,7 +441,7 @@ export default function SelfProfileScreen() {
                   <Text style={styles.optionButtonText}>Submit Request</Text>
                 </TouchableOpacity>
               </View>
-              
+
               <Text style={styles.verificationNote}>
                 💡 Verified profiles appear higher in feeds and gain more trust from the community.
               </Text>
@@ -465,17 +465,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.l,
     paddingVertical: SPACING.m,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.cardBackground,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   profileInfo: {
     flex: 1,
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   profileHeader: {
     flexDirection: 'row',

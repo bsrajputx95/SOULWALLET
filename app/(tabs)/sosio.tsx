@@ -1,10 +1,10 @@
 import React, { useState, useRef } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  Pressable, 
-  ScrollView, 
+import {
+  StyleSheet,
+  View,
+  Text,
+  Pressable,
+  ScrollView,
   RefreshControl,
   TextInput,
   Modal,
@@ -44,39 +44,39 @@ export default function SosioScreen() {
 
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  
+
   // Responsive padding logic like Home screen
   const isSmallScreen = width < 375;
   const isLargeScreen = width > 768;
   const responsivePadding = isSmallScreen ? SPACING.xs : isLargeScreen ? SPACING.m : SPACING.s;
-  
+
   // Calculate proper bottom padding: TabBar height (85px) + bottom safe area + extra spacing
   const bottomPadding = 85 + insets.bottom + 20;
-  
+
   // Filter posts based on active feed and search query
   const filteredPosts = React.useMemo(() => {
     let filtered = allPosts;
-    
+
     // Filter by feed type
     if (activeFeed === 'following') {
       filtered = filtered.filter(post => followedUsers.includes(post.username));
     } else if (activeFeed === 'vip') {
       filtered = filtered.filter(post => post.visibility === 'vip');
     }
-    
+
     // Filter by search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(post => 
+      filtered = filtered.filter(post =>
         post.content.toLowerCase().includes(query) ||
         post.username.toLowerCase().includes(query) ||
         (post.mentionedToken && post.mentionedToken.toLowerCase().includes(query))
       );
     }
-    
+
     return filtered;
   }, [allPosts, activeFeed, searchQuery, followedUsers]);
-  
+
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<FeedTab>('feed');
   const [showNewPostModal, setShowNewPostModal] = useState(false);
@@ -86,7 +86,7 @@ export default function SosioScreen() {
   const [tokenName, setTokenName] = useState('');
   const [tokenAddress, setTokenAddress] = useState('');
   const [postVisibility, setPostVisibility] = useState<'public' | 'vip' | 'followers'>('public');
-  
+
   // Header height for content offset
   const HEADER_HEIGHT = 60;
   // Tabs smooth hide/show on scroll
@@ -95,7 +95,7 @@ export default function SosioScreen() {
   const scrollEventValue = useRef(new Animated.Value(0)).current;
   const lastScrollY = useRef(0);
   const tabsHidden = useRef(false);
-  
+
 
 
   const onRefresh = React.useCallback(async () => {
@@ -114,7 +114,7 @@ export default function SosioScreen() {
         const currentScrollY = event.nativeEvent.contentOffset.y;
         const diff = currentScrollY - lastScrollY.current;
         const direction = diff > 0 ? 'down' : 'up';
-        
+
         if (direction === 'down' && currentScrollY > 20 && !tabsHidden.current) {
           Animated.timing(tabsHeight, {
             toValue: 0,
@@ -130,7 +130,7 @@ export default function SosioScreen() {
             useNativeDriver: false,
           }).start(() => { tabsHidden.current = false; });
         }
-        
+
         lastScrollY.current = currentScrollY;
       },
     }
@@ -138,25 +138,26 @@ export default function SosioScreen() {
 
   const handleCreatePost = async () => {
     if (!postContent.trim()) return;
-    
+
     // In a real app, this would send to backend via tRPC
     // For now, just close the modal
     if (__DEV__) {
       console.log('Creating post:', {
         content: postContent,
         mentionedToken: mentionToken ? tokenName : undefined,
-        visibility: postVisibility });
+        visibility: postVisibility
+      });
     }
-    
+
     setShowNewPostModal(false);
     setPostContent('');
     setMentionToken(false);
     setTokenName('');
     setTokenAddress('');
   };
-  
 
-  
+
+
   const formatNumber = (num: number, decimals: number = 2): string => {
     if (num >= 1000000) {
       return (num / 1000000).toFixed(1) + 'M';
@@ -169,7 +170,7 @@ export default function SosioScreen() {
 
   const handleTabChange = (tab: FeedTab) => {
     setActiveTab(tab);
-    
+
     // Map tabs to feed types
     if (tab === 'feed') {
       setActiveFeed('all');
@@ -182,10 +183,10 @@ export default function SosioScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View 
+      <View
         style={[
-          styles.header, 
-          { 
+          styles.header,
+          {
             paddingHorizontal: responsivePadding
           }
         ]}
@@ -196,18 +197,20 @@ export default function SosioScreen() {
               {user?.username?.charAt(0).toUpperCase() || 'U'}
             </Text>
           </View>
-          <Text style={styles.username}>@{user?.username || 'user'}</Text>
+          <Text style={styles.username} numberOfLines={1} ellipsizeMode="tail">
+            @{user?.username ? (user.username.length > 15 ? user.username.slice(0, 15) + '...' : user.username) : 'user'}
+          </Text>
         </View>
-        
+
         <View style={styles.headerActions}>
-          <Pressable 
+          <Pressable
             style={styles.searchButton}
             onPress={() => setShowSearchBar(!showSearchBar)}
           >
             <Search size={24} color={COLORS.solana} />
           </Pressable>
-          
-          <Pressable 
+
+          <Pressable
             style={styles.settingsButton}
             onPress={() => router.push('/profile/self')}
           >
@@ -215,7 +218,7 @@ export default function SosioScreen() {
           </Pressable>
         </View>
       </View>
-      
+
       {showSearchBar && (
         <View style={[styles.searchContainer, { marginHorizontal: responsivePadding }]}>
           <Search size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
@@ -234,7 +237,7 @@ export default function SosioScreen() {
           )}
         </View>
       )}
-      
+
       <Animated.View style={[styles.tabsContainer, { height: tabsHeight, overflow: 'hidden' }]}>
         <ScrollView
           horizontal
@@ -255,7 +258,7 @@ export default function SosioScreen() {
               Feed
             </Text>
           </Pressable>
-          
+
           <Pressable
             style={[
               styles.tab,
@@ -270,7 +273,7 @@ export default function SosioScreen() {
               Following
             </Text>
           </Pressable>
-          
+
           <Pressable
             style={[
               styles.tab,
@@ -285,7 +288,7 @@ export default function SosioScreen() {
               Groups
             </Text>
           </Pressable>
-          
+
           <Pressable
             style={[
               styles.tab,
@@ -302,12 +305,12 @@ export default function SosioScreen() {
           </Pressable>
         </ScrollView>
       </Animated.View>
-      
+
       <ScrollView
         style={styles.content}
         contentContainerStyle={[
-          styles.contentContainer, 
-          { 
+          styles.contentContainer,
+          {
             paddingHorizontal: responsivePadding,
             paddingBottom: bottomPadding
           }
@@ -319,14 +322,7 @@ export default function SosioScreen() {
         onScroll={handleTabsScroll}
         scrollEventThrottle={16}
       >
-        {profileQuery.data && (
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}><Text style={styles.statLabel}>Followers</Text><Text style={styles.statValue}>{profileQuery.data.stats.followersCount}</Text></View>
-            <View style={styles.statBox}><Text style={styles.statLabel}>Following</Text><Text style={styles.statValue}>{profileQuery.data.stats.followingCount}</Text></View>
-            <View style={styles.statBox}><Text style={styles.statLabel}>Copy</Text><Text style={styles.statValue}>{profileQuery.data.stats.copyTradersCount}</Text></View>
-            <View style={styles.statBox}><Text style={styles.statLabel}>ROI</Text><Text style={styles.statValue}>{profileQuery.data.stats.roi}%</Text></View>
-          </View>
-        )}
+        {/* Stats removed from main Sosio screen - visible only in profile */}
         {activeTab === 'groups' ? (
           <View style={styles.comingSoonContainer}>
             <Text style={styles.comingSoonTitle}>Groups Coming Soon</Text>
@@ -356,7 +352,7 @@ export default function SosioScreen() {
                 try {
                   const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint: post.mentionedTokenMint })
                   await executeSwap(res.swapTransaction)
-                } catch (e: any) {}
+                } catch (e: any) { }
               }}
             />
           ))
@@ -366,15 +362,15 @@ export default function SosioScreen() {
               {searchQuery
                 ? 'No posts found matching your search.'
                 : activeTab === 'following'
-                ? 'Follow some traders to see their posts here.'
-                : activeTab === 'vip'
-                ? 'Subscribe to VIP content to see exclusive posts.'
-                : 'No posts yet. Be the first to post!'}
+                  ? 'Follow some traders to see their posts here.'
+                  : activeTab === 'vip'
+                    ? 'Subscribe to VIP content to see exclusive posts.'
+                    : 'No posts yet. Be the first to post!'}
             </Text>
           </View>
         )}
       </ScrollView>
-      
+
       {/* Token Bag Button */}
       <Pressable
         style={styles.bagButton}
@@ -387,7 +383,7 @@ export default function SosioScreen() {
           <ShoppingBag size={19} color={COLORS.textPrimary} />
         </LinearGradient>
       </Pressable>
-      
+
       {/* New Post Button */}
       <Pressable
         style={styles.newPostButton}
@@ -400,11 +396,11 @@ export default function SosioScreen() {
           <Plus size={19} color={COLORS.textPrimary} />
         </LinearGradient>
       </Pressable>
-      
 
-      
 
-      
+
+
+
       {/* New Post Modal */}
       <Modal
         visible={showNewPostModal}
@@ -420,7 +416,7 @@ export default function SosioScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </Pressable>
             </View>
-            
+
             <ScrollView
               style={styles.modalScroll}
               contentContainerStyle={styles.modalContent}
@@ -435,7 +431,7 @@ export default function SosioScreen() {
                 value={postContent}
                 onChangeText={setPostContent}
               />
-              
+
               <View style={styles.tokenMentionContainer}>
                 <Text style={styles.tokenMentionLabel}>Mention Token?</Text>
                 <View style={styles.radioContainer}>
@@ -451,7 +447,7 @@ export default function SosioScreen() {
                     </View>
                     <Text style={styles.radioText}>Yes</Text>
                   </Pressable>
-                  
+
                   <Pressable
                     style={styles.radioOption}
                     onPress={() => setMentionToken(false)}
@@ -466,7 +462,7 @@ export default function SosioScreen() {
                   </Pressable>
                 </View>
               </View>
-              
+
               {mentionToken && (
                 <View style={styles.tokenInputsContainer}>
                   <NeonInput
@@ -475,7 +471,7 @@ export default function SosioScreen() {
                     value={tokenName}
                     onChangeText={setTokenName}
                   />
-                  
+
                   <NeonInput
                     label="Token Address (optional)"
                     placeholder="Enter token contract address"
@@ -484,7 +480,7 @@ export default function SosioScreen() {
                   />
                 </View>
               )}
-              
+
               <View style={styles.visibilityContainer}>
                 <Text style={styles.visibilityLabel}>Visibility</Text>
                 <View style={styles.visibilityOptions}>
@@ -500,7 +496,7 @@ export default function SosioScreen() {
                       postVisibility === 'public' && styles.visibilityOptionTextActive,
                     ]}>Public</Text>
                   </Pressable>
-                  
+
                   <Pressable
                     style={[
                       styles.visibilityOption,
@@ -513,7 +509,7 @@ export default function SosioScreen() {
                       postVisibility === 'vip' && styles.visibilityOptionTextActive,
                     ]}>VIP</Text>
                   </Pressable>
-                  
+
                   <Pressable
                     style={[
                       styles.visibilityOption,
@@ -528,12 +524,12 @@ export default function SosioScreen() {
                   </Pressable>
                 </View>
               </View>
-              
+
               <View style={styles.postActions}>
                 <Pressable style={styles.photoButton}>
                   <Link size={20} color={COLORS.solana} />
                 </Pressable>
-                
+
                 <NeonButton
                   title="Post"
                   icon={<Plus size={20} color={COLORS.textPrimary} />}
@@ -571,7 +567,8 @@ const styles = StyleSheet.create({
   profileButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1 },
+    flex: 1
+  },
   avatar: {
     width: 40,
     height: 40,
@@ -579,21 +576,24 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.solana + '50',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SPACING.m },
+    marginRight: SPACING.m
+  },
   avatarText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 18,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3 },
+    textShadowRadius: 3
+  },
   username: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 18,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3 },
+    textShadowRadius: 3
+  },
   settingsButton: {
     width: 40,
     height: 40,
@@ -621,9 +621,11 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     paddingHorizontal: SPACING.m,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   searchIcon: {
-    marginRight: SPACING.s },
+    marginRight: SPACING.s
+  },
   searchInput: {
     ...FONTS.phantomRegular,
     flex: 1,
@@ -632,11 +634,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2 },
+    textShadowRadius: 2
+  },
   tabsContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   tabsScroll: {
-    minHeight: 44 },
+    minHeight: 44
+  },
   tab: {
     paddingVertical: SPACING.s,
     paddingHorizontal: SPACING.m,
@@ -644,29 +649,36 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.medium,
     backgroundColor: COLORS.cardBackground,
     minHeight: 36,
-    justifyContent: 'center' },
+    justifyContent: 'center'
+  },
   activeTab: {
-    backgroundColor: COLORS.solana + '20' },
+    backgroundColor: COLORS.solana + '20'
+  },
   tabText: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
     fontSize: 14,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2 },
+    textShadowRadius: 2
+  },
   activeTabText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   content: {
-    flex: 1 },
+    flex: 1
+  },
   contentContainer: {
-    minHeight: 200 },
+    minHeight: 200
+  },
   comingSoonContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.l,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 200 },
+    height: 200
+  },
   comingSoonTitle: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
@@ -674,22 +686,26 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.m,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3 },
+    textShadowRadius: 3
+  },
   comingSoonDescription: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 16,
-    textAlign: 'center' },
+    textAlign: 'center'
+  },
   emptyContainer: {
     padding: SPACING.l,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 200 },
+    height: 200
+  },
   emptyText: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 16,
-    textAlign: 'center' },
+    textAlign: 'center'
+  },
   newPostButton: {
     position: 'absolute',
     bottom: 20,
@@ -713,12 +729,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   modalContainer: {
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.large,
@@ -726,20 +744,24 @@ const styles = StyleSheet.create({
     maxHeight: '80%',
     width: '92%',
     maxWidth: 720,
-    alignSelf: 'center' },
+    alignSelf: 'center'
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: SPACING.l,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBackground },
+    borderBottomColor: COLORS.cardBackground
+  },
   modalTitle: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
-    fontSize: 18 },
+    fontSize: 18
+  },
   modalContent: {
-    padding: SPACING.l },
+    padding: SPACING.l
+  },
   modalScroll: {
     maxHeight: '100%',
   },
@@ -752,21 +774,26 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   tokenMentionContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   tokenMentionLabel: {
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   radioContainer: {
     flexDirection: 'row',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   radioOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: SPACING.l },
+    marginRight: SPACING.l
+  },
   radioButton: {
     width: 20,
     height: 20,
@@ -775,89 +802,110 @@ const styles = StyleSheet.create({
     borderColor: COLORS.textSecondary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SPACING.xs },
+    marginRight: SPACING.xs
+  },
   radioButtonSelected: {
-    borderColor: COLORS.solana },
+    borderColor: COLORS.solana
+  },
   radioButtonInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: COLORS.solana },
+    backgroundColor: COLORS.solana
+  },
   radioText: {
     ...FONTS.phantomRegular,
     color: COLORS.textPrimary,
-    fontSize: 16 },
+    fontSize: 16
+  },
   tokenInputsContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   postActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: SPACING.m },
+    marginTop: SPACING.m
+  },
   photoButton: {
     width: 44,
     height: 44,
     borderRadius: BORDER_RADIUS.medium,
     backgroundColor: COLORS.solana + '20',
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   postButton: {
     flex: 1,
-    marginLeft: SPACING.m },
+    marginLeft: SPACING.m
+  },
   visibilityContainer: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   visibilityLabel: {
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   visibilityOptions: {
     flexDirection: 'row',
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
-    padding: 4 },
+    padding: 4
+  },
   visibilityOption: {
     flex: 1,
     paddingVertical: SPACING.s,
     alignItems: 'center',
-    borderRadius: BORDER_RADIUS.small },
+    borderRadius: BORDER_RADIUS.small
+  },
   visibilityOptionActive: {
-    backgroundColor: COLORS.solana + '20' },
+    backgroundColor: COLORS.solana + '20'
+  },
   visibilityOptionText: {
     ...FONTS.phantomMedium,
     color: COLORS.textSecondary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   visibilityOptionTextActive: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   loadingContainer: {
     padding: SPACING.l,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 200 },
+    height: 200
+  },
   loadingText: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 16 },
+    fontSize: 16
+  },
   errorContainer: {
     padding: SPACING.l,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 200 },
+    height: 200
+  },
   errorText: {
     ...FONTS.phantomRegular,
     color: COLORS.error,
     fontSize: 16,
     marginBottom: SPACING.m,
-    textAlign: 'center' },
+    textAlign: 'center'
+  },
   retryButton: {
     backgroundColor: COLORS.solana + '20',
     paddingHorizontal: SPACING.l,
     paddingVertical: SPACING.s,
-    borderRadius: BORDER_RADIUS.medium },
+    borderRadius: BORDER_RADIUS.medium
+  },
   retryText: {
     ...FONTS.phantomMedium,
     color: COLORS.solana,
-    fontSize: 14 },
+    fontSize: 14
+  },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
