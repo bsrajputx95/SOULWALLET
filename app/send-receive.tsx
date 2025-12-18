@@ -969,7 +969,7 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     flex: 1,
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: SPACING.sm,
   },
   sendDescription: {
     fontSize: 16,
@@ -986,9 +986,12 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
   },
   formContainer: {
-    borderRadius: BORDER_RADIUS.xl,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 16,
     padding: SPACING.lg,
     marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   inputSection: {
     marginBottom: SPACING.lg,
