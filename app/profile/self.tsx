@@ -35,6 +35,11 @@ export default function SelfProfileScreen() {
   const [vipPrice, setVipPrice] = useState('');
   const [vipDuration, setVipDuration] = useState<'monthly' | 'lifetime'>('monthly');
 
+  // Responsive padding logic like Home screen
+  const isSmallScreen = width < 375;
+  const isLargeScreen = width > 768;
+  const responsivePadding = isSmallScreen ? 8 : isLargeScreen ? 16 : 12;
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     // Simulate refresh
@@ -115,7 +120,7 @@ export default function SelfProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: responsivePadding }]}>
         <View style={styles.profileInfo}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
@@ -146,7 +151,7 @@ export default function SelfProfileScreen() {
 
       <ScrollView
         style={styles.content}
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={[styles.contentContainer, { paddingHorizontal: responsivePadding }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />

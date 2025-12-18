@@ -1,9 +1,24 @@
-import DOMPurify from 'isomorphic-dompurify';
+import { Platform } from 'react-native';
 import { logger } from './client-logger';
+
+// DOMPurify doesn't work in React Native (no DOM)
+// We'll use a simple fallback for RN
+let DOMPurify: any = null;
+
+// Only import DOMPurify on web platform
+if (Platform.OS === 'web') {
+  try {
+    // Dynamic import for web only
+    DOMPurify = require('isomorphic-dompurify');
+  } catch (e) {
+    // Ignore import errors
+  }
+}
 
 /**
  * Sanitize HTML content to prevent XSS attacks
- * Uses DOMPurify for robust HTML sanitization
+ * Uses DOMPurify for robust HTML sanitization (web only)
+ * Returns plain text for React Native
  * 
  * @param html - The HTML string to sanitize
  * @param allowedTags - Optional array of allowed HTML tags
@@ -15,9 +30,22 @@ export function sanitizeHtml(html: string, allowedTags?: string[]): string {
   }
 
   try {
+    // On React Native, just strip HTML tags (no DOM available)
+    if (Platform.OS !== 'web' || !DOMPurify?.sanitize) {
+      return html
+        .replace(/<[^>]*>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#x27;/g, "'")
+        .replace(/&#x2F;/g, '/')
+        .trim();
+    }
+
     const config: any = {
       ALLOWED_TAGS: allowedTags || [
-        'p', 'br', 'strong', 'em', 'u', 'a', 'ul', 'ol', 'li', 
+        'p', 'br', 'strong', 'em', 'u', 'a', 'ul', 'ol', 'li',
         'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre'
       ],
       ALLOWED_ATTR: ['href', 'title', 'target'],
@@ -28,8 +56,8 @@ export function sanitizeHtml(html: string, allowedTags?: string[]): string {
     return DOMPurify.sanitize(html, config);
   } catch (error) {
     logger.error('HTML sanitization error:', error);
-    // Return empty string on error for safety
-    return '';
+    // Return stripped text on error for safety
+    return html.replace(/<[^>]*>/g, '').trim();
   }
 }
 
@@ -47,7 +75,7 @@ export function stripHtml(html: string): string {
 
   // First sanitize to prevent any malicious code execution
   const sanitized = sanitizeHtml(html);
-  
+
   // Then strip all HTML tags
   return sanitized
     .replace(/<[^>]*>/g, '')
@@ -98,12 +126,12 @@ export function isValidUsername(username: string): boolean {
  */
 export function isValidPassword(password: string): boolean {
   if (password.length < 8) return false;
-  
+
   const hasUppercase = /[A-Z]/.test(password);
   const hasLowercase = /[a-z]/.test(password);
   const hasNumber = /\d/.test(password);
   const hasSpecial = /[@$!%*?&]/.test(password);
-  
+
   return hasUppercase && hasLowercase && hasNumber && hasSpecial;
 }
 
