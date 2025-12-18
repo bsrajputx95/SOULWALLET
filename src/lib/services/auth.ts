@@ -6,12 +6,12 @@ import { OTPType } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../logger';
 import prisma from '../prisma';
-import type { 
-  SignupInput, 
-  LoginInput, 
-  PasswordResetRequestInput, 
+import type {
+  SignupInput,
+  LoginInput,
+  PasswordResetRequestInput,
   ResetPasswordInput,
-  VerifyOtpInput 
+  VerifyOtpInput
 } from '../validations/auth';
 
 // Types for fingerprinting and security
@@ -56,7 +56,7 @@ export class AuthService {
   })();
   private static readonly JWT_SECRET_ROTATION_PERIOD_DAYS = parseInt(process.env.JWT_SECRET_ROTATION_PERIOD_DAYS || '90');
   private static readonly JWT_SECRET_OVERLAP_DAYS = parseInt(process.env.JWT_SECRET_OVERLAP_DAYS || '7');
-  private static readonly JWT_EXPIRES_IN: string | number = process.env.JWT_EXPIRES_IN || '15m';
+  private static readonly JWT_EXPIRES_IN: string | number = process.env.JWT_EXPIRES_IN || '1h';
   private static readonly JWT_REFRESH_EXPIRES_IN: string | number = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
   private static readonly OTP_EXPIRES_IN = 10 * 60 * 1000; // 10 minutes in milliseconds
   private static readonly MAX_LOGIN_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5');
@@ -293,7 +293,7 @@ export class AuthService {
   private static async detectSuspiciousActivity(data: { userId: string; ipAddress: string; userAgent?: string }): Promise<boolean> {
     try {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      
+
       // Get recent activities for this user
       const recentActivities = await prisma.sessionActivity.findMany({
         where: {
@@ -332,7 +332,7 @@ export class AuthService {
   private static async checkAndLockAccount(identifier: string, ipAddress: string): Promise<void> {
     try {
       const thirtyMinutesAgo = new Date(Date.now() - this.ACCOUNT_LOCKOUT_DURATION_MINUTES * 60 * 1000);
-      
+
       // Count failed attempts in the last 30 minutes
       const failedAttempts = await prisma.loginAttempt.count({
         where: {
@@ -540,7 +540,7 @@ export class AuthService {
   static async login(input: LoginInput, fingerprint?: Fingerprint) {
     const identifier = input.identifier.toLowerCase();
     const ipAddress = fingerprint?.ipAddress || 'unknown';
-    
+
     try {
       // Find user by email or username
       const user = await prisma.user.findFirst({
@@ -571,7 +571,7 @@ export class AuthService {
       // Check if account is locked
       if (u.lockedUntil && u.lockedUntil > new Date()) {
         const remainingTime = Math.ceil((u.lockedUntil.getTime() - Date.now()) / (1000 * 60));
-        
+
         await this.trackLoginAttempt({
           identifier,
           ipAddress,
@@ -783,7 +783,7 @@ export class AuthService {
       // while still allowing the password reset to complete
       await prisma.oTP.update({
         where: { id: otpRecord.id },
-        data: { 
+        data: {
           // Set a short verification window (5 minutes) for password reset
           expiresAt: new Date(Date.now() + 5 * 60 * 1000),
         },
@@ -852,7 +852,7 @@ export class AuthService {
       await prisma.$transaction([
         prisma.user.update({
           where: { id: user.id },
-          data: { 
+          data: {
             password: hashedPassword,
             failedLoginAttempts: 0,
             lockedUntil: null,

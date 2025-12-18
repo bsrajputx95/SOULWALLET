@@ -1,6 +1,5 @@
 import React from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { Clock } from 'lucide-react-native';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
@@ -52,22 +51,21 @@ export const WalletCard: React.FC<WalletCardProps> = ({
           <Text style={styles.balanceLabel}>🪙 Balance</Text>
           <Text style={styles.balanceValue}>{formatCurrency(balance)}</Text>
         </View>
-        
+
         <View style={styles.pnlContainer}>
           <View style={styles.pnlHeader}>
             <Text style={styles.pnlLabel}>{pnlPeriod === '1d' ? 'Daily' : pnlPeriod === '7d' ? '7-Day' : pnlPeriod === '30d' ? '30-Day' : 'Yearly'} PnL</Text>
             {onPeriodChange && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.periodButton}
                 onPress={() => {
                   const periods: ('1d' | '7d' | '30d' | '1y')[] = ['1d', '7d', '30d', '1y'];
                   const currentIndex = periods.indexOf(pnlPeriod);
                   const nextIndex = (currentIndex + 1) % periods.length;
-                  onPeriodChange(periods[nextIndex]);
+                  onPeriodChange(periods[nextIndex]!);
                 }}
               >
-                <Clock size={16} color={COLORS.textSecondary} />
-                <Text style={styles.periodText}>{pnlPeriod}</Text>
+                <Text style={styles.periodText}>{pnlPeriod.toUpperCase()}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -120,16 +118,20 @@ const styles = StyleSheet.create({
   periodButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    paddingHorizontal: SPACING.s,
+    backgroundColor: COLORS.solana + '20',
+    paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.xs,
     borderRadius: BORDER_RADIUS.small,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '30',
+    minWidth: 50,
+    justifyContent: 'center',
   },
   periodText: {
-    ...FONTS.monospace,
-    color: COLORS.textSecondary,
+    ...FONTS.sfProMedium,
+    color: COLORS.solana,
     fontSize: 12,
-    marginLeft: SPACING.xs,
+    fontWeight: '700',
   },
   pnlLabel: {
     ...FONTS.sfProMedium,

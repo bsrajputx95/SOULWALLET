@@ -14,7 +14,7 @@ import {
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
- import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
+import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import {
   Send,
   ArrowDown,
@@ -208,10 +208,10 @@ export default function SendReceiveScreen() {
       setSendSuccess(`Transaction successful! Signature: ${signature.slice(0, 8)}...${signature.slice(-8)}`);
       setSendAddress('');
       setSendAmount('');
-      
+
       // Refresh balances
       await refreshBalances();
-      
+
     } catch (error: any) {
       if (__DEV__) logger.error('Send transaction failed:', error);
       setSendError(error.message || 'Transaction failed. Please try again.');
@@ -225,7 +225,7 @@ export default function SendReceiveScreen() {
   // Handle address change with validation
   const handleAddressChange = (text: string) => {
     setSendAddress(text);
-    
+
     if (!text.trim()) {
       setAddressValidation({ isValid: false, message: '' });
       return;
@@ -233,19 +233,19 @@ export default function SendReceiveScreen() {
 
     // Basic Solana address validation
     if (text.length < 32 || text.length > 44) {
-      setAddressValidation({ 
-        isValid: false, 
-        message: 'Invalid address length' 
+      setAddressValidation({
+        isValid: false,
+        message: 'Invalid address length'
       });
     } else if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(text)) {
-      setAddressValidation({ 
-        isValid: false, 
-        message: 'Invalid characters in address' 
+      setAddressValidation({
+        isValid: false,
+        message: 'Invalid characters in address'
       });
     } else {
-      setAddressValidation({ 
-        isValid: true, 
-        message: 'Valid Solana address' 
+      setAddressValidation({
+        isValid: true,
+        message: 'Valid Solana address'
       });
     }
   };
@@ -253,7 +253,7 @@ export default function SendReceiveScreen() {
   // Validate amount
   const validateAmount = (amount: string) => {
     if (!amount || !selectedToken) return;
-    
+
     const numAmount = parseFloat(amount);
     if (numAmount > selectedToken.balance) {
       setSendError(`Insufficient balance. Available: ${selectedToken.balance.toFixed(6)} ${selectedToken.symbol}`);
@@ -337,7 +337,7 @@ export default function SendReceiveScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-            
+
             {/* Address Validation Feedback */}
             {sendAddress && (
               <Text style={[
@@ -368,7 +368,7 @@ export default function SendReceiveScreen() {
                 {selectedToken?.symbol || 'SOL'}
               </Text>
             </View>
-            
+
             {selectedToken && (
               <TouchableOpacity
                 style={styles.maxButton}
@@ -462,7 +462,7 @@ export default function SendReceiveScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.contactsList}>
               {loadingContacts ? (
                 <View style={styles.loadingContainer}>
@@ -513,7 +513,7 @@ export default function SendReceiveScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.confirmationContent}>
               <View style={styles.confirmationSection}>
                 <Text style={styles.confirmationLabel}>Sending</Text>
@@ -521,14 +521,14 @@ export default function SendReceiveScreen() {
                   {sendAmount} {selectedToken?.symbol}
                 </Text>
               </View>
-              
+
               <View style={styles.confirmationSection}>
                 <Text style={styles.confirmationLabel}>To</Text>
                 <Text style={styles.confirmationAddress}>
                   {sendAddress}
                 </Text>
               </View>
-              
+
               {feeEstimate && (
                 <View style={styles.confirmationSection}>
                   <Text style={styles.confirmationLabel}>Network Fee</Text>
@@ -537,7 +537,7 @@ export default function SendReceiveScreen() {
                   </Text>
                 </View>
               )}
-              
+
               <View style={styles.confirmationButtons}>
                 <TouchableOpacity
                   style={[styles.confirmationButton, styles.cancelButton]}
@@ -545,7 +545,7 @@ export default function SendReceiveScreen() {
                 >
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
-                
+
                 <TouchableOpacity
                   style={[styles.confirmationButton, styles.confirmButton, (!flags?.sendEnabled || !flags?.simulationMode) && { opacity: 0.6 }]}
                   onPress={handleSendConfirm}
@@ -1589,7 +1589,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: SPACING.sm,
     paddingBottom: SPACING.xl,
   },
 });

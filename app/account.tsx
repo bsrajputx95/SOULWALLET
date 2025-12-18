@@ -38,8 +38,8 @@ import { trpc } from '../lib/trpc';
 import { useAccount } from '../hooks/account-store';
 
 export default function AccountScreen() {
-  const { 
-    profile, 
+  const {
+    profile,
     isUpdating: isAccountUpdating,
     updateProfile,
     updateSecurity,
@@ -49,7 +49,7 @@ export default function AccountScreen() {
   const sessionsQuery = trpc.auth.getSessions.useQuery();
   const revokeSessionMutation = trpc.auth.revokeSession.useMutation();
   const deleteAccountMutation = trpc.account.deleteAccount.useMutation();
-  
+
   const [firstName, setFirstName] = useState(profile?.firstName || '');
   const [lastName, setLastName] = useState(profile?.lastName || '');
   const [email, setEmail] = useState(profile?.email || '');
@@ -93,7 +93,7 @@ export default function AccountScreen() {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
-  
+
 
 
   // Scroll tracking for header animation
@@ -138,7 +138,7 @@ export default function AccountScreen() {
       listener: (event: any) => {
         const currentScrollY = event.nativeEvent.contentOffset.y;
         const scrollDirection = currentScrollY > lastScrollY.current ? 'down' : 'up';
-        
+
         // Only animate if scroll direction changed or significant scroll distance
         if (Math.abs(currentScrollY - lastScrollY.current) > 5) {
           if (scrollDirection === 'down' && currentScrollY > HEADER_HEIGHT) {
@@ -157,7 +157,7 @@ export default function AccountScreen() {
             }).start();
           }
         }
-        
+
         lastScrollY.current = currentScrollY;
       },
     }
@@ -191,8 +191,8 @@ export default function AccountScreen() {
         'To disable two-factor authentication, you will need to enter your password and a verification code from your authenticator app.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Continue', 
+          {
+            text: 'Continue',
             onPress: () => {
               // For now, show a prompt for password and code
               // In a full implementation, this would be a proper modal
@@ -243,7 +243,7 @@ export default function AccountScreen() {
         Alert.alert('Error', `Please enter your ${resetContactMethod}`);
         return;
       }
-      
+
       // Only email is supported for now
       if (resetContactMethod === 'phone') {
         Alert.alert('Not Available', 'Phone verification is not yet available. Please use email.');
@@ -268,9 +268,9 @@ export default function AccountScreen() {
 
       try {
         setIsPasswordResetLoading(true);
-        const result = await verifyOtpMutation.mutateAsync({ 
-          email: resetContactValue.trim().toLowerCase(), 
-          otp: resetOtp.trim() 
+        const result = await verifyOtpMutation.mutateAsync({
+          email: resetContactValue.trim().toLowerCase(),
+          otp: resetOtp.trim()
         });
         if (result.isValid) {
           setPasswordResetStep(3);
@@ -330,7 +330,7 @@ export default function AccountScreen() {
         Alert.alert('Error', 'Please enter your password');
         return;
       }
-      
+
       try {
         setIsTwoFactorLoading(true);
         const result = await setupTOTPMutation.mutateAsync({ password: totpPassword });
@@ -351,7 +351,7 @@ export default function AccountScreen() {
         Alert.alert('Error', 'Please enter a valid 6-digit code from your authenticator app');
         return;
       }
-      
+
       try {
         setIsTwoFactorLoading(true);
         await enableTOTPMutation.mutateAsync({ code: totpVerifyCode });
@@ -456,22 +456,10 @@ export default function AccountScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <Animated.View 
-        style={[
-          styles.header, 
-          {
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 1000,
-            transform: [{ translateY: headerTranslateY }],
-          }
-        ]}
-      >
+      <View style={styles.header}>
         <Text style={styles.headerTitle}>Account Settings</Text>
-        <TouchableOpacity 
-          onPress={handleSave} 
+        <TouchableOpacity
+          onPress={handleSave}
           style={[styles.saveButton, isAccountUpdating && styles.saveButtonDisabled]}
           disabled={isAccountUpdating}
         >
@@ -479,18 +467,16 @@ export default function AccountScreen() {
             {isAccountUpdating ? 'Saving...' : 'Save'}
           </Text>
         </TouchableOpacity>
-      </Animated.View>
+      </View>
 
-      <ScrollView 
-        style={[styles.scrollView, { paddingTop: HEADER_HEIGHT }]} 
+      <ScrollView
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
       >
         {/* Profile Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Profile Information</Text>
-          
+
           <View style={styles.profileImageContainer}>
             <View style={styles.profileImageWrapper}>
               {profile?.profileImage ? (
@@ -588,7 +574,7 @@ export default function AccountScreen() {
         {/* Security & Privacy */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security & Privacy</Text>
-          
+
           <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
             <View style={styles.settingLeft}>
               <Lock size={20} color={COLORS.textSecondary} />
@@ -614,7 +600,7 @@ export default function AccountScreen() {
         {/* App Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>App Settings</Text>
-          
+
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Default Currency</Text>
             <View style={styles.inputContainer}>
@@ -652,7 +638,7 @@ export default function AccountScreen() {
           <Text style={styles.sectionDescription}>
             Manage devices where you're currently logged in
           </Text>
-          
+
           {sessionsQuery.isLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color={COLORS.solana} />
@@ -696,7 +682,7 @@ export default function AccountScreen() {
         {/* Social */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Social</Text>
-          
+
           <TouchableOpacity style={styles.settingRow} onPress={handleInviteFriends}>
             <View style={styles.settingLeft}>
               <Users size={20} color={COLORS.textSecondary} />
@@ -709,7 +695,7 @@ export default function AccountScreen() {
         {/* Danger Zone */}
         <View style={[styles.section, styles.dangerSection]}>
           <Text style={[styles.sectionTitle, { color: COLORS.error }]}>Danger Zone</Text>
-          
+
           <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
             <Trash2 size={20} color={COLORS.error} />
             <Text style={styles.deleteAccountText}>Delete Account</Text>
@@ -744,7 +730,7 @@ export default function AccountScreen() {
                 <Text style={styles.modalDescription}>
                   Enter your email or mobile number to receive a verification code
                 </Text>
-                
+
                 <View style={styles.methodSelector}>
                   <TouchableOpacity
                     style={[styles.methodButton, resetContactMethod === 'email' && styles.methodButtonActive]}
@@ -753,7 +739,7 @@ export default function AccountScreen() {
                     <Mail size={20} color={resetContactMethod === 'email' ? COLORS.textPrimary : COLORS.textSecondary} />
                     <Text style={[styles.methodText, resetContactMethod === 'email' && styles.methodTextActive]}>Email</Text>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={[styles.methodButton, resetContactMethod === 'phone' && styles.methodButtonActive]}
                     onPress={() => setResetContactMethod('phone')}
@@ -792,7 +778,7 @@ export default function AccountScreen() {
                 <Text style={styles.modalDescription}>
                   Enter the 6-digit verification code sent to your {resetContactMethod}
                 </Text>
-                
+
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Verification Code</Text>
                   <View style={styles.inputContainer}>
@@ -816,7 +802,7 @@ export default function AccountScreen() {
                 <Text style={styles.modalDescription}>
                   Create a new password for your account
                 </Text>
-                
+
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>New Password</Text>
                   <View style={styles.inputContainer}>
@@ -856,19 +842,19 @@ export default function AccountScreen() {
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             )}
-            
-            <TouchableOpacity 
-              style={[styles.nextButton, isPasswordResetLoading && styles.nextButtonDisabled]} 
+
+            <TouchableOpacity
+              style={[styles.nextButton, isPasswordResetLoading && styles.nextButtonDisabled]}
               onPress={handlePasswordResetNext}
               disabled={isPasswordResetLoading}
             >
               <Text style={styles.nextButtonText}>
-                {isPasswordResetLoading 
-                  ? 'Please wait...' 
-                  : passwordResetStep === 1 
-                    ? 'Send Code' 
-                    : passwordResetStep === 2 
-                      ? 'Verify' 
+                {isPasswordResetLoading
+                  ? 'Please wait...'
+                  : passwordResetStep === 1
+                    ? 'Send Code'
+                    : passwordResetStep === 2
+                      ? 'Verify'
                       : 'Reset Password'}
               </Text>
             </TouchableOpacity>
@@ -898,7 +884,7 @@ export default function AccountScreen() {
                 <Text style={styles.modalDescription}>
                   Enter your password to begin setting up two-factor authentication with an authenticator app.
                 </Text>
-                
+
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Password</Text>
                   <View style={styles.inputContainer}>
@@ -921,11 +907,11 @@ export default function AccountScreen() {
                 <Text style={styles.modalDescription}>
                   Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
                 </Text>
-                
+
                 {totpQrCode ? (
                   <View style={styles.qrCodeContainer}>
-                    <Image 
-                      source={{ uri: totpQrCode }} 
+                    <Image
+                      source={{ uri: totpQrCode }}
                       style={styles.qrCode}
                       resizeMode="contain"
                     />
@@ -935,7 +921,7 @@ export default function AccountScreen() {
                     <Text style={styles.qrCodePlaceholder}>Loading QR Code...</Text>
                   </View>
                 )}
-                
+
                 <Text style={[styles.modalDescription, { marginTop: SPACING.m }]}>
                   After scanning, tap "Next" to verify the setup.
                 </Text>
@@ -947,7 +933,7 @@ export default function AccountScreen() {
                 <Text style={styles.modalDescription}>
                   Enter the 6-digit code from your authenticator app to verify the setup.
                 </Text>
-                
+
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Verification Code</Text>
                   <View style={styles.inputContainer}>
@@ -974,11 +960,11 @@ export default function AccountScreen() {
                     2FA is now enabled!
                   </Text>
                 </View>
-                
+
                 <Text style={styles.modalDescription}>
                   Save these backup codes in a safe place. You can use them to access your account if you lose your authenticator device.
                 </Text>
-                
+
                 <View style={styles.backupCodesContainer}>
                   {totpBackupCodes.map((code, index) => (
                     <View key={index} style={styles.backupCodeItem}>
@@ -986,7 +972,7 @@ export default function AccountScreen() {
                     </View>
                   ))}
                 </View>
-                
+
                 <Text style={[styles.modalDescription, { color: COLORS.error, marginTop: SPACING.m }]}>
                   ⚠️ These codes will only be shown once. Save them now!
                 </Text>
@@ -1000,21 +986,21 @@ export default function AccountScreen() {
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             )}
-            
-            <TouchableOpacity 
-              style={[styles.nextButton, isTwoFactorLoading && styles.nextButtonDisabled]} 
+
+            <TouchableOpacity
+              style={[styles.nextButton, isTwoFactorLoading && styles.nextButtonDisabled]}
               onPress={handleTwoFactorNext}
               disabled={isTwoFactorLoading}
             >
               <Text style={styles.nextButtonText}>
-                {isTwoFactorLoading 
-                  ? 'Please wait...' 
-                  : twoFactorStep === 1 
-                    ? 'Continue' 
-                    : twoFactorStep === 2 
-                      ? 'Next' 
-                      : twoFactorStep === 3 
-                        ? 'Verify & Enable' 
+                {isTwoFactorLoading
+                  ? 'Please wait...'
+                  : twoFactorStep === 1
+                    ? 'Continue'
+                    : twoFactorStep === 2
+                      ? 'Next'
+                      : twoFactorStep === 3
+                        ? 'Verify & Enable'
                         : 'Done'}
               </Text>
             </TouchableOpacity>
@@ -1078,15 +1064,15 @@ export default function AccountScreen() {
           </View>
 
           <View style={styles.modalFooter}>
-            <TouchableOpacity 
-              style={styles.backButton} 
+            <TouchableOpacity
+              style={styles.backButton}
               onPress={() => setShowDeleteAccountModal(false)}
             >
               <Text style={styles.backButtonText}>Cancel</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.deleteButton, isDeleting && styles.nextButtonDisabled]} 
+
+            <TouchableOpacity
+              style={[styles.deleteButton, isDeleting && styles.nextButtonDisabled]}
               onPress={handleConfirmDeleteAccount}
               disabled={isDeleting}
             >
