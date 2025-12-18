@@ -346,7 +346,7 @@ export default function MarketScreen() {
           styles.filtersContainer,
           {
             paddingHorizontal: responsivePadding,
-            marginTop: isHeaderHidden ? 0 : HEADER_HEIGHT,
+            marginTop: SPACING.s,
             marginBottom: SPACING.s,
           }
         ]}>
@@ -369,7 +369,7 @@ export default function MarketScreen() {
       )}
 
       {showFilters && (
-        <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding }]}>
+        <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding, marginTop: SPACING.s }]}>
 
           <ScrollView
             horizontal
