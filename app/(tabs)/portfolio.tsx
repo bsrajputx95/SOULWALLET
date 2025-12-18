@@ -37,6 +37,12 @@ export default function PortfolioScreen() {
   const { tokens, copiedWallets, totalBalance, dailyPnl, refetch, updateCopiedWallet } = useWallet();
   const openPositionsQuery = trpc.copyTrading.getOpenPositions.useQuery({}, { refetchInterval: 30000 });
 
+  // Fetch trending tokens for watchlist price data
+  const { data: trendingData } = trpc.market.trending.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+
   // Responsive padding logic like Home screen
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 375;
@@ -369,8 +375,28 @@ export default function PortfolioScreen() {
               </View>
             ) : (
               watchlistSymbols.map((symbol) => {
-                const token = tokens.find(t => t.symbol.toUpperCase() === symbol);
-                if (!token) {
+                // First check user's wallet tokens
+                let token = tokens.find(t => t.symbol.toUpperCase() === symbol);
+
+                // If not in wallet, check trending market data
+                let marketToken = null;
+                if (!token && trendingData?.pairs) {
+                  const pair = trendingData.pairs.find(
+                    (p: any) => p.baseToken?.symbol?.toUpperCase() === symbol
+                  );
+                  if (pair) {
+                    marketToken = {
+                      symbol: pair.baseToken?.symbol || symbol,
+                      name: pair.baseToken?.name || symbol,
+                      price: parseFloat(pair.priceUsd || '0'),
+                      change24h: parseFloat(pair.priceChange?.h24 || '0'),
+                      logo: pair.info?.imageUrl,
+                    };
+                  }
+                }
+
+                // If neither wallet nor market data available, show placeholder
+                if (!token && !marketToken) {
                   return (
                     <Pressable
                       key={symbol}
@@ -385,7 +411,7 @@ export default function PortfolioScreen() {
                         </View>
                         <View style={styles.tokenInfo}>
                           <Text style={styles.tokenSymbol}>{symbol}</Text>
-                          <Text style={styles.tokenPrice}>—</Text>
+                          <Text style={styles.tokenPrice}>Loading...</Text>
                           <Text style={[styles.tokenChange, { color: COLORS.textSecondary }]}>—</Text>
                         </View>
                       </View>
@@ -396,40 +422,44 @@ export default function PortfolioScreen() {
                     </Pressable>
                   );
                 }
+
+                // Use wallet token or market token data
+                const displayToken = token || marketToken;
                 return (
                   <Pressable
-                    key={token.id}
+                    key={displayToken.symbol}
                     style={styles.tokenItem}
-                    onPress={() => setSelectedToken(token)}
+                    onPress={() => router.push(`/coin/${displayToken.symbol.toLowerCase()}`)}
                   >
                     <View style={styles.tokenRow}>
                       <View style={styles.tokenLogoContainer}>
-                        {token.logo ? (
-                          <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
+                        {displayToken.logo ? (
+                          <Image source={{ uri: displayToken.logo }} style={styles.tokenLogo} />
                         ) : (
                           <View style={styles.tokenLogoPlaceholder}>
-                            <Text style={styles.tokenLogoText}>{token.symbol.charAt(0)}</Text>
+                            <Text style={styles.tokenLogoText}>{displayToken.symbol.charAt(0)}</Text>
                           </View>
                         )}
                       </View>
                       <View style={styles.tokenInfo}>
-                        <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+                        <Text style={styles.tokenSymbol}>{displayToken.symbol}</Text>
                         <Text style={styles.tokenPrice}>
-                          ${token.price < 0.01 ? token.price.toFixed(6) : token.price.toFixed(2)}
+                          ${displayToken.price < 0.01 ? displayToken.price.toFixed(6) : displayToken.price.toFixed(2)}
                         </Text>
                         <Text style={[
                           styles.tokenChange,
-                          { color: token.change24h >= 0 ? COLORS.success : COLORS.error }
+                          { color: displayToken.change24h >= 0 ? COLORS.success : COLORS.error }
                         ]}>
-                          {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
+                          {displayToken.change24h >= 0 ? '+' : ''}{displayToken.change24h.toFixed(1)}%
                         </Text>
                       </View>
                     </View>
-
                     <View style={styles.tokenValue}>
-                      <Text style={styles.tokenValueText}>${token.value.toLocaleString()}</Text>
+                      <Text style={styles.tokenValueText}>
+                        {token && 'value' in token ? `$${token.value.toLocaleString()}` : '—'}
+                      </Text>
                       <Text style={styles.tokenPercentage}>
-                        ({getTokenPercentage(token.value).toFixed(0)}%)
+                        {token && 'value' in token ? `(${getTokenPercentage(token.value).toFixed(0)}%)` : '(—)'}
                       </Text>
                     </View>
                   </Pressable>
