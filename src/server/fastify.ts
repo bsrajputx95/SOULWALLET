@@ -938,8 +938,9 @@ export async function startServer(port = 3001, host = '0.0.0.0'): Promise<Fastif
     }
 
     return server;
-  } catch (error) {
-    logger.error('❌ Failed to start server:', error);
+  } catch (error: any) {
+    logger.error('❌ Failed to start server:', error?.message || error);
+    console.error('STARTUP ERROR:', error);
     process.exit(1);
   }
 }

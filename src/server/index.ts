@@ -495,7 +495,7 @@ const validateProduction = async () => {
   if (process.env.ENABLE_INTROSPECTION === 'true') {
     logger.warn('⚠️  ENABLE_INTROSPECTION is true in production - consider disabling');
   }
-  
+
   // 3.1 CSRF Protection Check (CRITICAL for production)
   if (process.env.CSRF_ENABLED !== 'true') {
     logger.warn('⚠️  CSRF_ENABLED is not "true" in production - CSRF protection is disabled!');
@@ -669,6 +669,7 @@ export const initializeApp = async () => {
       stack: error.stack,
       name: error.name
     });
+    console.error('INITIALIZATION ERROR:', error.message || error);
     throw error;
   }
 };
@@ -712,10 +713,10 @@ export const gracefulShutdown = async (signal: string) => {
       try {
         await transactionMonitor.stop();
         logger.info('✅ Transaction monitor stopped');
-        
+
         priceMonitor.stop();
         logger.info('✅ Price monitor stopped');
-        
+
         await executionQueue.close();
         logger.info('✅ Execution queue closed');
       } catch (error) {
