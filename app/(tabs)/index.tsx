@@ -746,16 +746,16 @@ export default function HomeScreen() {
               >
                 <Text style={styles.username}>@{user?.username || 'user'}</Text>
                 <View style={styles.walletAddressContainer}>
-                  {solanaPublicKey && (
-                    <View style={styles.connectedDot} />
+                  {(solanaPublicKey || user?.walletAddress) && (
+                    <>
+                      <View style={styles.connectedDot} />
+                      <Text style={styles.walletAddress}>
+                        {solanaPublicKey
+                          ? `${solanaPublicKey.slice(0, 6)}...${solanaPublicKey.slice(-4)}`
+                          : `${user?.walletAddress?.slice(0, 6)}...${user?.walletAddress?.slice(-4)}`}
+                      </Text>
+                    </>
                   )}
-                  <Text style={styles.walletAddress}>
-                    {solanaPublicKey
-                      ? `${solanaPublicKey.slice(0, 4)}...${solanaPublicKey.slice(-4)}`
-                      : user?.walletAddress
-                        ? `${user.walletAddress.slice(0, 4)}...${user.walletAddress.slice(-4)}`
-                        : 'Connect wallet'}
-                  </Text>
                 </View>
               </TouchableOpacity>
             </View>

@@ -501,7 +501,7 @@ export default function MarketScreen() {
               </Pressable>
             </View>
 
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
               {/* Liquidity */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Liquidity</Text>
