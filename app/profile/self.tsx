@@ -67,45 +67,17 @@ export default function SelfProfileScreen() {
 
 
 
-  const vipInfo = {
-    price: 49,
-    subscribers: 214,
-    enabled: true,
-  };
-
-  const posts = [
-    {
-      id: '1',
-      username: user?.username || 'user',
-      content: 'SOL looks primed for 160+ breakout. Chart looking bullish with strong support at 145.',
-      comments: 12,
-      reposts: 20,
-      likes: 98,
-      timestamp: '2h',
-      mentionedToken: 'SOL',
-      isVerified: true,
-    },
-  ];
+  // TODO: Fetch real posts from API
+  // const postsQuery = trpc.social.getUserPosts.useQuery({ userId: user?.id });
 
   const renderTabContent = () => {
     switch (activeTab) {
       case 'public':
-        return posts.map(post => (
-          <SocialPost
-            key={post.id}
-            id={post.id}
-            username={post.username}
-            content={post.content}
-            comments={post.comments}
-            reposts={post.reposts}
-            likes={post.likes}
-            timestamp={post.timestamp}
-            mentionedToken={post.mentionedToken}
-            isVerified={post.isVerified}
-            onPress={() => { if (__DEV__) console.log('Post pressed:', post.id); }}
-            onBuyPress={() => { if (__DEV__) console.log('Buy pressed:', post.mentionedToken); }}
-          />
-        ));
+        return (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No posts yet</Text>
+          </View>
+        );
       case 'vip':
         return (
           <View style={styles.emptyContainer}>
@@ -132,7 +104,7 @@ export default function SelfProfileScreen() {
               <Text style={styles.displayName} numberOfLines={1}>
                 {user?.username ? (user.username.length > 12 ? user.username.slice(0, 12) + '...' : user.username) : 'user'}
               </Text>
-              {user?.isVerified && <Shield size={16} color={COLORS.solana} style={styles.verifiedIcon} />}
+              {user?.isVerified && <Shield size={12} color={COLORS.solana} style={styles.verifiedIcon} />}
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>ELITE</Text>
               </View>
@@ -145,7 +117,7 @@ export default function SelfProfileScreen() {
           style={styles.settingsButton}
           onPress={() => router.push('/account')}
         >
-          <Settings size={24} color={COLORS.solana} />
+          <Settings size={18} color={COLORS.solana} />
         </TouchableOpacity>
       </View>
 
@@ -467,8 +439,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.l,
-    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: SPACING.s,
   },
   profileInfo: {
     flex: 1,
@@ -481,18 +453,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: COLORS.solana + '50',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SPACING.m,
+    marginRight: SPACING.s,
   },
   avatarText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
-    fontSize: 32,
+    fontSize: 20,
   },
   userDetails: {
     flex: 1,
@@ -500,37 +472,37 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.xs,
+    marginBottom: 2,
   },
   displayName: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
-    fontSize: 24,
-    marginRight: SPACING.s,
+    fontSize: 16,
+    marginRight: SPACING.xs,
   },
   verifiedIcon: {
-    marginRight: SPACING.s,
+    marginRight: SPACING.xs,
   },
   badge: {
     backgroundColor: COLORS.binance,
-    paddingHorizontal: SPACING.s,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
     borderRadius: BORDER_RADIUS.small,
   },
   badgeText: {
     ...FONTS.phantomBold,
     color: COLORS.background,
-    fontSize: 12,
+    fontSize: 9,
   },
   username: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 16,
+    fontSize: 12,
   },
   settingsButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: COLORS.cardBackground,
     justifyContent: 'center',
     alignItems: 'center',
