@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import {
   Star,
@@ -421,20 +422,18 @@ export default function CoinDetailsScreen() {
   }
 
   return (
-    <>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <Stack.Screen
         options={{
           headerShown: false,
           headerStyle: { backgroundColor: COLORS.background },
           headerTintColor: COLORS.textPrimary,
           headerTitle: '',
-          // Custom top bar rendered inside screen
         }}
       />
-      {/* Top bar removed as requested */}
 
       <ScrollView
-        style={styles.container}
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
@@ -915,7 +914,7 @@ export default function CoinDetailsScreen() {
           </View>
         </View>
       </Modal>
-    </>
+    </SafeAreaView>
   );
 }
 
@@ -950,6 +949,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  scrollView: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
