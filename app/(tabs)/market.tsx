@@ -369,22 +369,7 @@ export default function MarketScreen() {
       )}
 
       {showFilters && (
-        <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding, marginTop: showSearchBar ? 0 : (isHeaderHidden ? 0 : HEADER_HEIGHT) }]}>
-          <View style={styles.searchContainer}>
-            <Search size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search tokens..."
-              placeholderTextColor={COLORS.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')}>
-                <X size={20} color={COLORS.textSecondary} />
-              </Pressable>
-            )}
-          </View>
+        <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding }]}>
 
           <ScrollView
             horizontal
