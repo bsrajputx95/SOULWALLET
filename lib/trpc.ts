@@ -9,9 +9,10 @@ import { Platform } from 'react-native';
 export const trpc = createTRPCReact<AppRouter>();
 
 const getBaseUrl = (): string => {
-  // In development, use local server
+  // TEMP: Use Railway backend for Expo Go testing (localhost doesn't work from phone)
+  // In development, use deployed server for mobile testing
   if (__DEV__) {
-    return 'http://localhost:3001';
+    return 'https://soulwallet-production.up.railway.app';
   }
 
   // In production, use environment variable

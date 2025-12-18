@@ -210,17 +210,11 @@ export default function MarketScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <Animated.View
+      <View
         style={[
           styles.combinedHeader,
           {
             paddingHorizontal: responsivePadding,
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 1000,
-            transform: [{ translateY: headerTranslateY }]
           }
         ]}
       >
@@ -346,7 +340,7 @@ export default function MarketScreen() {
             </Pressable>
           </ScrollView>
         </View>
-      </Animated.View>
+      </View>
       {showSearchBar && (
         <View style={[
           styles.filtersContainer,
@@ -492,7 +486,7 @@ export default function MarketScreen() {
             styles.contentContainer,
             {
               paddingHorizontal: responsivePadding,
-              paddingTop: (showSearchBar || showFilters) ? 0 : HEADER_HEIGHT + SPACING.s
+              paddingTop: SPACING.s
             }
           ]}
           showsVerticalScrollIndicator={false}

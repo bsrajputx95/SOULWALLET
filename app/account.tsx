@@ -1110,10 +1110,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   saveButton: {
-    paddingHorizontal: SPACING.m,
+    paddingHorizontal: SPACING.l,
     paddingVertical: SPACING.s,
     backgroundColor: COLORS.solana,
     borderRadius: BORDER_RADIUS.small,
+    minWidth: 70,
+    alignItems: 'center',
   },
   saveButtonText: {
     ...FONTS.phantomSemiBold,

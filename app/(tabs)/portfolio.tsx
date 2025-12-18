@@ -1,11 +1,11 @@
 import React from 'react';
 import { useState, useCallback, useEffect } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  Pressable, 
-  ScrollView, 
+import {
+  StyleSheet,
+  View,
+  Text,
+  Pressable,
+  ScrollView,
   RefreshControl,
   Modal,
   Image,
@@ -42,7 +42,7 @@ export default function PortfolioScreen() {
   const isSmallScreen = width < 375;
   const isLargeScreen = width > 768;
   const responsivePadding = isSmallScreen ? SPACING.xs : isLargeScreen ? SPACING.m : SPACING.s;
-  
+
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<PortfolioTab>('tokens');
   const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
@@ -65,7 +65,7 @@ export default function PortfolioScreen() {
 
   // Header height for content offset
   const HEADER_HEIGHT = 60;
-  
+
   const loadWatchlist = useCallback(async () => {
     try {
       const raw = await AsyncStorage.getItem('watchlist_tokens');
@@ -79,7 +79,7 @@ export default function PortfolioScreen() {
       if (__DEV__) console.warn('Failed to load watchlist', e);
     }
   }, []);
-  
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -102,19 +102,14 @@ export default function PortfolioScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={[
-        styles.header, 
-        { 
-          paddingHorizontal: responsivePadding,
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1000
+        styles.header,
+        {
+          paddingHorizontal: responsivePadding
         }
       ]}>
         <View style={styles.profileContainer}>
           <Text style={styles.username}>@{user?.username || 'user'}</Text>
-          <Pressable 
+          <Pressable
             onPress={() => {
               if (!user?.walletAddress) {
                 router.push('/solana-setup');
@@ -129,22 +124,22 @@ export default function PortfolioScreen() {
             </Text>
           </Pressable>
         </View>
-        
-        <Pressable 
+
+        <Pressable
           style={styles.settingsButton}
           onPress={() => router.push('/settings')}
         >
           <Settings size={24} color={COLORS.solana} />
         </Pressable>
       </View>
-      
+
       <ScrollView
         style={styles.content}
         contentContainerStyle={[
-          styles.contentContainer, 
-          { 
+          styles.contentContainer,
+          {
             paddingHorizontal: responsivePadding,
-            paddingTop: HEADER_HEIGHT
+            paddingTop: SPACING.s
           }
         ]}
         showsVerticalScrollIndicator={false}
@@ -157,7 +152,7 @@ export default function PortfolioScreen() {
           <View style={styles.portfolioHeader}>
             <View style={styles.portfolioTitleRow}>
               <Text style={styles.portfolioTitle}>Portfolio Value</Text>
-              <Pressable 
+              <Pressable
                 style={styles.periodDropdown}
                 onPress={() => setShowPeriodDropdown(!showPeriodDropdown)}
               >
@@ -203,19 +198,19 @@ export default function PortfolioScreen() {
             </View>
           </View>
         </NeonCard>
-        
+
         <View style={styles.earningsContainer}>
           <View style={styles.earningCard}>
             <Text style={styles.earningLabel}>Copy Trade</Text>
             <Text style={styles.earningValue}>${((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)).toLocaleString()}</Text>
           </View>
-          
+
           <View style={styles.earningCard}>
             <Text style={styles.earningLabel}>Self</Text>
             <Text style={styles.earningValue}>${(Math.max(0, totalBalance - ((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)))).toLocaleString()}</Text>
           </View>
         </View>
-        
+
         <View style={styles.tabsContainer}>
           <Pressable
             style={[
@@ -231,7 +226,7 @@ export default function PortfolioScreen() {
               Token Holdings
             </Text>
           </Pressable>
-          
+
           <Pressable
             style={[
               styles.tab,
@@ -246,7 +241,7 @@ export default function PortfolioScreen() {
               Copied Wallets
             </Text>
           </Pressable>
-          
+
           <Pressable
             style={[
               styles.tab,
@@ -261,14 +256,14 @@ export default function PortfolioScreen() {
               Watch List
             </Text>
           </Pressable>
-          
+
 
         </View>
-        
+
         {activeTab === 'tokens' && (
           <View style={styles.tokensContainer}>
             {tokens.map(token => (
-              <Pressable 
+              <Pressable
                 key={token.id}
                 style={styles.tokenItem}
                 onPress={() => {
@@ -301,7 +296,7 @@ export default function PortfolioScreen() {
                     </Text>
                   </View>
                 </View>
-                
+
                 <View style={styles.tokenValue}>
                   <Text style={styles.tokenValueText}>${token.value.toLocaleString()}</Text>
                   <Text style={styles.tokenPercentage}>
@@ -322,22 +317,22 @@ export default function PortfolioScreen() {
                     <Text style={styles.walletUsername}>@{wallet.username}</Text>
                     <Text style={styles.copiedWalletAddress}>{wallet.walletAddress}</Text>
                   </View>
-                  
-                  <Pressable 
+
+                  <Pressable
                     style={styles.editButton}
-                  onPress={() => {
-                    setSelectedWallet(wallet);
-                    setEditAmount('1000');
-                    setEditAmountPerTrade('100');
-                    setEditSL('10');
-                    setEditTP('30');
-                    setEditSlippage('1');
-                  }}
+                    onPress={() => {
+                      setSelectedWallet(wallet);
+                      setEditAmount('1000');
+                      setEditAmountPerTrade('100');
+                      setEditSL('10');
+                      setEditTP('30');
+                      setEditSlippage('1');
+                    }}
                   >
                     <Text style={styles.editButtonText}>Edit</Text>
                   </Pressable>
                 </View>
-                
+
                 <View style={styles.walletStats}>
                   <View style={styles.walletStat}>
                     <Text style={styles.walletStatLabel}>ROI</Text>
@@ -348,7 +343,7 @@ export default function PortfolioScreen() {
                       {wallet.roi >= 0 ? '+' : ''}{wallet.roi.toFixed(1)}%
                     </Text>
                   </View>
-                  
+
                   <View style={styles.walletStat}>
                     <Text style={styles.walletStatLabel}>PnL</Text>
                     <Text style={[
@@ -402,8 +397,8 @@ export default function PortfolioScreen() {
                   );
                 }
                 return (
-                  <Pressable 
-                    key={token.id} 
+                  <Pressable
+                    key={token.id}
                     style={styles.tokenItem}
                     onPress={() => setSelectedToken(token)}
                   >
@@ -430,7 +425,7 @@ export default function PortfolioScreen() {
                         </Text>
                       </View>
                     </View>
-                    
+
                     <View style={styles.tokenValue}>
                       <Text style={styles.tokenValueText}>${token.value.toLocaleString()}</Text>
                       <Text style={styles.tokenPercentage}>
@@ -443,11 +438,11 @@ export default function PortfolioScreen() {
             )}
           </View>
         )}
-        
+
         <View style={styles.chartContainer}>
           <View style={styles.chartHeader}>
             <Text style={styles.chartTitle}>PnL Chart</Text>
-            
+
             <View style={styles.chartControls}>
               <View style={styles.periodSelector}>
                 {(['24h', '7d', '30d', 'all'] as ChartPeriod[]).map(period => (
@@ -468,7 +463,7 @@ export default function PortfolioScreen() {
                   </Pressable>
                 ))}
               </View>
-              
+
               <View style={styles.typeSelector}>
                 {(['line', 'candle'] as ChartType[]).map(type => (
                   <Pressable
@@ -490,7 +485,7 @@ export default function PortfolioScreen() {
               </View>
             </View>
           </View>
-          
+
           <View style={styles.chartPlaceholder}>
             <TrendingUp size={32} color={COLORS.textSecondary} />
             <Text style={styles.chartPlaceholderText}>
@@ -504,8 +499,8 @@ export default function PortfolioScreen() {
             </Text>
           </View>
         </View>
-        
-        <Pressable 
+
+        <Pressable
           style={styles.activityButton}
           onPress={() => {
             // Open Solscan for wallet activity
@@ -521,7 +516,7 @@ export default function PortfolioScreen() {
           <ChevronRight size={20} color={COLORS.textPrimary} />
         </Pressable>
       </ScrollView>
-      
+
       {/* Token Details Modal */}
       <Modal
         visible={selectedToken !== null}
@@ -529,7 +524,7 @@ export default function PortfolioScreen() {
         transparent={true}
         onRequestClose={() => { setSelectedToken(null); setTradeMode(null); setTradeAmount(''); setTradeError(undefined); }}
       >
-        <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }] }>
+        <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
           <View
             style={[
               styles.modalContainer,
@@ -549,14 +544,14 @@ export default function PortfolioScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </Pressable>
             </View>
-            
+
             <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={true}>
               <View style={styles.tokenDetailsHeader}>
                 <Text style={styles.tokenDetailsSymbol}>{selectedToken?.symbol}</Text>
                 <Text style={styles.tokenDetailsName}>{selectedToken?.name}</Text>
                 <Text style={styles.tokenDetailsPrice}>
-                  ${selectedToken?.price && selectedToken.price < 0.01 
-                    ? selectedToken.price.toFixed(6) 
+                  ${selectedToken?.price && selectedToken.price < 0.01
+                    ? selectedToken.price.toFixed(6)
                     : selectedToken?.price.toFixed(2)}
                 </Text>
                 <Text style={[
@@ -566,12 +561,12 @@ export default function PortfolioScreen() {
                   {(selectedToken?.change24h || 0) >= 0 ? '+' : ''}{selectedToken?.change24h.toFixed(1)}%
                 </Text>
               </View>
-              
+
               <View style={styles.chartPlaceholder}>
                 <TrendingUp size={48} color={COLORS.textSecondary} />
                 <Text style={styles.chartPlaceholderText}>Price Chart</Text>
               </View>
-              
+
               <View style={styles.tokenActions}>
                 <Pressable
                   style={styles.tokenActionButton}
@@ -584,7 +579,7 @@ export default function PortfolioScreen() {
                   <ShoppingCart size={20} color={COLORS.success} />
                   <Text style={styles.tokenActionText}>Buy</Text>
                 </Pressable>
-                
+
                 <Pressable
                   style={styles.tokenActionButton}
                   onPress={() => {
@@ -630,11 +625,11 @@ export default function PortfolioScreen() {
                         // Navigate to swap screen with token pre-selected
                         const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
                         const tokenMint = selectedToken?.id || '';
-                        
+
                         setSelectedToken(null);
                         setTradeMode(null);
                         setTradeAmount('');
-                        
+
                         router.push({
                           pathname: '/swap',
                           params: {
@@ -649,12 +644,12 @@ export default function PortfolioScreen() {
                   </View>
                 </View>
               )}
-              
-              </ScrollView>
+
+            </ScrollView>
           </View>
         </View>
       </Modal>
-      
+
       {/* Edit Copied Wallet Modal */}
       <Modal
         visible={selectedWallet !== null}
@@ -680,10 +675,10 @@ export default function PortfolioScreen() {
                 <X size={24} color={COLORS.textPrimary} />
               </Pressable>
             </View>
-            
+
             <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={true}>
               <Text style={styles.editWalletTitle}>@{selectedWallet?.username}</Text>
-              
+
               <NeonInput
                 label="Total Amount (USDC)"
                 placeholder="1000"
@@ -691,7 +686,7 @@ export default function PortfolioScreen() {
                 onChangeText={setEditAmount}
                 keyboardType="numeric"
               />
-              
+
               <NeonInput
                 label="Amount per Trade (USDC)"
                 placeholder="100"
@@ -699,7 +694,7 @@ export default function PortfolioScreen() {
                 onChangeText={setEditAmountPerTrade}
                 keyboardType="numeric"
               />
-              
+
               <NeonInput
                 label="Stop Loss (%)"
                 placeholder="10"
@@ -707,7 +702,7 @@ export default function PortfolioScreen() {
                 onChangeText={setEditSL}
                 keyboardType="numeric"
               />
-              
+
               <NeonInput
                 label="Take Profit (%)"
                 placeholder="30"
@@ -715,7 +710,7 @@ export default function PortfolioScreen() {
                 onChangeText={setEditTP}
                 keyboardType="numeric"
               />
-              
+
               <NeonInput
                 label="Slippage (%)"
                 placeholder="1"
@@ -723,7 +718,7 @@ export default function PortfolioScreen() {
                 onChangeText={setEditSlippage}
                 keyboardType="numeric"
               />
-              
+
               <View style={styles.editActions}>
                 <NeonButton
                   title="Stop Copying"
@@ -733,7 +728,7 @@ export default function PortfolioScreen() {
                   }}
                   style={[styles.editActionButton, { backgroundColor: COLORS.error + '20' }]}
                 />
-                
+
                 <NeonButton
                   title="Save Changes"
                   onPress={() => {
@@ -744,13 +739,13 @@ export default function PortfolioScreen() {
                       const stopLossVal = parseFloat(editSL);
                       const takeProfitVal = parseFloat(editTP);
                       const slippageVal = parseFloat(editSlippage);
-                      
+
                       if (!isNaN(totalAmountVal)) updates.totalAmount = totalAmountVal;
                       if (!isNaN(amountPerTradeVal)) updates.amountPerTrade = amountPerTradeVal;
                       if (!isNaN(stopLossVal)) updates.stopLoss = stopLossVal;
                       if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
                       if (!isNaN(slippageVal)) updates.slippage = slippageVal;
-                      
+
                       updateCopiedWallet(selectedWallet.id, updates);
                     }
                     setSelectedWallet(null);
@@ -762,7 +757,7 @@ export default function PortfolioScreen() {
           </View>
         </View>
       </Modal>
-      
+
       {/* Wallet creation/import is handled by /solana-setup page */}
     </SafeAreaView>
   );
@@ -771,28 +766,33 @@ export default function PortfolioScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background },
+    backgroundColor: COLORS.background
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: SPACING.m,
     backgroundColor: COLORS.background,
-    height: 60 },
+    height: 60
+  },
   profileContainer: {},
   username: {
     ...FONTS.orbitronMedium,
     color: COLORS.textPrimary,
-    fontSize: 16 },
+    fontSize: 16
+  },
   walletAddress: {
     ...FONTS.monospace,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   portfolioTitleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   periodDropdown: {
     position: 'relative',
     flexDirection: 'row',
@@ -802,12 +802,14 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.xs,
     borderRadius: BORDER_RADIUS.small,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   periodText: {
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
     fontSize: 12,
-    marginRight: SPACING.xs },
+    marginRight: SPACING.xs
+  },
   dropdownMenu: {
     position: 'absolute',
     top: '100%',
@@ -817,21 +819,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.solana + '20',
     minWidth: 60,
-    zIndex: 1000 },
+    zIndex: 1000
+  },
   dropdownItem: {
     paddingHorizontal: SPACING.s,
-    paddingVertical: SPACING.xs },
+    paddingVertical: SPACING.xs
+  },
   dropdownItemText: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   settingsButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: COLORS.cardBackground,
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   walletSettingsCard: {
     marginBottom: SPACING.m,
     padding: SPACING.m
@@ -873,75 +879,94 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.s
   },
   content: {
-    flex: 1 },
+    flex: 1
+  },
   contentContainer: {
-    paddingBottom: 20 },
+    paddingBottom: 20
+  },
   portfolioCard: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   portfolioHeader: {
-    padding: SPACING.m },
+    padding: SPACING.m
+  },
   portfolioTitle: {
     ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   portfolioValue: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 28,
     fontWeight: '700',
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   pnlContainer: {
     flexDirection: 'row',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   pnlValue: {
     ...FONTS.monospace,
     fontSize: 16,
     fontWeight: '700',
-    marginRight: SPACING.xs },
+    marginRight: SPACING.xs
+  },
   pnlPercentage: {
     ...FONTS.monospace,
-    fontSize: 14 },
+    fontSize: 14
+  },
   earningsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   earningCard: {
     flex: 1,
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginHorizontal: SPACING.xs },
+    marginHorizontal: SPACING.xs
+  },
   earningLabel: {
     ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
     fontSize: 12,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   earningValue: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 16,
-    fontWeight: '700' },
+    fontWeight: '700'
+  },
   tabsContainer: {
     flexDirection: 'row',
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     marginBottom: SPACING.m,
-    padding: 4 },
+    padding: 4
+  },
   tab: {
     flex: 1,
     paddingVertical: SPACING.s,
     alignItems: 'center',
-    borderRadius: BORDER_RADIUS.small },
+    borderRadius: BORDER_RADIUS.small
+  },
   activeTab: {
-    backgroundColor: COLORS.solana + '20' },
+    backgroundColor: COLORS.solana + '20'
+  },
   tabText: {
     ...FONTS.orbitronMedium,
     color: COLORS.textSecondary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   activeTabText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   tokensContainer: {
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   tokenItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -949,161 +974,203 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   tokenRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1 },
+    flex: 1
+  },
   tokenLogoContainer: {
-    marginRight: SPACING.s },
+    marginRight: SPACING.s
+  },
   tokenLogo: {
     width: 32,
     height: 32,
-    borderRadius: 16 },
+    borderRadius: 16
+  },
   tokenLogoPlaceholder: {
     width: 32,
     height: 32,
     borderRadius: 16,
     backgroundColor: COLORS.solana + '30',
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   tokenLogoText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   tokenInfo: {
-    flex: 1 },
+    flex: 1
+  },
   tokenSymbol: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   tokenPrice: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 14,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   tokenChange: {
     ...FONTS.monospace,
-    fontSize: 14 },
+    fontSize: 14
+  },
   tokenValue: {
-    alignItems: 'flex-end' },
+    alignItems: 'flex-end'
+  },
   tokenValueText: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   tokenPercentage: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   walletsContainer: {
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   walletCard: {
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   walletHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   walletInfo: {
-    flex: 1 },
+    flex: 1
+  },
   walletUsername: {
     ...FONTS.orbitronMedium,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   copiedWalletAddress: {
     ...FONTS.monospace,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   editButton: {
     backgroundColor: COLORS.solana + '20',
     paddingVertical: SPACING.xs,
     paddingHorizontal: SPACING.m,
-    borderRadius: BORDER_RADIUS.small },
+    borderRadius: BORDER_RADIUS.small
+  },
   editButtonText: {
     ...FONTS.orbitronMedium,
     color: COLORS.solana,
-    fontSize: 12 },
+    fontSize: 12
+  },
   walletStats: {
-    flexDirection: 'row' },
+    flexDirection: 'row'
+  },
   walletStat: {
-    marginRight: SPACING.l },
+    marginRight: SPACING.l
+  },
   walletStatLabel: {
     ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
     fontSize: 12,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   walletStatValue: {
     ...FONTS.monospace,
     fontSize: 16,
-    fontWeight: '700' },
+    fontWeight: '700'
+  },
   chartContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   chartHeader: {
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   chartTitle: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   chartControls: {
     flexDirection: 'row',
-    justifyContent: 'space-between' },
+    justifyContent: 'space-between'
+  },
   periodSelector: {
     flexDirection: 'row',
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.small,
-    padding: 2 },
+    padding: 2
+  },
   periodOption: {
     paddingVertical: SPACING.xs,
     paddingHorizontal: SPACING.s,
-    borderRadius: BORDER_RADIUS.small },
+    borderRadius: BORDER_RADIUS.small
+  },
   activePeriodOption: {
-    backgroundColor: COLORS.solana + '30' },
+    backgroundColor: COLORS.solana + '30'
+  },
   periodOptionText: {
     ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   activePeriodOptionText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   typeSelector: {
     flexDirection: 'row',
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.small,
-    padding: 2 },
+    padding: 2
+  },
   typeOption: {
     paddingVertical: SPACING.xs,
     paddingHorizontal: SPACING.s,
-    borderRadius: BORDER_RADIUS.small },
+    borderRadius: BORDER_RADIUS.small
+  },
   activeTypeOption: {
-    backgroundColor: COLORS.solana + '30' },
+    backgroundColor: COLORS.solana + '30'
+  },
   typeOptionText: {
     ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
-    fontSize: 12 },
+    fontSize: 12
+  },
   activeTypeOptionText: {
-    color: COLORS.solana },
+    color: COLORS.solana
+  },
   chartPlaceholder: {
     height: 200,
     backgroundColor: COLORS.background,
     borderRadius: BORDER_RADIUS.medium,
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   chartPlaceholderText: {
     ...FONTS.sfProMedium,
     color: COLORS.textPrimary,
     fontSize: 18,
-    marginTop: SPACING.s },
+    marginTop: SPACING.s
+  },
   chartPlaceholderSubtext: {
     ...FONTS.sfProRegular,
     fontSize: 14,
-    marginTop: SPACING.xs },
+    marginTop: SPACING.xs
+  },
   activityButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1111,64 +1178,77 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   activityButtonText: {
     ...FONTS.orbitronMedium,
     color: COLORS.textPrimary,
-    fontSize: 16 },
+    fontSize: 16
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end' },
+    justifyContent: 'flex-end'
+  },
   modalContainer: {
     backgroundColor: COLORS.background,
     borderTopLeftRadius: BORDER_RADIUS.large,
     borderTopRightRadius: BORDER_RADIUS.large,
     paddingBottom: 20,
-    maxHeight: '80%' },
+    maxHeight: '80%'
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: SPACING.l,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBackground },
+    borderBottomColor: COLORS.cardBackground
+  },
   modalTitle: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
-    fontSize: 18 },
+    fontSize: 18
+  },
   modalContent: {
-    padding: SPACING.l },
+    padding: SPACING.l
+  },
   modalScrollContent: {
     paddingBottom: SPACING.l
   },
   tokenDetailsHeader: {
     alignItems: 'center',
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   tokenDetailsSymbol: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 24,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   tokenDetailsName: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 16,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   tokenDetailsPrice: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 20,
     fontWeight: '700',
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   tokenDetailsChange: {
     ...FONTS.monospace,
     fontSize: 16,
-    fontWeight: '700' },
+    fontWeight: '700'
+  },
   tokenActions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginTop: SPACING.l },
+    marginTop: SPACING.l
+  },
   tokenActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1177,12 +1257,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.l,
     borderRadius: BORDER_RADIUS.medium,
     minWidth: 120,
-    justifyContent: 'center' },
+    justifyContent: 'center'
+  },
   tokenActionText: {
     ...FONTS.orbitronMedium,
     color: COLORS.textPrimary,
     fontSize: 14,
-    marginLeft: SPACING.s },
+    marginLeft: SPACING.s
+  },
   tradeContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
@@ -1205,18 +1287,22 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 18,
     textAlign: 'center',
-    marginBottom: SPACING.l },
+    marginBottom: SPACING.l
+  },
   editActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: SPACING.l },
+    marginTop: SPACING.l
+  },
   editActionButton: {
     flex: 1,
-    marginHorizontal: SPACING.xs },
+    marginHorizontal: SPACING.xs
+  },
 
   // Wallet Connection Modal Styles
   walletChoiceContainer: {
-    gap: SPACING.m },
+    gap: SPACING.m
+  },
   walletOption: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1224,7 +1310,8 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   walletOptionIcon: {
     width: 48,
     height: 48,
@@ -1232,32 +1319,39 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SPACING.m },
+    marginRight: SPACING.m
+  },
   walletOptionContent: {
-    flex: 1 },
+    flex: 1
+  },
   walletOptionTitle: {
     ...FONTS.orbitronMedium,
     color: COLORS.textPrimary,
     fontSize: 16,
-    marginBottom: SPACING.xs },
+    marginBottom: SPACING.xs
+  },
   walletOptionDescription: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
-    lineHeight: 20 },
+    lineHeight: 20
+  },
   importContainer: {
-    gap: SPACING.m },
+    gap: SPACING.m
+  },
   importTitle: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 18,
-    textAlign: 'center' },
+    textAlign: 'center'
+  },
   importDescription: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
     textAlign: 'center',
-    lineHeight: 20 },
+    lineHeight: 20
+  },
   importInput: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
@@ -1267,53 +1361,65 @@ const styles = StyleSheet.create({
     fontSize: 14,
     minHeight: 100,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   importActions: {
     flexDirection: 'row',
-    gap: SPACING.m },
+    gap: SPACING.m
+  },
   importButton: {
     flex: 1,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.medium,
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   backButton: {
     backgroundColor: COLORS.cardBackground,
     borderWidth: 1,
-    borderColor: COLORS.textSecondary + '30' },
+    borderColor: COLORS.textSecondary + '30'
+  },
   backButtonText: {
     ...FONTS.orbitronMedium,
     color: COLORS.textSecondary,
-    fontSize: 14 },
+    fontSize: 14
+  },
   importConfirmButton: {
-    backgroundColor: COLORS.solana },
+    backgroundColor: COLORS.solana
+  },
   importConfirmButtonText: {
     ...FONTS.orbitronMedium,
     color: COLORS.background,
-    fontSize: 14 },
+    fontSize: 14
+  },
   createContainer: {
-    gap: SPACING.m },
+    gap: SPACING.m
+  },
   createTitle: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 18,
-    textAlign: 'center' },
+    textAlign: 'center'
+  },
   createDescription: {
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
     textAlign: 'center',
-    lineHeight: 20 },
+    lineHeight: 20
+  },
   mnemonicContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20' },
+    borderColor: COLORS.solana + '20'
+  },
   mnemonicGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.s,
-    marginBottom: SPACING.m },
+    marginBottom: SPACING.m
+  },
   mnemonicWord: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1321,46 +1427,55 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.small,
     padding: SPACING.s,
     minWidth: '30%',
-    flex: 1 },
+    flex: 1
+  },
   mnemonicNumber: {
     ...FONTS.monospace,
     color: COLORS.textSecondary,
     fontSize: 12,
     marginRight: SPACING.xs,
-    minWidth: 20 },
+    minWidth: 20
+  },
   mnemonicText: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 14,
-    flex: 1 },
+    flex: 1
+  },
   showMnemonicButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: SPACING.s,
-    marginBottom: SPACING.s },
+    marginBottom: SPACING.s
+  },
   showMnemonicText: {
     ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginLeft: SPACING.xs },
+    marginLeft: SPACING.xs
+  },
   copyMnemonicButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.solana + '20',
     borderRadius: BORDER_RADIUS.small,
-    paddingVertical: SPACING.s },
+    paddingVertical: SPACING.s
+  },
   copyMnemonicText: {
     ...FONTS.orbitronMedium,
     color: COLORS.solana,
     fontSize: 14,
-    marginLeft: SPACING.xs },
+    marginLeft: SPACING.xs
+  },
   confirmationContainer: {
-    marginVertical: SPACING.m },
+    marginVertical: SPACING.m
+  },
   checkboxContainer: {
     flexDirection: 'row',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   checkbox: {
     width: 20,
     height: 20,
@@ -1369,34 +1484,45 @@ const styles = StyleSheet.create({
     borderColor: COLORS.textSecondary,
     marginRight: SPACING.s,
     justifyContent: 'center',
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   checkboxChecked: {
     backgroundColor: COLORS.solana,
-    borderColor: COLORS.solana },
+    borderColor: COLORS.solana
+  },
   checkmark: {
     color: COLORS.background,
     fontSize: 14,
-    fontWeight: 'bold' as const },
+    fontWeight: 'bold' as const
+  },
   checkboxText: {
     ...FONTS.sfProRegular,
     color: COLORS.textPrimary,
     fontSize: 14,
-    flex: 1 },
+    flex: 1
+  },
   createActions: {
     flexDirection: 'row',
-    gap: SPACING.m },
+    gap: SPACING.m
+  },
   createButton: {
     flex: 1,
     paddingVertical: SPACING.m,
     borderRadius: BORDER_RADIUS.medium,
-    alignItems: 'center' },
+    alignItems: 'center'
+  },
   createConfirmButton: {
-    backgroundColor: COLORS.solana },
+    backgroundColor: COLORS.solana
+  },
   createConfirmButtonDisabled: {
-    backgroundColor: COLORS.textSecondary + '30' },
+    backgroundColor: COLORS.textSecondary + '30'
+  },
   createConfirmButtonText: {
     ...FONTS.orbitronMedium,
     color: COLORS.background,
-    fontSize: 14 },
+    fontSize: 14
+  },
   createConfirmButtonTextDisabled: {
-    color: COLORS.textSecondary } });
+    color: COLORS.textSecondary
+  }
+});
