@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -104,52 +104,60 @@ export default function CoinDetailsScreen() {
     }
   );
 
-  // Transform API data to CoinData format
-  const coinData: CoinData | null = apiData ? {
-    symbol: apiData.symbol,
-    name: apiData.name,
-    price: apiData.price,
-    change24h: apiData.priceChange24h,
-    priceChange1h: apiData.priceChange1h,
-    priceChange7d: apiData.priceChange7d,
-    marketCap: apiData.marketCap,
-    fdv: apiData.fdv,
-    volume24h: apiData.volume24h,
-    liquidity: apiData.liquidity,
-    holders: apiData.holders || 0,
-    contractAddress: apiData.address,
-    verified: apiData.verified,
-    age: apiData.pairAge ? `${apiData.pairAge}h` : 'Unknown',
-    pairAge: apiData.pairAge,
-    logo: apiData.logo,
-    description: apiData.description,
-    website: apiData.website,
-    twitter: apiData.twitter,
-    telegram: apiData.telegram,
-    txns24h: apiData.txns24h,
-  } : (symbol?.toUpperCase() === 'SOL' ? {
-    symbol: 'SOL',
-    name: 'Solana',
-    price: 162.34,
-    change24h: 2.15,
-    priceChange1h: 0.58,
-    priceChange7d: 4.2,
-    marketCap: 72000000000,
-    fdv: 72000000000,
-    volume24h: 3200000000,
-    liquidity: 1800000000,
-    holders: 2200000,
-    contractAddress: 'So11111111111111111111111111111111111111112',
-    verified: true,
-    age: '48h',
-    pairAge: 48,
-    logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/info/logo.png',
-    description: 'Solana is a high-performance blockchain for web-scale applications.',
-    website: 'https://solana.com',
-    twitter: 'https://twitter.com/solana',
-    telegram: null,
-    txns24h: { buys: 50000, sells: 48000, total: 98000 },
-  } : null);
+  // Transform API data to CoinData format - memoized to prevent recreation
+  const coinData: CoinData | null = useMemo(() => {
+    if (apiData) {
+      return {
+        symbol: apiData.symbol,
+        name: apiData.name,
+        price: apiData.price,
+        change24h: apiData.priceChange24h,
+        priceChange1h: apiData.priceChange1h,
+        priceChange7d: apiData.priceChange7d,
+        marketCap: apiData.marketCap,
+        fdv: apiData.fdv,
+        volume24h: apiData.volume24h,
+        liquidity: apiData.liquidity,
+        holders: apiData.holders || 0,
+        contractAddress: apiData.address,
+        verified: apiData.verified,
+        age: apiData.pairAge ? `${apiData.pairAge}h` : 'Unknown',
+        pairAge: apiData.pairAge,
+        logo: apiData.logo,
+        description: apiData.description,
+        website: apiData.website,
+        twitter: apiData.twitter,
+        telegram: apiData.telegram,
+        txns24h: apiData.txns24h,
+      };
+    }
+    if (symbol?.toUpperCase() === 'SOL') {
+      return {
+        symbol: 'SOL',
+        name: 'Solana',
+        price: 162.34,
+        change24h: 2.15,
+        priceChange1h: 0.58,
+        priceChange7d: 4.2,
+        marketCap: 72000000000,
+        fdv: 72000000000,
+        volume24h: 3200000000,
+        liquidity: 1800000000,
+        holders: 2200000,
+        contractAddress: 'So11111111111111111111111111111111111111112',
+        verified: true,
+        age: '48h',
+        pairAge: 48,
+        logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/info/logo.png',
+        description: 'Solana is a high-performance blockchain for web-scale applications.',
+        website: 'https://solana.com',
+        twitter: 'https://twitter.com/solana',
+        telegram: null,
+        txns24h: { buys: 50000, sells: 48000, total: 98000 },
+      };
+    }
+    return null;
+  }, [apiData, symbol]);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [topTraders, setTopTraders] = useState<TopTrader[]>([]);
@@ -335,12 +343,13 @@ export default function CoinDetailsScreen() {
     setTopTraders(mockTopTraders);
   }, [coinData]);
 
-  // Load mock data when coin data is available
+  // Load mock data when coin data is available - use symbol as dep instead of coinData/loadMockData to avoid loop
   useEffect(() => {
     if (coinData) {
       loadMockData();
     }
-  }, [coinData, loadMockData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol]);
 
   const onRefresh = async () => {
     setRefreshing(true);
