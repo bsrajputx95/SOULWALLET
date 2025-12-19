@@ -65,11 +65,11 @@ export default function UserProfileScreen() {
     { enabled: !!userProfileQuery.data?.id }
   );
 
-  // Use API data if available, otherwise fall back to mock trader profile
+  // Use API data if available, otherwise fall back to mock trader profile or create placeholder
   const apiProfile = userProfileQuery.data;
   const mockProfile = username ? getTraderProfile(username) : null;
 
-  // Create unified profile object
+  // Create unified profile object - with fallback placeholder for unknown users
   const userProfile = apiProfile ? {
     username: apiProfile.username || username || '',
     profileImage: apiProfile.profileImage,
@@ -84,7 +84,22 @@ export default function UserProfileScreen() {
     maxDrawdown: (apiProfile as any).maxDrawdown || 0,
     winRate: (apiProfile as any).winRate || 0,
     vipPrice: (apiProfile as any).vipPrice,
-  } : mockProfile ? mockProfile : null;
+  } : mockProfile ? mockProfile : username ? {
+    // Placeholder profile when API fails and no mock exists
+    username: username,
+    profileImage: undefined,
+    walletAddress: undefined,
+    isVerified: false,
+    followers: 0,
+    following: 0,
+    copyTraders: 0,
+    vipFollowers: 0,
+    roi30d: 0,
+    pnl24h: 0,
+    maxDrawdown: 0,
+    winRate: 0,
+    vipPrice: undefined,
+  } : null;
 
   const isUserFollowed = username ? isFollowing(username) : false;
   const walletAddress = userProfile?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
