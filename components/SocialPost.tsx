@@ -6,6 +6,7 @@ import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
 import { SafeHtmlText } from './SafeHtml';
+import { trpc } from '../lib/trpc';
 
 interface SocialPostProps {
   id: string;
@@ -48,6 +49,48 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   const [currentReposts, setCurrentReposts] = useState(reposts);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // API mutations for like/repost
+  const toggleLikeMutation = trpc.social.toggleLike.useMutation({
+    onSuccess: (result) => {
+      setIsLiked(result.liked);
+      if (onUpdate) onUpdate();
+    },
+    onError: (error) => {
+      console.error('[SocialPost] Like error:', error);
+      // Revert optimistic update
+      setIsLiked(!isLiked);
+      setCurrentLikes(isLiked ? currentLikes + 1 : currentLikes - 1);
+    },
+  });
+
+  const createRepostMutation = trpc.social.createRepost.useMutation({
+    onSuccess: () => {
+      setIsReposted(true);
+      setCurrentReposts(currentReposts + 1);
+      if (onUpdate) onUpdate();
+    },
+    onError: (error) => {
+      console.error('[SocialPost] Repost error:', error);
+      // Revert optimistic update
+      setIsReposted(false);
+      setCurrentReposts(currentReposts - 1);
+    },
+  });
+
+  const deleteRepostMutation = trpc.social.deleteRepost.useMutation({
+    onSuccess: () => {
+      setIsReposted(false);
+      setCurrentReposts(currentReposts - 1);
+      if (onUpdate) onUpdate();
+    },
+    onError: (error) => {
+      console.error('[SocialPost] Delete repost error:', error);
+      // Revert optimistic update
+      setIsReposted(true);
+      setCurrentReposts(currentReposts + 1);
+    },
+  });
+
   const handleUsernamePress = useCallback(() => {
     router.push(`/profile/${username}`);
   }, [router, username]);
@@ -68,32 +111,31 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
 
   const handleLike = (e: any) => {
     e.stopPropagation();
-    if (isProcessing) return;
-    
-    setIsProcessing(true);
+    if (isProcessing || toggleLikeMutation.isPending) return;
+
+    // Optimistic update
     setIsLiked(!isLiked);
     setCurrentLikes(isLiked ? currentLikes - 1 : currentLikes + 1);
-    
-    // Simulate network delay
-    setTimeout(() => {
-      setIsProcessing(false);
-      if (onUpdate) onUpdate();
-    }, 300);
+
+    // Call API
+    toggleLikeMutation.mutate({ postId: id });
   };
 
   const handleRepost = (e: any) => {
     e.stopPropagation();
-    if (isProcessing) return;
-    
-    setIsProcessing(true);
+    if (isProcessing || createRepostMutation.isPending || deleteRepostMutation.isPending) return;
+
+    // Optimistic update
+    const wasReposted = isReposted;
     setIsReposted(!isReposted);
-    setCurrentReposts(isReposted ? currentReposts - 1 : currentReposts + 1);
-    
-    // Simulate network delay
-    setTimeout(() => {
-      setIsProcessing(false);
-      if (onUpdate) onUpdate();
-    }, 300);
+    setCurrentReposts(wasReposted ? currentReposts - 1 : currentReposts + 1);
+
+    // Call API
+    if (wasReposted) {
+      deleteRepostMutation.mutate({ postId: id });
+    } else {
+      createRepostMutation.mutate({ postId: id });
+    }
   };
 
   const handleComment = (e: any) => {
@@ -118,8 +160,8 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
         );
       } else if (word.startsWith('$')) {
         return (
-          <Text 
-            key={index} 
+          <Text
+            key={index}
             style={styles.token}
             onPress={() => handleTokenPress(word)}
           >
@@ -138,60 +180,60 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
       accessibilityLabel={`Open post by ${username}`}
       accessibilityHint="Opens post details with comments"
     >
-    <NeonCard style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.profileContainer}>
-          {profileImage ? (
-            <Image source={{ uri: profileImage }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.defaultAvatar]}>
-              <Text style={styles.avatarText}>
-                {username.charAt(0).toUpperCase()}
-              </Text>
+      <NeonCard style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.profileContainer}>
+            {profileImage ? (
+              <Image source={{ uri: profileImage }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.defaultAvatar]}>
+                <Text style={styles.avatarText}>
+                  {username.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <View style={styles.userInfo}>
+              <Pressable onPress={(e) => { e.stopPropagation(); handleUsernamePress(); }}>
+                <Text style={styles.username}>
+                  @{username}
+                  {isVerified && <Text style={styles.verified}> 🛡️</Text>}
+                </Text>
+              </Pressable>
+              <Text style={styles.timestamp}>{timestamp}</Text>
             </View>
-          )}
-          <View style={styles.userInfo}>
-            <Pressable onPress={(e) => { e.stopPropagation(); handleUsernamePress(); }}>
-              <Text style={styles.username}>
-                @{username}
-                {isVerified && <Text style={styles.verified}> 🛡️</Text>}
-              </Text>
-            </Pressable>
-            <Text style={styles.timestamp}>{timestamp}</Text>
           </View>
         </View>
-      </View>
-      
-      <Pressable 
-        onPress={handlePostPress}
-        style={styles.contentContainer}
-        accessibilityRole="button"
-        accessibilityLabel={`Post by ${username}: ${content.substring(0, 100)}`}
-        accessibilityHint="Double tap to view full post"
-      >
-        <SafeHtmlText 
-          html={content} 
-          style={styles.content}
-          maxLength={500}
-        />
-        {images && images.length > 0 && (
-          <View style={styles.imagesContainer}>
-            {images.map((imageUrl, index) => (
-              <Image
-                key={index}
-                source={{ uri: imageUrl }}
-                style={styles.postImage}
-                resizeMode="cover"
-              />
-            ))}
-          </View>
-        )}
-      </Pressable>
-        
+
+        <Pressable
+          onPress={handlePostPress}
+          style={styles.contentContainer}
+          accessibilityRole="button"
+          accessibilityLabel={`Post by ${username}: ${content.substring(0, 100)}`}
+          accessibilityHint="Double tap to view full post"
+        >
+          <SafeHtmlText
+            html={content}
+            style={styles.content}
+            maxLength={500}
+          />
+          {images && images.length > 0 && (
+            <View style={styles.imagesContainer}>
+              {images.map((imageUrl, index) => (
+                <Image
+                  key={index}
+                  source={{ uri: imageUrl }}
+                  style={styles.postImage}
+                  resizeMode="cover"
+                />
+              ))}
+            </View>
+          )}
+        </Pressable>
+
         <View style={styles.actionsContainer}>
           <View style={styles.actionGroup}>
-            <Pressable 
-              style={styles.action} 
+            <Pressable
+              style={styles.action}
               onPress={handleComment}
               accessibilityRole="button"
               accessibilityLabel={`${comments} comments`}
@@ -200,17 +242,17 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
               <MessageSquare size={16} color={COLORS.textSecondary} />
               <Text style={styles.actionCount}>{comments}</Text>
             </Pressable>
-            
-            <Pressable 
-              style={styles.action} 
+
+            <Pressable
+              style={styles.action}
               onPress={handleRepost}
               disabled={isProcessing}
               accessibilityRole="button"
               accessibilityLabel={`${isReposted ? 'Undo repost' : 'Repost'}: ${currentReposts} reposts`}
               accessibilityHint="Double tap to repost this"
             >
-              <Repeat 
-                size={16} 
+              <Repeat
+                size={16}
                 color={isReposted ? COLORS.success : COLORS.textSecondary}
               />
               <Text style={[
@@ -220,17 +262,17 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
                 {currentReposts}
               </Text>
             </Pressable>
-            
-            <Pressable 
-              style={styles.action} 
+
+            <Pressable
+              style={styles.action}
               onPress={handleLike}
               disabled={isProcessing}
               accessibilityRole="button"
               accessibilityLabel={`${isLiked ? 'Unlike' : 'Like'}: ${currentLikes} likes`}
               accessibilityHint="Double tap to like this post"
             >
-              <Heart 
-                size={16} 
+              <Heart
+                size={16}
                 color={isLiked ? COLORS.error : COLORS.textSecondary}
                 fill={isLiked ? COLORS.error : 'none'}
               />
@@ -242,7 +284,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
               </Text>
             </Pressable>
           </View>
-          
+
           {mentionedToken && (
             <Pressable
               style={styles.buyButton}

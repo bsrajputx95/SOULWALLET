@@ -9,6 +9,7 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronDown, UserPlus, UserMinus, X, Zap, Copy } from 'lucide-react-native';
@@ -20,10 +21,11 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { SocialPost } from '../../components/SocialPost';
 import { NeonCard } from '../../components/NeonCard';
 import { GlowingText } from '../../components/GlowingText';
-
+import { trpc } from '../../lib/trpc';
 
 import type { TraderProfile } from '../../hooks/social-store';
 import { useSocial } from '../../hooks/social-store';
+
 
 type TimeFilter = '24h' | '7d' | '30d' | '90d';
 
@@ -51,26 +53,60 @@ export default function UserProfileScreen() {
   const [maxSlippage, setMaxSlippage] = useState('0.5');
   const [exitWithTrader, setExitWithTrader] = useState(false);
 
-  const userProfile: TraderProfile | null = username ? (getTraderProfile(username) || null) : null;
+  // Fetch user profile from API by username
+  const userProfileQuery = trpc.user.getProfileByUsername.useQuery(
+    { username: username || '' },
+    { enabled: !!username }
+  );
+
+  // Fetch user's posts from API  
+  const userPostsQuery = trpc.social.getFeed.useQuery(
+    { feedType: 'user' as const, targetUserId: userProfileQuery.data?.id || '', limit: 20 },
+    { enabled: !!userProfileQuery.data?.id }
+  );
+
+  // Use API data if available, otherwise fall back to mock trader profile
+  const apiProfile = userProfileQuery.data;
+  const mockProfile = username ? getTraderProfile(username) : null;
+
+  // Create unified profile object
+  const userProfile = apiProfile ? {
+    username: apiProfile.username || username || '',
+    profileImage: apiProfile.profileImage,
+    walletAddress: apiProfile.walletAddress,
+    isVerified: apiProfile.isVerified || false,
+    followers: apiProfile.followersCount || 0,
+    following: apiProfile.followingCount || 0,
+    copyTraders: (apiProfile as any).copyTradersCount || 0,
+    vipFollowers: (apiProfile as any).vipFollowersCount || 0,
+    roi30d: (apiProfile as any).roi30d || 0,
+    pnl24h: (apiProfile as any).pnl24h || 0,
+    maxDrawdown: (apiProfile as any).maxDrawdown || 0,
+    winRate: (apiProfile as any).winRate || 0,
+    vipPrice: (apiProfile as any).vipPrice,
+  } : mockProfile ? mockProfile : null;
+
   const isUserFollowed = username ? isFollowing(username) : false;
-  const mockWalletAddress = userProfile ? `${userProfile.username}123456789abcdef123456789abcdef12345678` : '';
+  const walletAddress = userProfile?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
   const trustScore = 0.9; // Mocked trust score (90%)
 
-  // Posts for this user and filtered by selected visibility
-  const allPosts = posts || [];
-  const userPosts = userProfile ? allPosts.filter(p => p.username === userProfile.username) : [];
-  const visiblePosts = userPosts.filter(p => {
+  // Use API posts if available, otherwise use mock posts
+  const apiPosts = userPostsQuery.data?.posts || [];
+  const allPosts = apiPosts.length > 0 ? apiPosts : posts || [];
+  const userPosts = userProfile ? allPosts.filter((p: any) => p.username === userProfile.username || p.user?.username === userProfile.username) : [];
+  const visiblePosts = userPosts.filter((p: any) => {
     if (activePostsTab === 'public') {
-      return p.visibility === 'public' || !p.visibility;
+      return p.visibility === 'public' || p.visibility === 'PUBLIC' || !p.visibility;
     }
-    return p.visibility === activePostsTab;
+    return p.visibility?.toLowerCase() === activePostsTab;
   });
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    await userProfileQuery.refetch();
+    await userPostsQuery.refetch();
+    setRefreshing(false);
+  }, [userProfileQuery, userPostsQuery]);
 
   if (!userProfile) {
     return (
@@ -117,7 +153,7 @@ export default function UserProfileScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.userInfo}>
@@ -126,20 +162,20 @@ export default function UserProfileScreen() {
               {userProfile.username.charAt(0).toUpperCase()}
             </Text>
           </View>
-          
+
           <View style={styles.userDetails}>
             <View style={styles.usernameRow}>
               <Text style={styles.username}>@{userProfile.username}</Text>
             </View>
             <View style={styles.walletRow}>
               <Text style={styles.walletAddress} numberOfLines={1} ellipsizeMode="middle">
-                {mockWalletAddress}
+                {walletAddress}
               </Text>
               <TouchableOpacity
                 style={styles.copyIconButton}
                 onPress={async () => {
                   try {
-                    await Clipboard.setStringAsync(mockWalletAddress);
+                    await Clipboard.setStringAsync(walletAddress);
                     Alert.alert('Copied', 'Wallet address copied to clipboard');
                   } catch (e) {
                     if (__DEV__) console.log('Clipboard copy failed', e);
@@ -152,7 +188,7 @@ export default function UserProfileScreen() {
           </View>
         </View>
       </View>
-      
+
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
@@ -177,7 +213,7 @@ export default function UserProfileScreen() {
               <Text style={styles.statLabel}>Copy Traders</Text>
             </View>
           </View>
-          
+
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Text style={[styles.statValue, { color: COLORS.success }]}>+{userProfile.roi30d}%</Text>
@@ -189,13 +225,13 @@ export default function UserProfileScreen() {
             </View>
           </View>
         </View>
-        
+
         {/* Trading Summary */}
         <View style={styles.tradingSummaryContainer}>
           <Text style={styles.sectionTitle}>Trading Summary</Text>
-          
+
           <View style={styles.pnlContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.timeFilterButton}
               onPress={() => setShowTimeFilterModal(true)}
             >
@@ -206,7 +242,7 @@ export default function UserProfileScreen() {
               +{formatCurrency(getPnLForTimeFilter(timeFilter))}
             </Text>
           </View>
-          
+
           <View style={styles.metricsRow}>
             <View style={styles.metricItem}>
               <Text style={styles.metricLabel}>Max Drawdown:</Text>
@@ -222,7 +258,7 @@ export default function UserProfileScreen() {
             </View>
           </View>
         </View>
-        
+
         {/* Trust Score (Neon Bar) */}
         <NeonCard style={styles.trustScoreCard} color={COLORS.gradientPurple} intensity="medium">
           <View style={styles.trustHeader}>
@@ -233,7 +269,7 @@ export default function UserProfileScreen() {
             <View style={[styles.trustBarFill, { width: `${trustScore * 100}%` }]} />
           </View>
         </NeonCard>
-        
+
         {/* Action Buttons */}
         <View style={styles.actionButtonsContainer}>
           <TouchableOpacity
@@ -255,7 +291,7 @@ export default function UserProfileScreen() {
               {isUserFollowed ? 'Unfollow' : 'Follow'}
             </Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={styles.copyButton}
             onPress={() => setShowCopyModal(true)}
@@ -265,16 +301,16 @@ export default function UserProfileScreen() {
           </TouchableOpacity>
 
         </View>
-        
 
-        
+
+
         {/* VIP */}
         {userProfile.vipPrice && (
           <View style={styles.vipContainer}>
             <Text style={styles.sectionTitle}>VIP</Text>
             <View style={styles.vipContent}>
               <Text style={styles.vipPrice}>Price: ${userProfile.vipPrice}/month</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.joinVipButton}
                 onPress={() => {
                   setIsVipMember(true);
@@ -286,12 +322,12 @@ export default function UserProfileScreen() {
             </View>
           </View>
         )}
-        
+
         {/* Posts */}
         <View style={styles.postsContainer}>
           <Text style={styles.sectionTitle}>Posts</Text>
           <View style={styles.postsTabsHeader}>
-            {(['public','followers','vip'] as PostVisibility[]).map(tab => (
+            {(['public', 'followers', 'vip'] as PostVisibility[]).map(tab => (
               <TouchableOpacity
                 key={tab}
                 style={[
@@ -362,9 +398,9 @@ export default function UserProfileScreen() {
           )}
         </View>
       </ScrollView>
-      
 
-      
+
+
       {/* Time Filter Modal */}
       <Modal
         visible={showTimeFilterModal}
@@ -372,7 +408,7 @@ export default function UserProfileScreen() {
         animationType="fade"
         onRequestClose={() => setShowTimeFilterModal(false)}
       >
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.modalOverlay}
           activeOpacity={1}
           onPress={() => setShowTimeFilterModal(false)}

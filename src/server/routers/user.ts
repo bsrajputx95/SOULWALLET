@@ -84,6 +84,60 @@ export const userRouter = router({
     }),
 
   /**
+   * Get user profile by username (public profile)
+   */
+  getProfileByUsername: protectedProcedure
+    .input(z.object({
+      username: z.string().min(1),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const user = await prisma.user.findFirst({
+          where: { username: input.username },
+          include: {
+            _count: {
+              select: {
+                followers: true,
+                following: true,
+                posts: true,
+              },
+            },
+          },
+        });
+
+        if (!user) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+        }
+
+        return {
+          id: user.id,
+          username: user.username,
+          name: (user as any).name,
+          bio: (user as any).bio,
+          profileImage: (user as any).profileImage,
+          coverImage: (user as any).coverImage,
+          walletAddress: user.walletAddress,
+          isVerified: (user as any).isVerified || false,
+          badge: (user as any).badge,
+          followersCount: (user as any)._count?.followers || 0,
+          followingCount: (user as any)._count?.following || 0,
+          postsCount: (user as any)._count?.posts || 0,
+          roi30d: (user as any).roi30d || 0,
+          winRate: (user as any).winRate || 0,
+          totalTrades: (user as any).totalTrades || 0,
+          vipPrice: (user as any).vipPrice,
+          createdAt: user.createdAt,
+        };
+      } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        logger.error('Get profile by username error:', error);
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to get profile' });
+      }
+    }),
+
+  /**
    * Update user profile
    */
   updateProfile: protectedProcedure
