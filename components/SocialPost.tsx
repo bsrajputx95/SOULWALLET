@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { StyleSheet, Text, View, Image, Pressable } from 'react-native';
+import { StyleSheet, Text, View, Image, Pressable, Alert } from 'react-native';
 import { MessageSquare, Repeat, Heart, Zap } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
@@ -125,17 +125,35 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     e.stopPropagation();
     if (isProcessing || createRepostMutation.isPending || deleteRepostMutation.isPending) return;
 
-    // Optimistic update
-    const wasReposted = isReposted;
-    setIsReposted(!isReposted);
-    setCurrentReposts(wasReposted ? currentReposts - 1 : currentReposts + 1);
-
-    // Call API
-    if (wasReposted) {
+    // If already reposted, undo without confirmation
+    if (isReposted) {
+      setIsReposted(false);
+      setCurrentReposts(currentReposts - 1);
       deleteRepostMutation.mutate({ postId: id });
-    } else {
-      createRepostMutation.mutate({ postId: id });
+      return;
     }
+
+    // Show confirmation dialog for new repost
+    Alert.alert(
+      'Repost',
+      `Repost this post from @${username}?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Repost',
+          onPress: () => {
+            // Optimistic update
+            setIsReposted(true);
+            setCurrentReposts(currentReposts + 1);
+            // Call API
+            createRepostMutation.mutate({ postId: id });
+          },
+        },
+      ]
+    );
   };
 
   const handleComment = (e: any) => {
