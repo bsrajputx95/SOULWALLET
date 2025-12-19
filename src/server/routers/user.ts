@@ -621,4 +621,61 @@ export const userRouter = router({
         });
       }
     }),
+
+  /**
+   * Search for users by username
+   */
+  searchUsers: protectedProcedure
+    .input(z.object({
+      query: z.string().min(1).max(50),
+      limit: z.number().min(1).max(20).default(10),
+    }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const users = await prisma.user.findMany({
+          where: {
+            OR: [
+              { username: { contains: input.query, mode: 'insensitive' } },
+              { name: { contains: input.query, mode: 'insensitive' } },
+            ],
+            id: { not: ctx.user.id }, // Exclude current user
+          },
+          take: input.limit,
+          select: {
+            id: true,
+            username: true,
+            name: true,
+            walletAddress: true,
+            isVerified: true,
+            createdAt: true,
+            _count: {
+              select: {
+                followers: true,
+                following: true,
+              },
+            },
+          },
+          orderBy: [
+            { isVerified: 'desc' }, // Verified users first
+            { username: 'asc' },
+          ],
+        });
+
+        return users.map(user => ({
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          walletAddress: user.walletAddress,
+          isVerified: user.isVerified,
+          followersCount: (user as any)._count?.followers || 0,
+          followingCount: (user as any)._count?.following || 0,
+        }));
+      } catch (error) {
+        logger.error('Search users error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to search users',
+        });
+      }
+    }),
 });

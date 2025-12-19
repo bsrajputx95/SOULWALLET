@@ -42,6 +42,12 @@ export default function SosioScreen() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchBar, setShowSearchBar] = useState(false);
 
+  // User search query - only run when search has 2+ characters
+  const userSearchQuery = trpc.user.searchUsers.useQuery(
+    { query: searchQuery, limit: 5 },
+    { enabled: searchQuery.length >= 2 }
+  );
+
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
@@ -322,6 +328,39 @@ export default function SosioScreen() {
         onScroll={handleTabsScroll}
         scrollEventThrottle={16}
       >
+        {/* User Search Results - shown when searching */}
+        {searchQuery.length >= 2 && userSearchQuery.data && userSearchQuery.data.length > 0 && (
+          <View style={styles.userSearchResults}>
+            <Text style={styles.searchResultsTitle}>Users</Text>
+            {userSearchQuery.data.map((searchUser: any) => (
+              <Pressable
+                key={searchUser.id}
+                style={styles.userResultItem}
+                onPress={() => router.push(`/profile/${searchUser.username}`)}
+              >
+                <View style={styles.userResultAvatar}>
+                  <Text style={styles.userResultAvatarText}>
+                    {searchUser.username?.charAt(0).toUpperCase() || 'U'}
+                  </Text>
+                </View>
+                <View style={styles.userResultInfo}>
+                  <View style={styles.userResultNameRow}>
+                    <Text style={styles.userResultUsername}>@{searchUser.username}</Text>
+                    {searchUser.isVerified && (
+                      <View style={styles.verifiedBadge}>
+                        <Text style={styles.verifiedBadgeText}>✓</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.userResultFollowers}>
+                    {searchUser.followersCount} followers
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
         {/* Stats removed from main Sosio screen - visible only in profile */}
         {activeTab === 'groups' ? (
           <View style={styles.comingSoonContainer}>
@@ -928,5 +967,71 @@ const styles = StyleSheet.create({
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 14
+  },
+  // User search results styles
+  userSearchResults: {
+    marginBottom: SPACING.m,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.m,
+  },
+  searchResultsTitle: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    marginBottom: SPACING.s,
+  },
+  userResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.s,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.background,
+  },
+  userResultAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.solana + '30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.m,
+  },
+  userResultAvatarText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+  },
+  userResultInfo: {
+    flex: 1,
+  },
+  userResultNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  userResultUsername: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+  },
+  verifiedBadge: {
+    backgroundColor: COLORS.solana,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  verifiedBadgeText: {
+    ...FONTS.phantomBold,
+    color: COLORS.background,
+    fontSize: 8,
+  },
+  userResultFollowers: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
   },
 });
