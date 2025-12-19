@@ -638,7 +638,7 @@ export const userRouter = router({
               { username: { contains: input.query, mode: 'insensitive' } },
               { name: { contains: input.query, mode: 'insensitive' } },
             ],
-            id: { not: ctx.user.id }, // Exclude current user
+            // Include all users including current user
           },
           take: input.limit,
           select: {
