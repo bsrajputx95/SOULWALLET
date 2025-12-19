@@ -42,11 +42,24 @@ export default function SosioScreen() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchBar, setShowSearchBar] = useState(false);
 
+
   // User search query - only run when search has 2+ characters
+  // Strip @ prefix if user types it (usernames stored without @)
+  const cleanedSearchQuery = searchQuery.startsWith('@') ? searchQuery.slice(1) : searchQuery;
   const userSearchQuery = trpc.user.searchUsers.useQuery(
-    { query: searchQuery, limit: 5 },
-    { enabled: searchQuery.length >= 2 }
+    { query: cleanedSearchQuery, limit: 5 },
+    { enabled: cleanedSearchQuery.length >= 2 }
   );
+
+  // Debug logging for user search
+  React.useEffect(() => {
+    if (cleanedSearchQuery.length >= 2) {
+      console.log('[UserSearch] Query:', cleanedSearchQuery);
+      console.log('[UserSearch] Status:', userSearchQuery.status);
+      console.log('[UserSearch] Data:', userSearchQuery.data);
+      console.log('[UserSearch] Error:', userSearchQuery.error);
+    }
+  }, [cleanedSearchQuery, userSearchQuery.status, userSearchQuery.data, userSearchQuery.error]);
 
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
