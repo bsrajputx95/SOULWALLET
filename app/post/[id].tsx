@@ -254,7 +254,7 @@ export default function PostDetailScreen() {
           headerShown: false,
         }}
       />
-      
+
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Main Post */}
         <NeonCard style={styles.postContainer}>
@@ -265,20 +265,20 @@ export default function PostDetailScreen() {
               ) : (
                 <View style={[styles.avatar, styles.defaultAvatar]}>
                   <Text style={styles.avatarText}>
-                    {post.username.charAt(0).toUpperCase()}
+                    {(post.username || post.user?.username || 'U').charAt(0).toUpperCase()}
                   </Text>
                 </View>
               )}
               <View style={styles.userInfo}>
                 <View style={styles.userRow}>
-                  <TouchableOpacity onPress={() => router.push(`/profile/${post.username}`)}>
+                  <TouchableOpacity onPress={() => router.push(`/profile/${post.username || post.user?.username}`)}>
                     <Text style={styles.username}>
-                      @{post.username}
-                      {post.isVerified && <Text style={styles.verified}> 🛡️</Text>}
+                      @{post.username || post.user?.username}
+                      {(post.isVerified || post.user?.isVerified) && <Text style={styles.verified}> 🛡️</Text>}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
-                    onPress={() => router.back()} 
+                  <TouchableOpacity
+                    onPress={() => router.back()}
                     style={styles.backButton}
                   >
                     <X size={18} color={COLORS.textSecondary} />
@@ -288,19 +288,19 @@ export default function PostDetailScreen() {
               </View>
             </View>
           </View>
-          
+
           <View style={styles.postContent}>
             <Text style={styles.postText}>{formatContent(post.content)}</Text>
           </View>
-          
+
           <View style={styles.postActions}>
-            <TouchableOpacity 
-              style={styles.action} 
+            <TouchableOpacity
+              style={styles.action}
               onPress={handleLike}
               disabled={likePostMutation.isPending}
             >
-              <Heart 
-                size={20} 
+              <Heart
+                size={20}
                 color={isLiked ? COLORS.error : COLORS.textSecondary}
                 fill={isLiked ? COLORS.error : 'none'}
               />
@@ -308,21 +308,21 @@ export default function PostDetailScreen() {
                 {post.likes}
               </Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.action} 
+
+            <TouchableOpacity
+              style={styles.action}
               onPress={handleRepost}
               disabled={repostMutation.isPending}
             >
-              <Repeat 
-                size={20} 
+              <Repeat
+                size={20}
                 color={isReposted ? COLORS.success : COLORS.textSecondary}
               />
               <Text style={[styles.actionCount, isReposted && styles.repostedText]}>
                 {post.reposts}
               </Text>
             </TouchableOpacity>
-            
+
             <View style={styles.action}>
               <MessageSquare size={20} color={COLORS.textSecondary} />
               <Text style={styles.actionCount}>{post.comments}</Text>
@@ -357,7 +357,7 @@ export default function PostDetailScreen() {
             <Text style={styles.indexBarLabel}>Disagree {disagreePercent}%</Text>
           </View>
         </NeonCard>
-        
+
         {/* Add Comment */}
         <NeonCard style={styles.commentInputContainer}>
           <View style={styles.commentInputRow}>
@@ -409,7 +409,7 @@ export default function PostDetailScreen() {
               <Text style={[styles.sortText, sortMode === 'liked' && styles.sortTextSelected]}>Most liked</Text>
             </TouchableOpacity>
           </View>
-          
+
           {post.commentsList && post.commentsList.length > 0 ? (
             [...post.commentsList].sort((a: Comment, b: Comment) => {
               if (sortMode === 'liked') {
@@ -427,7 +427,7 @@ export default function PostDetailScreen() {
                     ) : (
                       <View style={[styles.commentAvatar, styles.defaultAvatar]}>
                         <Text style={styles.commentAvatarText}>
-                          {comment.username.charAt(0).toUpperCase()}
+                          {(comment.username || 'U').charAt(0).toUpperCase()}
                         </Text>
                       </View>
                     )}
@@ -442,7 +442,7 @@ export default function PostDetailScreen() {
                     </View>
                   </View>
                 </View>
-                
+
                 <Text style={styles.commentContent}>{formatContent(comment.content)}</Text>
                 {typeof comment.likes === 'number' && (
                   <View style={{ marginTop: SPACING.xs }}>
