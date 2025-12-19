@@ -43,23 +43,16 @@ export default function SosioScreen() {
   const [showSearchBar, setShowSearchBar] = useState(false);
 
 
+
   // User search query - only run when search has 2+ characters
   // Strip @ prefix if user types it (usernames stored without @)
   const cleanedSearchQuery = searchQuery.startsWith('@') ? searchQuery.slice(1) : searchQuery;
-  const userSearchQuery = trpc.user.searchUsers.useQuery(
+  // Use social.searchUsers (already exists in Railway deployment)
+  const userSearchQuery = trpc.social.searchUsers.useQuery(
     { query: cleanedSearchQuery, limit: 5 },
     { enabled: cleanedSearchQuery.length >= 2 }
   );
 
-  // Debug logging for user search
-  React.useEffect(() => {
-    if (cleanedSearchQuery.length >= 2) {
-      console.log('[UserSearch] Query:', cleanedSearchQuery);
-      console.log('[UserSearch] Status:', userSearchQuery.status);
-      console.log('[UserSearch] Data:', userSearchQuery.data);
-      console.log('[UserSearch] Error:', userSearchQuery.error);
-    }
-  }, [cleanedSearchQuery, userSearchQuery.status, userSearchQuery.data, userSearchQuery.error]);
 
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -155,24 +148,51 @@ export default function SosioScreen() {
     }
   );
 
+  // Create post mutation
+  const createPostMutation = trpc.social.createPost.useMutation({
+    onSuccess: () => {
+      // Refetch the feed after posting
+      feedQuery?.refetch();
+    },
+  });
+
+  // Get feed query from social store or directly query
+  const feedQuery = trpc.social.getFeed.useQuery({
+    feedType: 'all' as const,
+    limit: 20,
+  }, {
+    refetchInterval: 30000,
+  });
+
   const handleCreatePost = async () => {
     if (!postContent.trim()) return;
 
-    // In a real app, this would send to backend via tRPC
-    // For now, just close the modal
-    if (__DEV__) {
-      console.log('Creating post:', {
-        content: postContent,
-        mentionedToken: mentionToken ? tokenName : undefined,
-        visibility: postVisibility
-      });
-    }
+    try {
+      // Map visibility to PostVisibility enum
+      const visibilityMap = {
+        'public': 'PUBLIC' as const,
+        'vip': 'VIP' as const,
+        'followers': 'FOLLOWERS' as const,
+      };
 
-    setShowNewPostModal(false);
-    setPostContent('');
-    setMentionToken(false);
-    setTokenName('');
-    setTokenAddress('');
+      await createPostMutation.mutateAsync({
+        content: postContent.trim(),
+        visibility: visibilityMap[postVisibility],
+        mentionedTokenName: mentionToken && tokenName ? tokenName : undefined,
+        mentionedTokenMint: mentionToken && tokenAddress ? tokenAddress : undefined,
+      });
+
+      console.log('[Sosio] Post created successfully');
+
+      setShowNewPostModal(false);
+      setPostContent('');
+      setMentionToken(false);
+      setTokenName('');
+      setTokenAddress('');
+    } catch (error) {
+      console.error('[Sosio] Failed to create post:', error);
+      // Could add an alert here
+    }
   };
 
 
