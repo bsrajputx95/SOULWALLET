@@ -632,6 +632,8 @@ export const userRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       try {
+        logger.info(`[searchUsers] Query: "${input.query}", Limit: ${input.limit}`);
+
         const users = await prisma.user.findMany({
           where: {
             OR: [
@@ -660,6 +662,8 @@ export const userRouter = router({
             { username: 'asc' },
           ],
         });
+
+        logger.info(`[searchUsers] Found ${users.length} users for query "${input.query}"`);
 
         return users.map(user => ({
           id: user.id,
