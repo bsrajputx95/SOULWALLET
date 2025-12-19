@@ -29,6 +29,10 @@ import { executionQueue } from '../lib/services/executionQueue';
 // Global cleanup service instance
 let cleanupService: ReturnType<typeof createCleanupService> | null = null;
 
+// API Version to verify deployment
+const API_VERSION = '2.0.1-searchUsers';
+console.log(`[API] Starting SoulWallet API v${API_VERSION}`);
+
 /**
  * Main application router
  * This is where all sub-routers are combined
