@@ -47,21 +47,22 @@ export default function PostDetailScreen() {
     { enabled: !!id }
   );
 
-  const likePostMutation = (trpc as any).social.likePost.useMutation({
+  // Use correct API endpoint names
+  const likePostMutation = trpc.social.toggleLike.useMutation({
     onSuccess: (data: any) => {
       setIsLiked(data.liked);
       postQuery.refetch();
     },
   });
 
-  const repostMutation = (trpc as any).social.repost.useMutation({
-    onSuccess: (data: any) => {
-      setIsReposted(data.reposted);
+  const repostMutation = trpc.social.createRepost.useMutation({
+    onSuccess: () => {
+      setIsReposted(true);
       postQuery.refetch();
     },
   });
 
-  const addCommentMutation = (trpc as any).social.addComment.useMutation({
+  const addCommentMutation = trpc.social.createComment.useMutation({
     onSuccess: () => {
       setNewComment('');
       postQuery.refetch();
