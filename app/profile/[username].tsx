@@ -108,6 +108,19 @@ export default function UserProfileScreen() {
     setRefreshing(false);
   }, [userProfileQuery, userPostsQuery]);
 
+  // Show loading while fetching profile
+  if (userProfileQuery.isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.solana} />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!userProfile) {
     return (
       <SafeAreaView style={styles.container}>
@@ -116,7 +129,8 @@ export default function UserProfileScreen() {
           <Text style={styles.headerTitle}>Profile Not Found</Text>
         </View>
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>User profile not found</Text>
+          <Text style={styles.errorText}>User @{username} not found</Text>
+          <Text style={styles.errorSubtext}>This user may not exist or the profile is not available.</Text>
         </View>
       </SafeAreaView>
     );
@@ -575,6 +589,35 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginTop: SPACING.m,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.l,
+  },
+  errorText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    marginBottom: SPACING.s,
+  },
+  errorSubtext: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -874,18 +917,6 @@ const styles = StyleSheet.create({
   },
   gatedVipButton: {
     alignSelf: 'center',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.l,
-  },
-  errorText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-    textAlign: 'center',
   },
   modalOverlay: {
     flex: 1,
