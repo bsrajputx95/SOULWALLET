@@ -62,10 +62,17 @@ export default function PostDetailScreen() {
     },
   });
 
+  // Fetch comments from API
+  const commentsQuery = trpc.social.getComments.useQuery(
+    { postId: id!, limit: 50 },
+    { enabled: !!id }
+  );
+
   const addCommentMutation = trpc.social.createComment.useMutation({
     onSuccess: () => {
       setNewComment('');
       postQuery.refetch();
+      commentsQuery.refetch(); // Also refetch comments
     },
   });
 
@@ -389,7 +396,9 @@ export default function PostDetailScreen() {
 
         {/* Comments */}
         <View style={styles.commentsSection}>
-          <Text style={styles.commentsTitle}>Comments ({post.commentsList?.length || 0})</Text>
+          <Text style={styles.commentsTitle}>
+            Comments ({commentsQuery.data?.comments?.length || post.commentsCount || post.comments || 0})
+          </Text>
           <View style={styles.sortRow}>
             <TouchableOpacity
               style={[styles.sortChip, sortMode === 'new' && styles.sortChipSelected]}
@@ -411,54 +420,65 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           </View>
 
-          {post.commentsList && post.commentsList.length > 0 ? (
-            [...post.commentsList].sort((a: Comment, b: Comment) => {
-              if (sortMode === 'liked') {
-                return (b.likes || 0) - (a.likes || 0);
-              }
-              const ta = getTime(a, 0);
-              const tb = getTime(b, 0);
-              return sortMode === 'new' ? tb - ta : ta - tb;
-            }).map((comment: Comment) => (
-              <NeonCard key={comment.id} style={styles.commentContainer}>
-                <View style={styles.commentHeader}>
-                  <View style={styles.profileContainer}>
-                    {comment.profileImage ? (
-                      <Image source={{ uri: comment.profileImage }} style={styles.commentAvatar} />
-                    ) : (
-                      <View style={[styles.commentAvatar, styles.defaultAvatar]}>
-                        <Text style={styles.commentAvatarText}>
-                          {(comment.username || 'U').charAt(0).toUpperCase()}
+          {/* Use API comments data, fallback to mock commentsList */}
+          {(() => {
+            const apiComments = commentsQuery.data?.comments || [];
+            const comments = apiComments.length > 0 ? apiComments : (post.commentsList || []);
+            const commentCount = apiComments.length > 0 ? apiComments.length : (post.commentsList?.length || 0);
+
+            if (comments.length > 0) {
+              return [...comments].sort((a: any, b: any) => {
+                if (sortMode === 'liked') {
+                  return ((b.likes || b._count?.likes) || 0) - ((a.likes || a._count?.likes) || 0);
+                }
+                const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return sortMode === 'new' ? tb - ta : ta - tb;
+              }).map((comment: any) => (
+                <NeonCard key={comment.id} style={styles.commentContainer}>
+                  <View style={styles.commentHeader}>
+                    <View style={styles.profileContainer}>
+                      {comment.profileImage || comment.user?.profileImage ? (
+                        <Image source={{ uri: comment.profileImage || comment.user?.profileImage }} style={styles.commentAvatar} />
+                      ) : (
+                        <View style={[styles.commentAvatar, styles.defaultAvatar]}>
+                          <Text style={styles.commentAvatarText}>
+                            {(comment.username || comment.user?.username || 'U').charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={styles.commentUserInfo}>
+                        <TouchableOpacity onPress={() => router.push(`/profile/${comment.username || comment.user?.username}`)}>
+                          <Text style={styles.commentUsername}>
+                            @{comment.username || comment.user?.username}
+                            {(comment.isVerified || comment.user?.isVerified) && <Text style={styles.verified}> 🛡️</Text>}
+                          </Text>
+                        </TouchableOpacity>
+                        <Text style={styles.commentTimestamp}>
+                          {comment.timestamp || (comment.createdAt ? new Date(comment.createdAt).toLocaleDateString() : '')}
                         </Text>
                       </View>
-                    )}
-                    <View style={styles.commentUserInfo}>
-                      <TouchableOpacity onPress={() => router.push(`/profile/${comment.username}`)}>
-                        <Text style={styles.commentUsername}>
-                          @{comment.username}
-                          {comment.isVerified && <Text style={styles.verified}> 🛡️</Text>}
-                        </Text>
-                      </TouchableOpacity>
-                      <Text style={styles.commentTimestamp}>{comment.timestamp}</Text>
                     </View>
                   </View>
-                </View>
 
-                <Text style={styles.commentContent}>{formatContent(comment.content)}</Text>
-                {typeof comment.likes === 'number' && (
-                  <View style={{ marginTop: SPACING.xs }}>
-                    <Text style={{ ...FONTS.phantomRegular, color: COLORS.textSecondary, fontSize: 12 }}>
-                      {comment.likes} likes
-                    </Text>
-                  </View>
-                )}
-              </NeonCard>
-            ))
-          ) : (
-            <View style={styles.noCommentsContainer}>
-              <Text style={styles.noCommentsText}>No comments yet. Be the first to comment!</Text>
-            </View>
-          )}
+                  <Text style={styles.commentContent}>{formatContent(comment.content)}</Text>
+                  {typeof (comment.likes || comment._count?.likes) === 'number' && (
+                    <View style={{ marginTop: SPACING.xs }}>
+                      <Text style={{ ...FONTS.phantomRegular, color: COLORS.textSecondary, fontSize: 12 }}>
+                        {comment.likes || comment._count?.likes || 0} likes
+                      </Text>
+                    </View>
+                  )}
+                </NeonCard>
+              ));
+            } else {
+              return (
+                <View style={styles.noCommentsContainer}>
+                  <Text style={styles.noCommentsText}>No comments yet. Be the first to comment!</Text>
+                </View>
+              );
+            }
+          })()}
         </View>
       </ScrollView>
     </SafeAreaView>
