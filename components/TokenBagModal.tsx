@@ -7,6 +7,8 @@ import {
   Pressable,
   ScrollView,
   useWindowDimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { X, ShoppingBag, Settings } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -131,118 +133,125 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
           </View>
 
           {/* Content */}
-          <ScrollView
-            style={styles.content}
-            showsVerticalScrollIndicator={false}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1 }}
           >
-            {showSettings && (
-              <View style={styles.settingsContainer}>
-                <View style={styles.settingsPanel}>
-                  <Text style={styles.settingsTitle}>Buy Settings</Text>
-                  <View style={styles.settingsRow}>
-                    <NeonInput
-                      label="Buy Amount (USDC)"
-                      placeholder="Enter amount"
-                      value={buyAmount}
-                      keyboardType="decimal-pad"
-                      onChangeText={(text) => {
-                        const cleaned = text.replace(/[^0-9.]/g, '');
-                        setBuyAmount(cleaned);
-                      }}
+            <ScrollView
+              style={styles.content}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="none"
+            >
+              {showSettings && (
+                <View style={styles.settingsContainer}>
+                  <View style={styles.settingsPanel}>
+                    <Text style={styles.settingsTitle}>Buy Settings</Text>
+                    <View style={styles.settingsRow}>
+                      <NeonInput
+                        label="Buy Amount (USDC)"
+                        placeholder="Enter amount"
+                        value={buyAmount}
+                        keyboardType="decimal-pad"
+                        onChangeText={(text) => {
+                          const cleaned = text.replace(/[^0-9.]/g, '');
+                          setBuyAmount(cleaned);
+                        }}
+                      />
+                    </View>
+
+                    <View style={styles.settingsRow}>
+                      <NeonInput
+                        label="Slippage Tolerance (%)"
+                        placeholder="Enter slippage (e.g. 0.5)"
+                        value={String(slippage)}
+                        keyboardType="decimal-pad"
+                        onChangeText={(text) => {
+                          const cleaned = text.replace(/[^0-9.]/g, '');
+                          const num = parseFloat(cleaned);
+                          if (!isNaN(num)) {
+                            const clamped = Math.max(0.01, Math.min(50, num));
+                            setSlippage(parseFloat(clamped.toFixed(2)));
+                          } else if (cleaned === '') {
+                            setSlippage(0.5);
+                          }
+                        }}
+                      />
+                    </View>
+
+                    <NeonButton
+                      title="Apply Settings"
+                      variant="primary"
+                      size="medium"
+                      fullWidth
+                      style={styles.applyButton}
+                      onPress={applySettings}
                     />
                   </View>
-
-                  <View style={styles.settingsRow}>
-                    <NeonInput
-                      label="Slippage Tolerance (%)"
-                      placeholder="Enter slippage (e.g. 0.5)"
-                      value={String(slippage)}
-                      keyboardType="decimal-pad"
-                      onChangeText={(text) => {
-                        const cleaned = text.replace(/[^0-9.]/g, '');
-                        const num = parseFloat(cleaned);
-                        if (!isNaN(num)) {
-                          const clamped = Math.max(0.01, Math.min(50, num));
-                          setSlippage(parseFloat(clamped.toFixed(2)));
-                        } else if (cleaned === '') {
-                          setSlippage(0.5);
-                        }
-                      }}
-                    />
+                </View>
+              )}
+              {mockTokens.map((token, index) => (
+                <NeonCard
+                  key={token.address}
+                  style={styles.tokenCard}
+                  color={COLORS.gradientPurple}
+                  intensity="medium"
+                >
+                  <View style={styles.tokenHeader}>
+                    <View style={styles.tokenInfo}>
+                      <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+                      <Text style={styles.tokenName}>{token.name}</Text>
+                    </View>
+                    <View style={styles.tokenValues}>
+                      <Text style={styles.tokenValue}>${token.value.toFixed(2)}</Text>
+                      <Text
+                        style={[
+                          styles.tokenChange,
+                          token.change24h >= 0 ? styles.positive : styles.negative,
+                        ]}
+                      >
+                        {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
+                      </Text>
+                    </View>
                   </View>
 
+                  <View style={styles.balanceContainer}>
+                    <Text style={styles.balanceLabel}>Holdings:</Text>
+                    <Text style={styles.balanceValue}>
+                      {formatNumber(token.balance)} {token.symbol}
+                    </Text>
+                  </View>
+
+                  {/* Sell Buttons */}
+                  <View style={styles.sellContainer}>
+                    <Text style={styles.sellLabel}>Quick Sell:</Text>
+                    <View style={styles.sellButtons}>
+                      {[10, 25, 50, 100].map((percentage) => (
+                        <NeonButton
+                          key={percentage}
+                          title={`${percentage}%`}
+                          variant="outline"
+                          size="small"
+                          style={styles.sellButton}
+                          onPress={() => handleSell(token, percentage)}
+                        />
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Buy More Button */}
                   <NeonButton
-                    title="Apply Settings"
+                    title="Buy More"
                     variant="primary"
                     size="medium"
                     fullWidth
-                    style={styles.applyButton}
-                    onPress={applySettings}
+                    style={styles.buyMoreButton}
+                    onPress={() => handleBuyMore(token)}
                   />
-                </View>
-              </View>
-            )}
-            {mockTokens.map((token, index) => (
-              <NeonCard
-                key={token.address}
-                style={styles.tokenCard}
-                color={COLORS.gradientPurple}
-                intensity="medium"
-              >
-                <View style={styles.tokenHeader}>
-                  <View style={styles.tokenInfo}>
-                    <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                    <Text style={styles.tokenName}>{token.name}</Text>
-                  </View>
-                  <View style={styles.tokenValues}>
-                    <Text style={styles.tokenValue}>${token.value.toFixed(2)}</Text>
-                    <Text
-                      style={[
-                        styles.tokenChange,
-                        token.change24h >= 0 ? styles.positive : styles.negative,
-                      ]}
-                    >
-                      {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.balanceContainer}>
-                  <Text style={styles.balanceLabel}>Holdings:</Text>
-                  <Text style={styles.balanceValue}>
-                    {formatNumber(token.balance)} {token.symbol}
-                  </Text>
-                </View>
-
-                {/* Sell Buttons */}
-                <View style={styles.sellContainer}>
-                  <Text style={styles.sellLabel}>Quick Sell:</Text>
-                  <View style={styles.sellButtons}>
-                    {[10, 25, 50, 100].map((percentage) => (
-                      <NeonButton
-                        key={percentage}
-                        title={`${percentage}%`}
-                        variant="outline"
-                        size="small"
-                        style={styles.sellButton}
-                        onPress={() => handleSell(token, percentage)}
-                      />
-                    ))}
-                  </View>
-                </View>
-
-                {/* Buy More Button */}
-                <NeonButton
-                  title="Buy More"
-                  variant="primary"
-                  size="medium"
-                  fullWidth
-                  style={styles.buyMoreButton}
-                  onPress={() => handleBuyMore(token)}
-                />
-              </NeonCard>
-            ))}
-          </ScrollView>
+                </NeonCard>
+              ))}
+            </ScrollView>
+          </KeyboardAvoidingView>
         </View>
       </View>
     </Modal>
