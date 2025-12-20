@@ -65,6 +65,12 @@ export default function SelfProfileScreen() {
     followerEquity: profileQuery.data?.tradingStats?.followerEquity || 0,
   };
 
+  // VIP info from API or defaults
+  const vipInfo = {
+    price: (profileQuery.data as any)?.vipPrice || 0,
+    subscribers: stats.vipSubs,
+  };
+
 
 
   // TODO: Fetch real posts from API
