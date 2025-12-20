@@ -38,11 +38,12 @@ type PostVisibility = 'public' | 'followers' | 'vip';
 export default function UserProfileScreen() {
   const router = useRouter();
   const { username } = useLocalSearchParams<{ username: string }>();
-  const { getTraderProfile, toggleFollow, isFollowing, posts } = useSocial();
+  const { getTraderProfile, posts } = useSocial(); // Keep only for mock posts fallback
   const [refreshing, setRefreshing] = useState(false);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('24h');
   const [activePostsTab, setActivePostsTab] = useState<PostVisibility>('public');
   const [isVipMember, setIsVipMember] = useState(false);
+  const [isFollowingUser, setIsFollowingUser] = useState(false);
 
   const [showTimeFilterModal, setShowTimeFilterModal] = useState(false);
   const [showCopyModal, setShowCopyModal] = useState(false);
@@ -58,6 +59,25 @@ export default function UserProfileScreen() {
     { username: username || '' },
     { enabled: !!username }
   );
+
+  // Toggle follow mutation
+  const toggleFollowMutation = trpc.social.toggleFollow.useMutation({
+    onSuccess: (data: any) => {
+      setIsFollowingUser(data.following);
+      userProfileQuery.refetch(); // Refetch to update follower count
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to follow user');
+    },
+  });
+
+  const handleFollowPress = () => {
+    if (!userProfileQuery.data?.id) {
+      Alert.alert('Error', 'Cannot follow user - profile not loaded');
+      return;
+    }
+    toggleFollowMutation.mutate({ userId: userProfileQuery.data.id });
+  };
 
   // Fetch user's posts from API  
   const userPostsQuery = trpc.social.getFeed.useQuery(
@@ -101,9 +121,9 @@ export default function UserProfileScreen() {
     vipPrice: undefined,
   } : null;
 
-  const isUserFollowed = username ? isFollowing(username) : false;
+  // isFollowingUser state is set by API response from toggleFollowMutation
   const walletAddress = userProfile?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
-  const trustScore = 0.9; // Mocked trust score (90%)
+  const trustScore = 0.9; // TODO: Calculate from real data
 
   // Use API posts if available, otherwise use mock posts
   const apiPosts = userPostsQuery.data?.posts || [];
@@ -304,20 +324,21 @@ export default function UserProfileScreen() {
           <TouchableOpacity
             style={[
               styles.followButton,
-              isUserFollowed && styles.followButtonActive,
+              isFollowingUser && styles.followButtonActive,
             ]}
-            onPress={() => username && toggleFollow(username)}
+            onPress={handleFollowPress}
+            disabled={toggleFollowMutation.isPending}
           >
-            {isUserFollowed ? (
+            {isFollowingUser ? (
               <UserMinus size={20} color={COLORS.textPrimary} />
             ) : (
               <UserPlus size={20} color={COLORS.textPrimary} />
             )}
             <Text style={[
               styles.followButtonText,
-              isUserFollowed && styles.followButtonTextActive,
+              isFollowingUser && styles.followButtonTextActive,
             ]}>
-              {isUserFollowed ? 'Unfollow' : 'Follow'}
+              {toggleFollowMutation.isPending ? 'Loading...' : (isFollowingUser ? 'Unfollow' : 'Follow')}
             </Text>
           </TouchableOpacity>
 
@@ -375,15 +396,16 @@ export default function UserProfileScreen() {
             ))}
           </View>
 
-          {activePostsTab === 'followers' && !isUserFollowed ? (
+          {activePostsTab === 'followers' && !isFollowingUser ? (
             <View style={styles.gatedContainer}>
               <Text style={styles.gatedText}>Follow @{userProfile.username} to view followers-only posts.</Text>
               <TouchableOpacity
                 style={[styles.followButton, styles.gatedActionButton]}
-                onPress={() => toggleFollow(userProfile.username)}
+                onPress={handleFollowPress}
+                disabled={toggleFollowMutation.isPending}
               >
                 <UserPlus size={20} color={COLORS.textPrimary} />
-                <Text style={styles.followButtonText}>Follow</Text>
+                <Text style={styles.followButtonText}>{toggleFollowMutation.isPending ? 'Loading...' : 'Follow'}</Text>
               </TouchableOpacity>
             </View>
           ) : activePostsTab === 'vip' && !isVipMember ? (
