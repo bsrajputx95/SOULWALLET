@@ -110,7 +110,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     >
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.modalContainer, { maxHeight: modalHeight }]}>
+        <View style={[styles.modalContainer, { minHeight: modalHeight, maxHeight: height * 0.85 }]}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
