@@ -25,12 +25,20 @@ export const socialRouter = router({
       let tokenInfo: { symbol?: string; name?: string } | null = null
       if (input.mentionedTokenMint) {
         try {
+          // Just validate address format
           new PublicKey(input.mentionedTokenMint)
-          const info = await jupiterSwap.getTokenInfo(input.mentionedTokenMint)
-          if (!info) throw new Error('Token not found')
-          tokenInfo = { symbol: info.symbol, name: info.name }
+          // Try to get token info from Jupiter, but don't fail if not found
+          try {
+            const info = await jupiterSwap.getTokenInfo(input.mentionedTokenMint)
+            if (info) {
+              tokenInfo = { symbol: info.symbol, name: info.name }
+            }
+          } catch {
+            // Token not in Jupiter - that's OK, use user-provided name
+            console.log(`Token ${input.mentionedTokenMint} not found in Jupiter, using user-provided name`)
+          }
         } catch {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid token address or token not found' })
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid token address format' })
         }
       }
       return await (SocialService as any).createPost(ctx.user.id, {
