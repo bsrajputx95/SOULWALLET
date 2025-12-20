@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
   KeyboardAvoidingView,
   Platform,
+  TextInput,
 } from 'react-native';
 import { X, ShoppingBag, Settings } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -147,36 +148,49 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                 <View style={styles.settingsContainer}>
                   <View style={styles.settingsPanel}>
                     <Text style={styles.settingsTitle}>Buy Settings</Text>
+
                     <View style={styles.settingsRow}>
-                      <NeonInput
-                        label="Buy Amount (USDC)"
-                        placeholder="Enter amount"
-                        value={buyAmount}
-                        keyboardType="decimal-pad"
-                        onChangeText={(text) => {
-                          const cleaned = text.replace(/[^0-9.]/g, '');
-                          setBuyAmount(cleaned);
-                        }}
-                      />
+                      <Text style={styles.inputLabel}>Buy Amount (USDC)</Text>
+                      <View style={styles.inputWrapper}>
+                        <TextInput
+                          style={styles.textInput}
+                          placeholder="Enter amount"
+                          placeholderTextColor={COLORS.textSecondary}
+                          value={buyAmount}
+                          keyboardType="decimal-pad"
+                          autoCorrect={false}
+                          autoCapitalize="none"
+                          onChangeText={(text) => {
+                            const cleaned = text.replace(/[^0-9.]/g, '');
+                            setBuyAmount(cleaned);
+                          }}
+                        />
+                      </View>
                     </View>
 
                     <View style={styles.settingsRow}>
-                      <NeonInput
-                        label="Slippage Tolerance (%)"
-                        placeholder="Enter slippage (e.g. 0.5)"
-                        value={String(slippage)}
-                        keyboardType="decimal-pad"
-                        onChangeText={(text) => {
-                          const cleaned = text.replace(/[^0-9.]/g, '');
-                          const num = parseFloat(cleaned);
-                          if (!isNaN(num)) {
-                            const clamped = Math.max(0.01, Math.min(50, num));
-                            setSlippage(parseFloat(clamped.toFixed(2)));
-                          } else if (cleaned === '') {
-                            setSlippage(0.5);
-                          }
-                        }}
-                      />
+                      <Text style={styles.inputLabel}>Slippage Tolerance (%)</Text>
+                      <View style={styles.inputWrapper}>
+                        <TextInput
+                          style={styles.textInput}
+                          placeholder="Enter slippage (e.g. 0.5)"
+                          placeholderTextColor={COLORS.textSecondary}
+                          value={String(slippage)}
+                          keyboardType="decimal-pad"
+                          autoCorrect={false}
+                          autoCapitalize="none"
+                          onChangeText={(text) => {
+                            const cleaned = text.replace(/[^0-9.]/g, '');
+                            const num = parseFloat(cleaned);
+                            if (!isNaN(num)) {
+                              const clamped = Math.max(0.01, Math.min(50, num));
+                              setSlippage(parseFloat(clamped.toFixed(2)));
+                            } else if (cleaned === '') {
+                              setSlippage(0.5);
+                            }
+                          }}
+                        />
+                      </View>
                     </View>
 
                     <NeonButton
@@ -342,6 +356,25 @@ const styles = StyleSheet.create({
   },
   settingsRow: {
     marginBottom: SPACING.m,
+  },
+  inputLabel: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    marginBottom: SPACING.xs,
+  },
+  inputWrapper: {
+    borderWidth: 1,
+    borderColor: COLORS.textSecondary + '50',
+    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.background,
+  },
+  textInput: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textPrimary,
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.m,
+    fontSize: 16,
   },
   settingsLabel: {
     ...FONTS.phantomMedium,
