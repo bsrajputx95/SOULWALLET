@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: SPACING.l,
+    paddingHorizontal: SPACING.s, // Reduced for edge-to-edge layout
   },
   loadingContainer: {
     flex: 1,

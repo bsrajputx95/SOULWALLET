@@ -676,7 +676,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.l,
+    paddingHorizontal: SPACING.s, // Reduced for edge-to-edge layout
     paddingVertical: SPACING.m,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.cardBackground,
