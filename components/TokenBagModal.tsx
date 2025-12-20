@@ -144,6 +144,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                       label="Buy Amount (USDC)"
                       placeholder="Enter amount"
                       value={buyAmount}
+                      keyboardType="decimal-pad"
                       onChangeText={(text) => {
                         const cleaned = text.replace(/[^0-9.]/g, '');
                         setBuyAmount(cleaned);
@@ -152,45 +153,32 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                   </View>
 
                   <View style={styles.settingsRow}>
-                    <Text style={styles.settingsLabel}>Slippage Tolerance</Text>
-                    <View style={styles.slippageButtons}>
-                      {[0.1, 0.5, 1, 3].map((p) => (
-                        <NeonButton
-                          key={p}
-                          title={`${p}%`}
-                          variant={Math.abs(slippage - p) < 0.0001 ? 'primary' : 'outline'}
-                          size="small"
-                          style={styles.slippageButton}
-                          onPress={() => setSlippage(p)}
-                        />
-                      ))}
-                    </View>
-                    <View style={styles.customSlippageRow}>
-                      <NeonInput
-                        label="Custom (%)"
-                        placeholder="0.1 - 50"
-                        value={String(slippage)}
-                        onChangeText={(text) => {
-                          const cleaned = text.replace(/[^0-9.]/g, '');
-                          const num = parseFloat(cleaned);
-                          if (!isNaN(num)) {
-                            const clamped = Math.max(0.01, Math.min(50, num));
-                            setSlippage(parseFloat(clamped.toFixed(2)));
-                          } else if (cleaned === '') {
-                            setSlippage(0.5);
-                          }
-                        }}
-                      />
-                    </View>
-                    <NeonButton
-                      title="OK"
-                      variant="primary"
-                      size="small"
-                      fullWidth
-                      style={styles.applyButton}
-                      onPress={applySettings}
+                    <NeonInput
+                      label="Slippage Tolerance (%)"
+                      placeholder="Enter slippage (e.g. 0.5)"
+                      value={String(slippage)}
+                      keyboardType="decimal-pad"
+                      onChangeText={(text) => {
+                        const cleaned = text.replace(/[^0-9.]/g, '');
+                        const num = parseFloat(cleaned);
+                        if (!isNaN(num)) {
+                          const clamped = Math.max(0.01, Math.min(50, num));
+                          setSlippage(parseFloat(clamped.toFixed(2)));
+                        } else if (cleaned === '') {
+                          setSlippage(0.5);
+                        }
+                      }}
                     />
                   </View>
+
+                  <NeonButton
+                    title="Apply Settings"
+                    variant="primary"
+                    size="medium"
+                    fullWidth
+                    style={styles.applyButton}
+                    onPress={applySettings}
+                  />
                 </View>
               </View>
             )}
@@ -351,18 +339,6 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 14,
     marginBottom: SPACING.s,
-  },
-  slippageButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.s,
-  },
-  slippageButton: {
-    flex: 1,
-    marginHorizontal: 2,
-  },
-  customSlippageRow: {
-    marginTop: SPACING.xs,
   },
   content: {
     flex: 1,
