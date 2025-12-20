@@ -759,10 +759,9 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.s, // Reduced for edge-to-edge layout
+    borderRadius: 0, // No border radius for edge-to-edge
+    padding: SPACING.m,
     marginVertical: SPACING.s,
-    marginHorizontal: SPACING.xs,
   },
   statsRow: {
     flexDirection: 'row',
@@ -785,10 +784,9 @@ const styles = StyleSheet.create({
   },
   tradingSummaryContainer: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.s, // Reduced for edge-to-edge layout
+    borderRadius: 0, // No border radius for edge-to-edge
+    padding: SPACING.m,
     marginBottom: SPACING.s,
-    marginHorizontal: SPACING.xs,
   },
   sectionTitle: {
     ...FONTS.phantomBold,
@@ -838,12 +836,10 @@ const styles = StyleSheet.create({
   actionButtonsContainer: {
     flexDirection: 'column',
     marginVertical: SPACING.s,
-    marginHorizontal: SPACING.xs,
     gap: SPACING.s,
   },
   trustScoreCard: {
     marginBottom: SPACING.s,
-    marginHorizontal: SPACING.xs,
   },
   trustHeader: {
     flexDirection: 'row',
