@@ -111,7 +111,7 @@ export default function SelfProfileScreen() {
                 {user?.username ? (user.username.length > 12 ? user.username.slice(0, 12) + '...' : user.username) : 'user'}
               </Text>
             </View>
-            <Text style={styles.username}>@{user?.username || 'user'}.sol</Text>
+            <Text style={styles.username}>@{user?.username || 'user'}</Text>
           </View>
         </View>
 
