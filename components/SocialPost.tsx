@@ -48,6 +48,14 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   const [currentLikes, setCurrentLikes] = useState(likes);
   const [currentReposts, setCurrentReposts] = useState(reposts);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Truncate content if too long
+  const MAX_CONTENT_LENGTH = 200;
+  const shouldTruncate = content.length > MAX_CONTENT_LENGTH && !isExpanded;
+  const displayContent = shouldTruncate
+    ? content.substring(0, MAX_CONTENT_LENGTH) + '...'
+    : content;
 
   // API mutations for like/repost
   const toggleLikeMutation = trpc.social.toggleLike.useMutation({
@@ -228,11 +236,14 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
           accessibilityLabel={`Post by ${username}: ${content.substring(0, 100)}`}
           accessibilityHint="Double tap to view full post"
         >
-          <SafeHtmlText
-            html={content}
-            style={styles.content}
-            maxLength={500}
-          />
+          <Text style={styles.content} numberOfLines={isExpanded ? undefined : 6}>
+            {displayContent}
+          </Text>
+          {shouldTruncate && (
+            <Pressable onPress={() => setIsExpanded(true)}>
+              <Text style={styles.seeMore}>See more</Text>
+            </Pressable>
+          )}
           {images && images.length > 0 && (
             <View style={styles.imagesContainer}>
               {images.map((imageUrl, index) => (
@@ -391,6 +402,12 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  seeMore: {
+    ...FONTS.phantomMedium,
+    color: COLORS.solana,
+    fontSize: 14,
+    marginTop: SPACING.xs,
   },
   hashtag: {
     color: COLORS.solana,
