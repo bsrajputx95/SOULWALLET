@@ -198,7 +198,7 @@ export default function SelfProfileScreen() {
 
 
 
-        {/* VIP Section */}
+        {/* VIP Section - Coming Soon (hidden until VIP is enabled)
         <NeonCard style={styles.vipCard}>
           <Text style={styles.sectionTitle}>VIP Section</Text>
           <View style={styles.vipInfo}>
@@ -215,6 +215,7 @@ export default function SelfProfileScreen() {
             </View>
           </View>
         </NeonCard>
+        */}
 
         {/* VIP Setup and Get Verified */}
         <View style={styles.actionButtonsContainer}>

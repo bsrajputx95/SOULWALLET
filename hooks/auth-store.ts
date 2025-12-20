@@ -86,13 +86,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       // Always store access token for current session
       await SecureStorage.setToken(result.token);
 
-      // Only persist refresh token if "Remember Me" is checked
-      // This means session-only auth when rememberMe=false
-      if (result.refreshToken && rememberMe) {
+      // Always store refresh token so user stays logged in
+      // The rememberMe flag now only affects session duration preference
+      if (result.refreshToken) {
         await SecureStorage.setRefreshToken(result.refreshToken);
-      } else if (!rememberMe) {
-        // Clear any existing refresh token for session-only mode
-        await SecureStorage.clearRefreshToken();
       }
 
       await SecureStorage.setUserData(loggedInUser);

@@ -43,7 +43,6 @@ export default function UserProfileScreen() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('24h');
   const [activePostsTab, setActivePostsTab] = useState<PostVisibility>('public');
   const [isVipMember, setIsVipMember] = useState(false);
-  const [isFollowingUser, setIsFollowingUser] = useState(false);
 
   const [showTimeFilterModal, setShowTimeFilterModal] = useState(false);
   const [showCopyModal, setShowCopyModal] = useState(false);
@@ -79,8 +78,7 @@ export default function UserProfileScreen() {
 
   // Toggle follow mutation - use existing toggleFollow with userId
   const toggleFollowMutation = trpc.social.toggleFollow.useMutation({
-    onSuccess: (data: any) => {
-      setIsFollowingUser(data.following);
+    onSuccess: () => {
       userProfileQuery.refetch();
     },
     onError: (error: any) => {
@@ -139,8 +137,9 @@ export default function UserProfileScreen() {
     vipPrice: undefined,
   } : null;
 
-  // isFollowingUser state is set by API response from toggleFollowMutation
-  const walletAddress = userProfile?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
+  // Compute isFollowingUser from API response
+  const isFollowingUser = (apiProfile as any)?.isFollowing || false;
+  const walletAddress = (userProfile as any)?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
   const trustScore = 0.9; // TODO: Calculate from real data
 
   // Use API posts if available, otherwise use mock posts

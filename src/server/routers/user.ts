@@ -90,7 +90,7 @@ export const userRouter = router({
     .input(z.object({
       username: z.string().min(1),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       try {
         const user = await prisma.user.findFirst({
           where: { username: input.username },
@@ -108,6 +108,16 @@ export const userRouter = router({
         if (!user) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
         }
+
+        // Check if current user is following this user
+        const isFollowing = await prisma.follow.findUnique({
+          where: {
+            followerId_followingId: {
+              followerId: ctx.user.id,
+              followingId: user.id,
+            },
+          },
+        });
 
         return {
           id: user.id,
@@ -127,6 +137,7 @@ export const userRouter = router({
           totalTrades: (user as any).totalTrades || 0,
           vipPrice: (user as any).vipPrice,
           createdAt: user.createdAt,
+          isFollowing: !!isFollowing,
         };
       } catch (error) {
         if (error instanceof TRPCError) {

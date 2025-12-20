@@ -35,33 +35,9 @@ interface TokenBagModalProps {
   onClose: () => void;
 }
 
-// Mock data for iBuy tokens
-const mockTokens: Token[] = [
-  {
-    symbol: 'PEPE',
-    name: 'Pepe',
-    balance: 1000000,
-    value: 1250.50,
-    change24h: 15.2,
-    address: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R',
-  },
-  {
-    symbol: 'BONK',
-    name: 'Bonk',
-    balance: 500000,
-    value: 890.75,
-    change24h: -8.4,
-    address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-  },
-  {
-    symbol: 'WIF',
-    name: 'dogwifhat',
-    balance: 250,
-    value: 2100.25,
-    change24h: 22.8,
-    address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
-  },
-];
+// TODO: Replace with actual API call to get user's iBuy tokens
+// For now, tokens will be empty until user makes iBuy purchases
+const ibuyTokens: Token[] = [];
 
 export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   visible,
@@ -204,7 +180,18 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                   </View>
                 </View>
               )}
-              {mockTokens.map((token, index) => (
+
+              {/* Empty state when no iBuy tokens */}
+              {ibuyTokens.length === 0 && (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>No iBuy tokens yet</Text>
+                  <Text style={styles.emptyStateSubtext}>
+                    Tokens you buy via iBuy will appear here
+                  </Text>
+                </View>
+              )}
+
+              {ibuyTokens.map((token: Token) => (
                 <NeonCard
                   key={token.address}
                   style={styles.tokenCard}
@@ -476,5 +463,21 @@ const styles = StyleSheet.create({
   },
   applyButton: {
     marginTop: SPACING.s,
+  },
+  emptyState: {
+    padding: SPACING.xl,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    marginBottom: SPACING.xs,
+  },
+  emptyStateSubtext: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center' as const,
   },
 });
