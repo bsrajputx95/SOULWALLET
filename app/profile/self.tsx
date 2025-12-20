@@ -29,7 +29,7 @@ export default function SelfProfileScreen() {
   const { width } = useWindowDimensions();
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'public' | 'vip'>('public');
+  const [activeTab, setActiveTab] = useState<'public' | 'followers' | 'vip'>('public');
   const [showVipSetup, setShowVipSetup] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
   const [vipPrice, setVipPrice] = useState('');
@@ -82,6 +82,12 @@ export default function SelfProfileScreen() {
         return (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No posts yet</Text>
+          </View>
+        );
+      case 'followers':
+        return (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No followers-only posts yet</Text>
           </View>
         );
       case 'vip':
@@ -245,6 +251,21 @@ export default function SelfProfileScreen() {
                 activeTab === 'public' && styles.activeTabText,
               ]}>
                 Public
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.tab,
+                activeTab === 'followers' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('followers')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'followers' && styles.activeTabText,
+              ]}>
+                Followers
               </Text>
             </TouchableOpacity>
 
