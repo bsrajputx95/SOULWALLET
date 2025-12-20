@@ -754,8 +754,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    paddingHorizontal: SPACING.l,
-    paddingBottom: SPACING.xl,
+    paddingBottom: SPACING.xl, // Only bottom padding for scrolling
   },
   statsContainer: {
     backgroundColor: COLORS.cardBackground,
