@@ -282,7 +282,6 @@ export default function PostDetailScreen() {
                   <TouchableOpacity onPress={() => router.push(`/profile/${post.username || post.user?.username}`)}>
                     <Text style={styles.username}>
                       @{post.username || post.user?.username}
-                      {(post.isVerified || post.user?.isVerified) && <Text style={styles.verified}> 🛡️</Text>}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -451,7 +450,6 @@ export default function PostDetailScreen() {
                         <TouchableOpacity onPress={() => router.push(`/profile/${comment.username || comment.user?.username}`)}>
                           <Text style={styles.commentUsername}>
                             @{comment.username || comment.user?.username}
-                            {(comment.isVerified || comment.user?.isVerified) && <Text style={styles.verified}> 🛡️</Text>}
                           </Text>
                         </TouchableOpacity>
                         <Text style={styles.commentTimestamp}>

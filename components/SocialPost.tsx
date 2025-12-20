@@ -214,7 +214,6 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
               <Pressable onPress={(e) => { e.stopPropagation(); handleUsernamePress(); }}>
                 <Text style={styles.username}>
                   @{username}
-                  {isVerified && <Text style={styles.verified}> 🛡️</Text>}
                 </Text>
               </Pressable>
               <Text style={styles.timestamp}>{timestamp}</Text>

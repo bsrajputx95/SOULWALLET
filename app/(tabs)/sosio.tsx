@@ -379,11 +379,6 @@ export default function SosioScreen() {
                 <View style={styles.userResultInfo}>
                   <View style={styles.userResultNameRow}>
                     <Text style={styles.userResultUsername}>@{searchUser.username}</Text>
-                    {searchUser.isVerified && (
-                      <View style={styles.verifiedBadge}>
-                        <Text style={styles.verifiedBadgeText}>✓</Text>
-                      </View>
-                    )}
                   </View>
                   <Text style={styles.userResultFollowers}>
                     {searchUser.followersCount} followers

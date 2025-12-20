@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
-
+  Alert,
   Modal,
   TextInput,
   useWindowDimensions,
@@ -110,10 +110,6 @@ export default function SelfProfileScreen() {
               <Text style={styles.displayName} numberOfLines={1}>
                 {user?.username ? (user.username.length > 12 ? user.username.slice(0, 12) + '...' : user.username) : 'user'}
               </Text>
-              {user?.isVerified && <Shield size={12} color={COLORS.solana} style={styles.verifiedIcon} />}
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>ELITE</Text>
-              </View>
             </View>
             <Text style={styles.username}>@{user?.username || 'user'}.sol</Text>
           </View>
@@ -224,15 +220,14 @@ export default function SelfProfileScreen() {
             <Text style={styles.actionButtonText}>Enable VIP</Text>
           </TouchableOpacity>
 
-          {!user?.isVerified && (
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => setShowVerification(true)}
-            >
-              <Shield size={20} color={COLORS.solana} />
-              <Text style={styles.actionButtonText}>Get Verified</Text>
-            </TouchableOpacity>
-          )}
+          {/* Get Verified - Coming Soon */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => Alert.alert('Coming Soon', 'Verification feature will be available soon!')}
+          >
+            <Shield size={20} color={COLORS.solana} />
+            <Text style={styles.actionButtonText}>Get Verified</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Posts Tabs */}
