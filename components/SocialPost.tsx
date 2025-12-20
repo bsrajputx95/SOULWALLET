@@ -370,6 +370,7 @@ const styles = StyleSheet.create({
   },
   userInfo: {
     flex: 1,
+    marginLeft: SPACING.s, // Add space between avatar and username
   },
   username: {
     ...FONTS.phantomSemiBold,
@@ -379,6 +380,7 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
     fontWeight: '600',
+    flexShrink: 0, // Prevent username from being hidden
   },
   verified: {
     fontSize: 14,
