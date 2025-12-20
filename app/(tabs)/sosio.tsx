@@ -532,19 +532,35 @@ export default function SosioScreen() {
 
               {mentionToken && (
                 <View style={styles.tokenInputsContainer}>
-                  <NeonInput
-                    label="Token Name"
-                    placeholder="e.g. SOL, ETH, BONK"
-                    value={tokenName}
-                    onChangeText={setTokenName}
-                  />
+                  <View style={styles.tokenInputWrapper}>
+                    <Text style={styles.tokenInputLabel}>Token Name</Text>
+                    <View style={styles.tokenInputField}>
+                      <TextInput
+                        style={styles.tokenTextInput}
+                        placeholder="e.g. SOL, ETH, BONK"
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={tokenName}
+                        onChangeText={setTokenName}
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                      />
+                    </View>
+                  </View>
 
-                  <NeonInput
-                    label="Token Address (optional)"
-                    placeholder="Enter token contract address"
-                    value={tokenAddress}
-                    onChangeText={setTokenAddress}
-                  />
+                  <View style={styles.tokenInputWrapper}>
+                    <Text style={styles.tokenInputLabel}>Token Address (optional)</Text>
+                    <View style={styles.tokenInputField}>
+                      <TextInput
+                        style={styles.tokenTextInput}
+                        placeholder="Enter token contract address"
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={tokenAddress}
+                        onChangeText={setTokenAddress}
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                      />
+                    </View>
+                  </View>
                 </View>
               )}
 
@@ -887,6 +903,28 @@ const styles = StyleSheet.create({
   },
   tokenInputsContainer: {
     marginBottom: SPACING.m
+  },
+  tokenInputWrapper: {
+    marginBottom: SPACING.m,
+  },
+  tokenInputLabel: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    marginBottom: SPACING.xs,
+  },
+  tokenInputField: {
+    borderWidth: 1,
+    borderColor: COLORS.textSecondary + '50',
+    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.background,
+  },
+  tokenTextInput: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textPrimary,
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.m,
+    fontSize: 16,
   },
   postActions: {
     flexDirection: 'row',
