@@ -53,18 +53,35 @@ export default function UserProfileScreen() {
   const [takeProfit, setTakeProfit] = useState('30');
   const [maxSlippage, setMaxSlippage] = useState('0.5');
   const [exitWithTrader, setExitWithTrader] = useState(false);
+  const [targetUserId, setTargetUserId] = useState<string | null>(null);
 
-  // Fetch user profile from API by username
-  const userProfileQuery = trpc.user.getProfileByUsername.useQuery(
-    { username: username || '' },
+  // Search for user to get their ID (workaround until getProfileByUsername is deployed)
+  const searchUserQuery = trpc.social.searchUsers.useQuery(
+    { query: username || '', limit: 5 },
     { enabled: !!username }
   );
 
-  // Toggle follow mutation - use username directly (works without profile ID)
-  const toggleFollowMutation = trpc.social.toggleFollowByUsername.useMutation({
+  // Update targetUserId when search results come in
+  React.useEffect(() => {
+    if (searchUserQuery.data?.length) {
+      const foundUser = searchUserQuery.data.find((u: any) => u.username === username);
+      if (foundUser) {
+        setTargetUserId(foundUser.id);
+      }
+    }
+  }, [searchUserQuery.data, username]);
+
+  // Fetch user profile from API by username (may not work until Railway deploys)
+  const userProfileQuery = trpc.user.getProfileByUsername.useQuery(
+    { username: username || '' },
+    { enabled: !!username, retry: false }
+  );
+
+  // Toggle follow mutation - use existing toggleFollow with userId
+  const toggleFollowMutation = trpc.social.toggleFollow.useMutation({
     onSuccess: (data: any) => {
       setIsFollowingUser(data.following);
-      userProfileQuery.refetch(); // Refetch to update follower count
+      userProfileQuery.refetch();
     },
     onError: (error: any) => {
       Alert.alert('Error', error.message || 'Failed to follow user');
@@ -72,11 +89,12 @@ export default function UserProfileScreen() {
   });
 
   const handleFollowPress = () => {
-    if (!username) {
-      Alert.alert('Error', 'Cannot follow - no username');
+    const userId = userProfileQuery.data?.id || targetUserId;
+    if (!userId) {
+      Alert.alert('Error', 'User not found. Please try again.');
       return;
     }
-    toggleFollowMutation.mutate({ username });
+    toggleFollowMutation.mutate({ userId });
   };
 
   // Fetch user's posts from API  
