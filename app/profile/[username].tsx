@@ -60,8 +60,8 @@ export default function UserProfileScreen() {
     { enabled: !!username }
   );
 
-  // Toggle follow mutation
-  const toggleFollowMutation = trpc.social.toggleFollow.useMutation({
+  // Toggle follow mutation - use username directly (works without profile ID)
+  const toggleFollowMutation = trpc.social.toggleFollowByUsername.useMutation({
     onSuccess: (data: any) => {
       setIsFollowingUser(data.following);
       userProfileQuery.refetch(); // Refetch to update follower count
@@ -72,11 +72,11 @@ export default function UserProfileScreen() {
   });
 
   const handleFollowPress = () => {
-    if (!userProfileQuery.data?.id) {
-      Alert.alert('Error', 'Cannot follow user - profile not loaded');
+    if (!username) {
+      Alert.alert('Error', 'Cannot follow - no username');
       return;
     }
-    toggleFollowMutation.mutate({ userId: userProfileQuery.data.id });
+    toggleFollowMutation.mutate({ username });
   };
 
   // Fetch user's posts from API  

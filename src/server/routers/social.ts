@@ -212,7 +212,7 @@ export const socialRouter = router({
 
       return {
         comments,
-        nextCursor: comments.length === input.limit 
+        nextCursor: comments.length === input.limit
           ? comments[comments.length - 1]?.createdAt?.toISOString() || null
           : null,
       }
@@ -258,8 +258,8 @@ export const socialRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       return await SocialService.createRepost(
-        ctx.user.id, 
-        input.postId, 
+        ctx.user.id,
+        input.postId,
         input.comment
       );
     }),
@@ -302,7 +302,7 @@ export const socialRouter = router({
     }),
 
   /**
-   * Follow or unfollow a user
+   * Follow or unfollow a user by userId
    */
   toggleFollow: protectedProcedure
     .input(z.object({
@@ -310,6 +310,27 @@ export const socialRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       return await SocialService.toggleFollow(ctx.user.id, input.userId);
+    }),
+
+  /**
+   * Follow or unfollow a user by username (useful when profile not loaded)
+   */
+  toggleFollowByUsername: protectedProcedure
+    .input(z.object({
+      username: z.string().min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Find user by username first
+      const userToFollow = await prisma.user.findFirst({
+        where: { username: input.username },
+        select: { id: true },
+      });
+
+      if (!userToFollow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      return await SocialService.toggleFollow(ctx.user.id, userToFollow.id);
     }),
 
   /**
@@ -349,7 +370,7 @@ export const socialRouter = router({
 
       return {
         followers: followers.map(f => f.follower),
-        nextCursor: followers.length === input.limit 
+        nextCursor: followers.length === input.limit
           ? followers[followers.length - 1]?.createdAt?.toISOString() || null
           : null,
       }
@@ -392,7 +413,7 @@ export const socialRouter = router({
 
       return {
         following: following.map(f => f.following),
-        nextCursor: following.length === input.limit 
+        nextCursor: following.length === input.limit
           ? following[following.length - 1]?.createdAt?.toISOString() || null
           : null,
       }
@@ -529,7 +550,7 @@ export const socialRouter = router({
       // Calculate time threshold
       const now = new Date();
       const threshold = new Date();
-      
+
       switch (input.period) {
         case '1h':
           threshold.setHours(now.getHours() - 1);
@@ -658,7 +679,7 @@ export const socialRouter = router({
 
       return {
         notifications,
-        nextCursor: notifications.length === input.limit 
+        nextCursor: notifications.length === input.limit
           ? notifications[notifications.length - 1]?.createdAt?.toISOString() || null
           : null,
       }
