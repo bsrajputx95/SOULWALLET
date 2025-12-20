@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: SPACING.s,
   },
   profileContainer: {
@@ -370,7 +370,6 @@ const styles = StyleSheet.create({
   },
   userInfo: {
     flex: 1,
-    marginLeft: SPACING.s, // Add space between avatar and username
   },
   username: {
     ...FONTS.phantomSemiBold,
