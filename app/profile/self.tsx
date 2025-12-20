@@ -357,8 +357,8 @@ export default function SelfProfileScreen() {
               <TouchableOpacity
                 style={styles.enableButton}
                 onPress={() => {
-                  if (__DEV__) console.log('Enabling VIP:', { price: vipPrice, duration: vipDuration });
                   setShowVipSetup(false);
+                  Alert.alert('Coming Soon', 'VIP Mode feature will be available soon!');
                 }}
               >
                 <Text style={styles.enableButtonText}>Enable VIP Mode</Text>
