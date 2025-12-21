@@ -42,10 +42,10 @@ export class SocialService {
    */
   private static sanitizeContent(content: string): string {
     // Remove any potential XSS
-    return DOMPurify.sanitize(content, { 
+    return DOMPurify.sanitize(content, {
       ALLOWED_TAGS: [],
       ALLOWED_ATTR: [],
-      KEEP_CONTENT: true 
+      KEEP_CONTENT: true
     });
   }
 
@@ -92,15 +92,8 @@ export class SocialService {
         }
       }
 
-      // Validate token mention
+      // Validate token mention - only check address format, symbol is optional
       if (input.mentionedTokenMint) {
-        if (!input.mentionedTokenSymbol) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Token symbol is required when mint address is provided',
-          });
-        }
-
         if (!this.isValidSolanaAddress(input.mentionedTokenMint)) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -197,7 +190,7 @@ export class SocialService {
             where: { followerId: viewerId },
             select: { followingId: true },
           });
-          
+
           where = {
             OR: [
               { userId: viewerId }, // Own posts
