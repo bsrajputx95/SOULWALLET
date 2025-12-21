@@ -214,14 +214,14 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
             ) : (
               <View style={[styles.avatar, styles.defaultAvatar]}>
                 <Text style={styles.avatarText}>
-                  {username.charAt(0).toUpperCase()}
+                  {(username || '?').charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
             <View style={styles.userInfo}>
               <Pressable onPress={(e) => { e.stopPropagation(); handleUsernamePress(); }}>
                 <Text style={styles.username}>
-                  @{username}
+                  @{username || 'unknown'}
                 </Text>
               </Pressable>
               <Text style={styles.timestamp}>{timestamp}</Text>
