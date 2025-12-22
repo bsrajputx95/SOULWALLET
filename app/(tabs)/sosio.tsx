@@ -21,7 +21,6 @@ import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { SocialPost } from '../../components/SocialPost';
 import { NeonButton } from '../../components/NeonButton';
-import { NeonInput } from '../../components/NeonInput';
 import { TokenBagModal } from '../../components/TokenBagModal';
 
 import { useAuth } from '../../hooks/auth-store';
@@ -102,8 +101,6 @@ export default function SosioScreen() {
   const [tokenAddress, setTokenAddress] = useState('');
   const [postVisibility, setPostVisibility] = useState<'public' | 'vip' | 'followers'>('public');
 
-  // Header height for content offset
-  const HEADER_HEIGHT = 60;
   // Tabs smooth hide/show on scroll
   const TABS_HEIGHT = 44;
   const tabsHeight = useRef(new Animated.Value(TABS_HEIGHT)).current;
@@ -196,18 +193,6 @@ export default function SosioScreen() {
       console.error('[Sosio] Failed to create post:', error);
       // Could add an alert here
     }
-  };
-
-
-
-  const formatNumber = (num: number, decimals: number = 2): string => {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    }
-    if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toFixed(decimals);
   };
 
   const handleTabChange = (tab: FeedTab) => {

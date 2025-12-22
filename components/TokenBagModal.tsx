@@ -12,13 +12,11 @@ import {
   TextInput,
 } from 'react-native';
 import { X, ShoppingBag, Settings } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { NeonCard } from './NeonCard';
 import { NeonButton } from './NeonButton';
-import { NeonInput } from './NeonInput';
 import { logger } from '../lib/client-logger';
 import { trpc } from '../lib/trpc';
 

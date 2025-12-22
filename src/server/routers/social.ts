@@ -113,12 +113,13 @@ export const socialRouter = router({
         });
       }
 
-      // Check if viewer has liked/reposted (if authenticated)
+      // Check if viewer has liked/reposted/voted (if authenticated)
       let isLiked = false;
       let isReposted = false;
+      let userVote: boolean | null = null; // true=agree, false=disagree, null=not voted
 
       if (ctx.user) {
-        const [like, repost] = await Promise.all([
+        const [like, repost, vote] = await Promise.all([
           prisma.postLike.findUnique({
             where: {
               userId_postId: {
@@ -135,11 +136,26 @@ export const socialRouter = router({
               },
             },
           }),
+          prisma.postVote.findUnique({
+            where: {
+              userId_postId: {
+                userId: ctx.user.id,
+                postId: input.postId,
+              },
+            },
+          }),
         ]);
 
         isLiked = !!like;
         isReposted = !!repost;
+        userVote = vote ? vote.vote : null;
       }
+
+      // Calculate vote percentage
+      const totalVotes = post.agreeCount + post.disagreeCount;
+      const agreePercentage = totalVotes > 0
+        ? Math.round((post.agreeCount / totalVotes) * 100)
+        : 0;
 
       return {
         ...post,
@@ -148,6 +164,10 @@ export const socialRouter = router({
         likesCount: post._count.likes,
         commentsCount: post._count.comments,
         repostsCount: post._count.reposts,
+        agreeCount: post.agreeCount,
+        disagreeCount: post.disagreeCount,
+        agreePercentage,
+        userVote, // null if not voted, true if agree, false if disagree
         _count: undefined,
       };
     }),

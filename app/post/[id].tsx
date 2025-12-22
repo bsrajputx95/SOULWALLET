@@ -37,8 +37,8 @@ export default function PostDetailScreen() {
   const [isReposted, setIsReposted] = useState(false);
   const { posts } = useSocial();
   const [userVote, setUserVote] = useState<null | 'agree' | 'disagree'>(null);
-  const [agreeCount, setAgreeCount] = useState<number>(80);
-  const [disagreeCount, setDisagreeCount] = useState<number>(20);
+  const [agreeCount, setAgreeCount] = useState<number>(0);
+  const [disagreeCount, setDisagreeCount] = useState<number>(0);
   const [sortMode, setSortMode] = useState<'new' | 'old' | 'liked'>('new');
 
   // Mock tRPC queries for development - using any to bypass type checking
@@ -73,6 +73,19 @@ export default function PostDetailScreen() {
       setNewComment('');
       postQuery.refetch();
       commentsQuery.refetch(); // Also refetch comments
+    },
+  });
+
+  // Vote on post mutation
+  const voteOnPostMutation = trpc.social.voteOnPost.useMutation({
+    onSuccess: (data: { success: boolean; agreeCount: number; disagreeCount: number }) => {
+      setAgreeCount(data.agreeCount);
+      setDisagreeCount(data.disagreeCount);
+    },
+    onError: (error: any) => {
+      console.error('Vote error:', error);
+      // Revert on error
+      setUserVote(null);
     },
   });
 
@@ -152,7 +165,7 @@ export default function PostDetailScreen() {
     disagreeCount: 20,
   } : null);
 
-  // Sync vote counts from server/offline post if available
+  // Sync vote counts and user vote from server
   useEffect(() => {
     if (!post) return;
     if (typeof (post as any)?.agreeCount === 'number') {
@@ -160,6 +173,14 @@ export default function PostDetailScreen() {
     }
     if (typeof (post as any)?.disagreeCount === 'number') {
       setDisagreeCount((post as any).disagreeCount);
+    }
+    // Sync user's existing vote from API
+    if ((post as any)?.userVote === true) {
+      setUserVote('agree');
+    } else if ((post as any)?.userVote === false) {
+      setUserVote('disagree');
+    } else {
+      setUserVote(null);
     }
   }, [post]);
 
@@ -214,21 +235,22 @@ export default function PostDetailScreen() {
   const disagreePercent = 100 - agreePercent;
 
   const handleVote = (choice: 'agree' | 'disagree') => {
-    setUserVote(prev => {
-      if (prev === choice) return prev;
-      if (prev === null) {
-        if (choice === 'agree') setAgreeCount(c => c + 1);
-        else setDisagreeCount(c => c + 1);
-      } else {
-        if (choice === 'agree') {
-          setAgreeCount(c => c + 1);
-          setDisagreeCount(c => Math.max(c - 1, 0));
-        } else {
-          setDisagreeCount(c => c + 1);
-          setAgreeCount(c => Math.max(c - 1, 0));
-        }
-      }
-      return choice;
+    // Already voted - no changes allowed (one vote per user)
+    if (userVote !== null) return;
+    if (!id) return;
+
+    // Optimistic update
+    setUserVote(choice);
+    if (choice === 'agree') {
+      setAgreeCount(c => c + 1);
+    } else {
+      setDisagreeCount(c => c + 1);
+    }
+
+    // Call API
+    voteOnPostMutation.mutate({
+      postId: id,
+      vote: choice === 'agree',
     });
   };
 
