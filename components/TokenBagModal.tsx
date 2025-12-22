@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
+  Alert,
 } from 'react-native';
 import { X, ShoppingBag, Settings } from 'lucide-react-native';
 
@@ -19,6 +20,10 @@ import { NeonCard } from './NeonCard';
 import { NeonButton } from './NeonButton';
 import { logger } from '../lib/client-logger';
 import { trpc } from '../lib/trpc';
+import { useSolanaWallet } from '../hooks/solana-wallet-store';
+
+// USDC mint address on Solana
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 interface Token {
   symbol: string;
@@ -44,6 +49,10 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [buyAmount, setBuyAmount] = useState<string>('');
   const [slippage, setSlippage] = useState<number>(0.5);
+  const [isSelling, setIsSelling] = useState(false);
+
+  // Get wallet for swap execution
+  const { executeSwap, publicKey } = useSolanaWallet();
 
   // Fetch persisted settings from API
   const settingsQuery = trpc.user.getIBuySettings.useQuery(undefined, {
@@ -63,10 +72,10 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       // Show success message with profit info
       const profitText = data.profit >= 0 ? `+$${data.profit.toFixed(2)}` : `-$${Math.abs(data.profit).toFixed(2)}`;
       const feeText = data.creatorFee > 0 ? `\n5% creator fee: $${data.creatorFee.toFixed(2)} → @${data.creatorUsername}` : '';
-      alert(`Sold! ${profitText}${feeText}`);
+      Alert.alert('Sold!', `${profitText}${feeText}`);
     },
     onError: (error: any) => {
-      alert(`Sell failed: ${error.message}`);
+      Alert.alert('Sell Failed', error.message);
     },
   });
 
@@ -122,25 +131,59 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     }
   };
 
-  // Sell a specific token - finds the first open purchase and sells it
-  const handleSell = (token: Token, percentage: number) => {
-    // Find open purchases for this token
-    const tokenPurchases = openPurchases.filter((p: any) => p.tokenMint === token.address);
-    if (tokenPurchases.length === 0) {
-      alert('No open positions to sell');
+  // Sell a specific token - executes real Jupiter swap
+  const handleSell = async (token: Token, percentage: number) => {
+    if (!publicKey) {
+      Alert.alert('Wallet Not Connected', 'Please connect your wallet first.');
       return;
     }
 
-    // For now, sell the first purchase (100% of that position)
-    // In production, you'd do a Jupiter swap here first
-    const purchase = tokenPurchases[0];
-    const simulatedSellPrice = purchase.priceInUsdc * (1 + (Math.random() * 0.4 - 0.1)); // Simulate +/- price change
+    // Find open purchases for this token
+    const tokenPurchases = openPurchases.filter((p: any) => p.tokenMint === token.address);
+    if (tokenPurchases.length === 0) {
+      Alert.alert('No Position', 'No open positions to sell.');
+      return;
+    }
 
-    sellMutation.mutate({
-      purchaseId: purchase.id,
-      sellAmountUsdc: simulatedSellPrice * (percentage / 100),
-      sellTxSig: `sim_${Date.now()}`, // In production, this comes from Jupiter swap
-    });
+    const purchase = tokenPurchases[0];
+    const sellAmount = Math.floor(purchase.amountBought * (percentage / 100));
+
+    if (sellAmount <= 0) {
+      Alert.alert('Invalid Amount', 'Sell amount too small.');
+      return;
+    }
+
+    setIsSelling(true);
+
+    try {
+      // Execute real swap: Token → USDC via Jupiter
+      const result = await executeSwap({
+        inputMint: token.address,
+        outputMint: USDC_MINT,
+        amount: sellAmount,
+        slippageBps: Math.round(slippage * 100),
+      });
+
+      if (!result?.signature) {
+        throw new Error('Swap failed - no transaction signature');
+      }
+
+      // Estimate USDC received (in production, parse from tx result)
+      // For now, use proportional calculation based on original buy price
+      const sellAmountUsdc = (purchase.priceInUsdc * percentage) / 100;
+
+      // Record the sell with API
+      sellMutation.mutate({
+        purchaseId: purchase.id,
+        sellAmountUsdc,
+        sellTxSig: result.signature,
+      });
+    } catch (error: any) {
+      logger.error('Sell swap failed:', error);
+      Alert.alert('Swap Failed', error.message || 'Failed to execute sell swap');
+    } finally {
+      setIsSelling(false);
+    }
   };
 
   const handleBuyMore = (token: Token) => {
