@@ -117,9 +117,9 @@ export default function PostDetailScreen() {
 
   const handleShare = async () => {
     if (!id) return;
-    const postLink = `post:${id}`;
+    const postLink = `soulwallet/post/${id}`;
     await Clipboard.setStringAsync(postLink);
-    Alert.alert('Link Copied!', `Share this link: ${postLink}\n\nPaste it in search or a post to share.`);
+    Alert.alert('Link Copied!', `Share this link:\n\n${postLink}\n\nPaste it in search or a post to share.`);
   };
 
   const formatContent = (text: string) => {
@@ -142,18 +142,21 @@ export default function PostDetailScreen() {
             {word}{' '}
           </Text>
         );
-      } else if (word.startsWith('post:')) {
-        // Clickable post link
-        const postId = word.replace('post:', '');
-        return (
-          <Text
-            key={index}
-            style={styles.postLink}
-            onPress={() => router.push(`/post/${postId}`)}
-          >
-            {word}{' '}
-          </Text>
-        );
+      } else if (word.includes('soulwallet/post/')) {
+        // Clickable post link - extract postId from soulwallet/post/ID format
+        const postIdMatch = word.match(/soulwallet\/post\/([a-zA-Z0-9_-]+)/);
+        if (postIdMatch) {
+          const postId = postIdMatch[1];
+          return (
+            <Text
+              key={index}
+              style={styles.postLink}
+              onPress={() => router.push(`/post/${postId}`)}
+            >
+              {word}{' '}
+            </Text>
+          );
+        }
       }
       return word + ' ';
     });

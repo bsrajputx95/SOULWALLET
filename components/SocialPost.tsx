@@ -170,7 +170,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   };
 
   const formattedContent = useMemo(() => {
-    // Format hashtags, mentions, and tokens
+    // Format hashtags, mentions, tokens, and post links
     return content.split(' ').map((word, index) => {
       if (word.startsWith('#')) {
         return (
@@ -194,10 +194,25 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
             {word}{' '}
           </Text>
         );
+      } else if (word.includes('soulwallet/post/')) {
+        // Clickable post link
+        const postIdMatch = word.match(/soulwallet\/post\/([a-zA-Z0-9_-]+)/);
+        if (postIdMatch) {
+          const postId = postIdMatch[1];
+          return (
+            <Text
+              key={index}
+              style={styles.postLink}
+              onPress={() => router.push(`/post/${postId}`)}
+            >
+              {word}{' '}
+            </Text>
+          );
+        }
       }
       return word + ' ';
     });
-  }, [content, handleTokenPress]);
+  }, [content, handleTokenPress, router]);
 
   return (
     <Pressable
@@ -418,6 +433,10 @@ const styles = StyleSheet.create({
   },
   token: {
     color: COLORS.success,
+  },
+  postLink: {
+    color: COLORS.solana,
+    textDecorationLine: 'underline',
   },
   actionsContainer: {
     flexDirection: 'row',

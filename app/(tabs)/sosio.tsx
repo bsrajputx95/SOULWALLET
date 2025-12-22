@@ -55,9 +55,9 @@ export default function SosioScreen() {
     { enabled: cleanedSearchQuery.length >= 2 }
   );
 
-  // Detect post:id links in search and navigate directly
+  // Detect soulwallet/post/id links in search and navigate directly
   useEffect(() => {
-    const postLinkMatch = searchQuery.match(/^post:([a-zA-Z0-9_-]+)$/);
+    const postLinkMatch = searchQuery.match(/soulwallet\/post\/([a-zA-Z0-9_-]+)/);
     if (postLinkMatch) {
       const postId = postLinkMatch[1];
       setSearchQuery(''); // Clear search
