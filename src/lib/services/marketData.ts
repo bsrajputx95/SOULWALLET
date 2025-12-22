@@ -63,7 +63,7 @@ class MarketDataService {
         'SOL', 'BONK', 'WIF', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY',
         'ORCA', 'STEP', 'SAMO', 'FIDA', 'MNGO', 'COPE'
       ];
-      
+
       const results = await Promise.all(
         searchTerms.map(async (token) => {
           try {
@@ -150,7 +150,7 @@ class MarketDataService {
     try {
       // Search for popular Solana ecosystem tokens
       const popularTokens = ['SOL', 'USDC', 'BONK', 'WIF', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY'];
-      
+
       const results = await Promise.all(
         popularTokens.map(async (token) => {
           try {
@@ -182,6 +182,61 @@ class MarketDataService {
     } catch (error) {
       // Fallback to simple solana search
       return this.search('solana');
+    }
+  }
+
+  /**
+   * Get OHLCV (price history) data for a token pair
+   * Uses DexScreener's undocumented chart API
+   */
+  async getOHLCV(pairAddress: string, timeframe: '5m' | '15m' | '1h' | '4h' | '1d' = '1h') {
+    const key = `ohlcv:${pairAddress}:${timeframe}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    try {
+      // DexScreener uses specific resolution values
+      const resolutionMap: Record<string, string> = {
+        '5m': '5',
+        '15m': '15',
+        '1h': '60',
+        '4h': '240',
+        '1d': '1440'
+      };
+      const resolution = resolutionMap[timeframe] || '60';
+
+      // Cache buster for real-time data
+      const now = Math.floor(Date.now() / 1000);
+
+      // DexScreener chart API
+      const url = `https://io.dexscreener.com/dex/chart/amm/v3/solana/${pairAddress}?res=${resolution}&cb=${Math.floor(now / 60)}`;
+
+      const { data } = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'SoulWallet/1.0'
+        }
+      });
+
+      // Parse response - DexScreener returns bars in specific format
+      const bars = data?.bars || [];
+      const ohlcv = bars.map((bar: any) => ({
+        time: bar.timestamp || bar.t,
+        open: parseFloat(bar.open || bar.o || '0'),
+        high: parseFloat(bar.high || bar.h || '0'),
+        low: parseFloat(bar.low || bar.l || '0'),
+        close: parseFloat(bar.close || bar.c || '0'),
+        volume: parseFloat(bar.volume || bar.v || '0'),
+      })).filter((b: any) => b.time && b.close > 0);
+
+      // Cache for 1 minute for real-time feel
+      this.cache.set(key, ohlcv, 60);
+      return ohlcv;
+    } catch (error) {
+      console.error('OHLCV fetch error:', error);
+      // Return empty array on error
+      return [];
     }
   }
 }

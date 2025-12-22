@@ -189,6 +189,7 @@
     "react-native-screens": "~4.16.0",
     "react-native-share": "^12.2.0",
     "react-native-svg": "15.12.1",
+    "react-native-svg-charts": "^5.4.0",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.15.0",

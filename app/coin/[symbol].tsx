@@ -26,6 +26,7 @@ import {
   Activity,
   Shield,
 } from 'lucide-react-native';
+import { LineChart, Grid, YAxis, XAxis } from 'react-native-svg-charts';
 import { COLORS } from '../../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
@@ -34,7 +35,9 @@ import { GlowingText } from '../../components/GlowingText';
 import { trpc } from '../../lib/trpc';
 
 type Timeframe = '1h' | '1d' | '1w' | '1m' | '1y';
+type ChartTimeframe = '5m' | '15m' | '1h' | '4h' | '1d';
 const TF_ORDER: Timeframe[] = ['1h', '1d', '1w', '1m', '1y'];
+const CHART_TIMEFRAMES: ChartTimeframe[] = ['5m', '15m', '1h', '4h', '1d'];
 
 
 
@@ -166,8 +169,37 @@ export default function CoinDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
   const [sentimentTimeframe, setSentimentTimeframe] = useState<'1h' | '1d' | '1w' | '1m' | '1y'>('1d');
+  const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('1h');
   const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 640;
+
+  // Fetch price history for chart
+  const pairAddress = apiData?.pairAddress || '';
+  const {
+    data: priceHistoryData,
+    isLoading: isLoadingChart,
+    refetch: refetchChart,
+  } = trpc.market.getPriceHistory.useQuery(
+    { pairAddress, timeframe: chartTimeframe },
+    {
+      enabled: !!pairAddress && activeTab === 'chart',
+      refetchInterval: 60000, // Refresh every minute
+      retry: 1,
+    }
+  );
+
+  // Extract close prices for line chart
+  const chartData = useMemo(() => {
+    if (!priceHistoryData?.data || priceHistoryData.data.length === 0) {
+      // Generate mock data if no real data available
+      return Array.from({ length: 50 }, (_, i) => {
+        const base = coinData?.price || 100;
+        const variance = base * 0.05;
+        return base + (Math.random() - 0.5) * variance * 2;
+      });
+    }
+    return priceHistoryData.data.map((d: any) => d.close);
+  }, [priceHistoryData, coinData?.price]);
 
   const getMockSentiment = useCallback((tf: '1h' | '1d' | '1w' | '1m' | '1y') => {
     // Simple deterministic mock based on timeframe for consistent UI
@@ -695,10 +727,62 @@ export default function CoinDetailsScreen() {
         {/* Tab Content */}
         {activeTab === 'chart' && (
           <NeonCard style={styles.chartCard}>
-            <View style={styles.chartPlaceholder}>
-              <Activity color={COLORS.solana} size={48} />
-              <Text style={styles.chartPlaceholderText}>TradingView Chart</Text>
-              <Text style={styles.chartSubtext}>Real-time price chart will be integrated here</Text>
+            {/* Chart Timeframe Selector */}
+            <View style={styles.chartTimeframeRow}>
+              {CHART_TIMEFRAMES.map((tf) => (
+                <TouchableOpacity
+                  key={tf}
+                  style={[
+                    styles.chartTimeframePill,
+                    chartTimeframe === tf && styles.chartTimeframePillActive,
+                  ]}
+                  onPress={() => setChartTimeframe(tf)}
+                >
+                  <Text
+                    style={[
+                      styles.chartTimeframeText,
+                      chartTimeframe === tf && styles.chartTimeframeTextActive,
+                    ]}
+                  >
+                    {tf}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Price Chart */}
+            {isLoadingChart ? (
+              <View style={styles.chartLoading}>
+                <ActivityIndicator size="large" color={COLORS.solana} />
+                <Text style={styles.chartLoadingText}>Loading chart...</Text>
+              </View>
+            ) : (
+              <View style={styles.chartContainer}>
+                <View style={{ height: 200, flexDirection: 'row' }}>
+                  <YAxis
+                    data={chartData}
+                    contentInset={{ top: 20, bottom: 20 }}
+                    svg={{ fill: COLORS.textSecondary, fontSize: 10 }}
+                    numberOfTicks={5}
+                    formatLabel={(value: number) => `$${value.toFixed(value < 1 ? 4 : 2)}`}
+                  />
+                  <LineChart
+                    style={{ flex: 1, marginLeft: 10 }}
+                    data={chartData}
+                    svg={{ stroke: COLORS.solana, strokeWidth: 2 }}
+                    contentInset={{ top: 20, bottom: 20 }}
+                  >
+                    <Grid svg={{ stroke: COLORS.cardBackground }} />
+                  </LineChart>
+                </View>
+              </View>
+            )}
+
+            {/* Chart Info */}
+            <View style={styles.chartInfo}>
+              <Text style={styles.chartInfoText}>
+                {priceHistoryData?.data?.length || 0} data points • {chartTimeframe} candles
+              </Text>
             </View>
           </NeonCard>
         )}
@@ -1261,25 +1345,56 @@ const styles = StyleSheet.create({
   chartCard: {
     margin: SPACING.m,
     marginTop: 0,
-    height: 300,
+    minHeight: 320,
   },
-  chartPlaceholder: {
-    flex: 1,
+  chartTimeframeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    marginBottom: SPACING.m,
+  },
+  chartTimeframePill: {
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.medium,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border + '40',
+  },
+  chartTimeframePillActive: {
+    backgroundColor: COLORS.solana + '20',
+    borderColor: COLORS.solana,
+  },
+  chartTimeframeText: {
+    ...FONTS.phantomMedium,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  chartTimeframeTextActive: {
+    color: COLORS.solana,
+  },
+  chartLoading: {
+    height: 200,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  chartPlaceholderText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    marginTop: SPACING.m,
-  },
-  chartSubtext: {
+  chartLoadingText: {
     ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
     fontSize: 14,
+    color: COLORS.textSecondary,
     marginTop: SPACING.s,
-    textAlign: 'center',
+  },
+  chartContainer: {
+    paddingRight: SPACING.s,
+  },
+  chartInfo: {
+    marginTop: SPACING.s,
+    alignItems: 'center',
+  },
+  chartInfoText: {
+    ...FONTS.phantomRegular,
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
   tradesCard: {
     margin: SPACING.m,

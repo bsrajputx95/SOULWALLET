@@ -17,7 +17,7 @@ export const marketRouter = router({
 
   // Get detailed token info for coin detail page
   getTokenDetails: protectedProcedure
-    .input(z.object({ 
+    .input(z.object({
       symbol: z.string().min(1).max(20),
       address: z.string().optional(),
     }))
@@ -25,11 +25,11 @@ export const marketRouter = router({
       try {
         // Search for token by symbol
         const searchResult = await marketData.search(input.symbol);
-        
+
         if (!searchResult.pairs || searchResult.pairs.length === 0) {
-          throw new TRPCError({ 
-            code: 'NOT_FOUND', 
-            message: 'Token not found' 
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Token not found'
           });
         }
 
@@ -37,11 +37,11 @@ export const marketRouter = router({
         const solanaPairs = (searchResult.pairs as any[]).filter(
           (p: any) => p.chainId === 'solana'
         );
-        
-        const pair = solanaPairs.length > 0 
-          ? solanaPairs.sort((a: any, b: any) => 
-              parseFloat(b.liquidity?.usd || '0') - parseFloat(a.liquidity?.usd || '0')
-            )[0]
+
+        const pair = solanaPairs.length > 0
+          ? solanaPairs.sort((a: any, b: any) =>
+            parseFloat(b.liquidity?.usd || '0') - parseFloat(a.liquidity?.usd || '0')
+          )[0]
           : searchResult.pairs[0];
 
         return {
@@ -51,39 +51,39 @@ export const marketRouter = router({
           name: pair.baseToken?.name || 'Unknown',
           decimals: pair.baseToken?.decimals || 9,
           logo: pair.info?.imageUrl || null,
-          
+
           // Price Data
           price: parseFloat(pair.priceUsd || '0'),
           priceChange1h: parseFloat(pair.priceChange?.h1 || '0'),
           priceChange24h: parseFloat(pair.priceChange?.h24 || '0'),
           priceChange7d: parseFloat(pair.priceChange?.d7 || '0'),
-          
+
           // Market Data
           marketCap: parseFloat(pair.marketCap || '0'),
           fdv: parseFloat(pair.fdv || '0'),
           volume24h: parseFloat(pair.volume?.h24 || '0'),
           liquidity: parseFloat(pair.liquidity?.usd || '0'),
-          
+
           // Transaction Data
           txns24h: {
             buys: pair.txns?.h24?.buys || 0,
             sells: pair.txns?.h24?.sells || 0,
             total: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
           },
-          
+
           // Holders (not available from DexScreener, would need separate API)
           holders: 0,
-          
+
           // Metadata
           website: pair.info?.websites?.[0] || null,
           twitter: pair.info?.socials?.find((s: any) => s.type === 'twitter')?.url || null,
           telegram: pair.info?.socials?.find((s: any) => s.type === 'telegram')?.url || null,
           description: pair.info?.description || null,
-          
+
           // Verification
           verified: pair.info?.verified || false,
-          pairAge: pair.pairCreatedAt 
-            ? Math.floor((Date.now() - pair.pairCreatedAt) / 3600000) 
+          pairAge: pair.pairCreatedAt
+            ? Math.floor((Date.now() - pair.pairCreatedAt) / 3600000)
             : null,
           pairAddress: pair.pairAddress,
           dexId: pair.dexId,
@@ -91,9 +91,9 @@ export const marketRouter = router({
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
-        throw new TRPCError({ 
-          code: 'INTERNAL_SERVER_ERROR', 
-          message: 'Failed to fetch token details' 
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch token details'
         });
       }
     }),
@@ -134,6 +134,28 @@ export const marketRouter = router({
         return await marketData.getSoulMarket();
       } catch (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch SoulMarket tokens' });
+      }
+    }),
+
+  // Get price history (OHLCV) for charting
+  getPriceHistory: protectedProcedure
+    .input(z.object({
+      pairAddress: z.string().min(10),
+      timeframe: z.enum(['5m', '15m', '1h', '4h', '1d']).default('1h'),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const ohlcv = await marketData.getOHLCV(input.pairAddress, input.timeframe);
+        return {
+          data: ohlcv,
+          timeframe: input.timeframe,
+          pairAddress: input.pairAddress,
+        };
+      } catch (error) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch price history'
+        });
       }
     }),
 });
