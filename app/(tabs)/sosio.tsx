@@ -37,6 +37,8 @@ export default function SosioScreen() {
   const { posts: allPosts, followedUsers } = useSocial();
   const profileQuery = trpc.user.getProfile.useQuery(undefined)
   const ibuyMutation = trpc.social.ibuyToken.useMutation()
+  const ibuySettingsQuery = trpc.user.getIBuySettings.useQuery()
+  const recordPurchaseMutation = trpc.social.recordIBuyPurchase.useMutation()
   const { executeSwap } = useSolanaWallet()
   const [activeFeed, setActiveFeed] = useState<'all' | 'following' | 'vip'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -418,8 +420,22 @@ export default function SosioScreen() {
                 if (!post.mentionedTokenMint) return
                 try {
                   const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint: post.mentionedTokenMint })
-                  await executeSwap(res.swapTransaction)
-                } catch (e: any) { }
+                  const txSig = await executeSwap(res.swapTransaction)
+                  // Record the purchase after successful swap
+                  if (txSig) {
+                    await recordPurchaseMutation.mutateAsync({
+                      postId: post.id,
+                      tokenMint: post.mentionedTokenMint,
+                      tokenSymbol: post.mentionedToken,
+                      tokenName: post.mentionedToken,
+                      amountBought: 0, // Will be updated from tx result
+                      priceInUsdc: ibuySettingsQuery.data?.buyAmount || 10,
+                      transactionSig: txSig,
+                    })
+                  }
+                } catch (e: any) {
+                  console.error('iBuy error:', e)
+                }
               }}
             />
           ))

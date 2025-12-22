@@ -747,4 +747,64 @@ export const userRouter = router({
         });
       }
     }),
+
+  /**
+   * Get user's iBuy settings (buy amount, slippage)
+   */
+  getIBuySettings: protectedProcedure
+    .query(async ({ ctx }) => {
+      try {
+        const settings = await prisma.iBuySettings.findUnique({
+          where: { userId: ctx.user.id },
+        });
+
+        // Return defaults if no settings exist
+        return {
+          buyAmount: settings?.buyAmount ?? 10,
+          slippage: settings?.slippage ?? 0.5,
+        };
+      } catch (error) {
+        logger.error('Get iBuy settings error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to get iBuy settings',
+        });
+      }
+    }),
+
+  /**
+   * Update user's iBuy settings
+   */
+  updateIBuySettings: protectedProcedure
+    .input(z.object({
+      buyAmount: z.number().positive().max(10000).optional(),
+      slippage: z.number().min(0.1).max(50).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const settings = await prisma.iBuySettings.upsert({
+          where: { userId: ctx.user.id },
+          create: {
+            userId: ctx.user.id,
+            buyAmount: input.buyAmount ?? 10,
+            slippage: input.slippage ?? 0.5,
+          },
+          update: {
+            ...(input.buyAmount !== undefined && { buyAmount: input.buyAmount }),
+            ...(input.slippage !== undefined && { slippage: input.slippage }),
+          },
+        });
+
+        return {
+          buyAmount: settings.buyAmount,
+          slippage: settings.slippage,
+        };
+      } catch (error) {
+        logger.error('Update iBuy settings error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to update iBuy settings',
+        });
+      }
+    }),
 });

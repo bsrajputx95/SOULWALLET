@@ -832,4 +832,153 @@ export const socialRouter = router({
       }
       return { success: true, swapTransaction: swapData.swapTransaction }
     }),
+
+  /**
+   * Vote on a post (agree/disagree) - one vote per user per post
+   */
+  voteOnPost: protectedProcedure
+    .input(z.object({
+      postId: z.string(),
+      vote: z.boolean(), // true = agree, false = disagree
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        // Check if user already voted
+        const existingVote = await prisma.postVote.findUnique({
+          where: {
+            userId_postId: {
+              userId: ctx.user.id,
+              postId: input.postId,
+            },
+          },
+        });
+
+        if (existingVote) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'You have already voted on this post',
+          });
+        }
+
+        // Create vote and update counts atomically
+        await prisma.$transaction([
+          prisma.postVote.create({
+            data: {
+              userId: ctx.user.id,
+              postId: input.postId,
+              vote: input.vote,
+            },
+          }),
+          prisma.post.update({
+            where: { id: input.postId },
+            data: input.vote
+              ? { agreeCount: { increment: 1 } }
+              : { disagreeCount: { increment: 1 } },
+          }),
+        ]);
+
+        // Get updated counts
+        const post = await prisma.post.findUnique({
+          where: { id: input.postId },
+          select: { agreeCount: true, disagreeCount: true },
+        });
+
+        const total = (post?.agreeCount || 0) + (post?.disagreeCount || 0);
+        const agreePercentage = total > 0
+          ? Math.round(((post?.agreeCount || 0) / total) * 100)
+          : 0;
+
+        return {
+          success: true,
+          agreeCount: post?.agreeCount || 0,
+          disagreeCount: post?.disagreeCount || 0,
+          agreePercentage,
+        };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        logger.error('Vote on post error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to vote on post',
+        });
+      }
+    }),
+
+  /**
+   * Get user's iBuy purchases
+   */
+  getIBuyPurchases: protectedProcedure
+    .query(async ({ ctx }) => {
+      try {
+        const purchases = await prisma.iBuyPurchase.findMany({
+          where: { userId: ctx.user.id },
+          orderBy: { createdAt: 'desc' },
+          include: {
+            post: {
+              select: {
+                id: true,
+                content: true,
+                mentionedTokenSymbol: true,
+              },
+            },
+          },
+        });
+
+        return purchases.map(p => ({
+          id: p.id,
+          tokenMint: p.tokenMint,
+          tokenSymbol: p.tokenSymbol,
+          tokenName: p.tokenName,
+          amountBought: p.amountBought,
+          priceInUsdc: p.priceInUsdc,
+          transactionSig: p.transactionSig,
+          createdAt: p.createdAt,
+          postId: p.postId,
+        }));
+      } catch (error) {
+        logger.error('Get iBuy purchases error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to get iBuy purchases',
+        });
+      }
+    }),
+
+  /**
+   * Record a completed iBuy purchase (called after successful swap)
+   */
+  recordIBuyPurchase: protectedProcedure
+    .input(z.object({
+      postId: z.string(),
+      tokenMint: z.string(),
+      tokenSymbol: z.string().optional(),
+      tokenName: z.string().optional(),
+      amountBought: z.number(),
+      priceInUsdc: z.number(),
+      transactionSig: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const purchase = await prisma.iBuyPurchase.create({
+          data: {
+            userId: ctx.user.id,
+            postId: input.postId,
+            tokenMint: input.tokenMint,
+            tokenSymbol: input.tokenSymbol,
+            tokenName: input.tokenName,
+            amountBought: input.amountBought,
+            priceInUsdc: input.priceInUsdc,
+            transactionSig: input.transactionSig,
+          },
+        });
+
+        return { success: true, purchaseId: purchase.id };
+      } catch (error) {
+        logger.error('Record iBuy purchase error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to record iBuy purchase',
+        });
+      }
+    }),
 });

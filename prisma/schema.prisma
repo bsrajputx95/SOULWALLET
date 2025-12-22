@@ -79,6 +79,9 @@ model User {
   following       Follow[]  @relation("UserFollowers")
   vipSubscribers      VIPSubscription[] @relation("VIPCreator")
   vipSubscriptions    VIPSubscription[] @relation("VIPSubscriber")
+  postVotes           PostVote[]
+  ibuySettings        IBuySettings?
+  ibuyPurchases       IBuyPurchase[]
   
   // Custodial Wallet for copy trading
   custodialWallet CustodialWallet?
@@ -289,10 +292,16 @@ model Post {
   commentsCount Int @default(0)
   repostsCount  Int @default(0)
   
+  // Agree/Disagree voting counts
+  agreeCount    Int @default(0)
+  disagreeCount Int @default(0)
+  
   // Relationships
   likes     PostLike[]
   comments  PostComment[]
   reposts   Repost[]
+  votes     PostVote[]
+  ibuyPurchases IBuyPurchase[]
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -304,6 +313,61 @@ model Post {
   @@index([userId, createdAt(sort: Desc)])
   @@index([mentionedTokenSymbol, createdAt(sort: Desc)])
   @@map("posts")
+}
+
+// Post vote model for agree/disagree
+model PostVote {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  vote      Boolean  // true = agree, false = disagree
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, postId])  // One vote per user per post
+  @@index([postId])
+  @@index([userId])
+  @@map("post_votes")
+}
+
+// iBuy settings model - persists user's buy preferences
+model IBuySettings {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  buyAmount Float    @default(10)   // USDC amount
+  slippage  Float    @default(0.5)  // percentage
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("ibuy_settings")
+}
+
+// iBuy purchase tracking
+model IBuyPurchase {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId          String
+  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  tokenMint       String
+  tokenSymbol     String?
+  tokenName       String?
+  amountBought    Float    // Amount of tokens received
+  priceInUsdc     Float    // USDC spent
+  transactionSig  String   @unique
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([tokenMint])
+  @@map("ibuy_purchases")
 }
 
 enum PostVisibility {

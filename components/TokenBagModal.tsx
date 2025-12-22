@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -20,6 +20,7 @@ import { NeonCard } from './NeonCard';
 import { NeonButton } from './NeonButton';
 import { NeonInput } from './NeonInput';
 import { logger } from '../lib/client-logger';
+import { trpc } from '../lib/trpc';
 
 interface Token {
   symbol: string;
@@ -35,10 +36,6 @@ interface TokenBagModalProps {
   onClose: () => void;
 }
 
-// TODO: Replace with actual API call to get user's iBuy tokens
-// For now, tokens will be empty until user makes iBuy purchases
-const ibuyTokens: Token[] = [];
-
 export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   visible,
   onClose,
@@ -49,13 +46,61 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [buyAmount, setBuyAmount] = useState<string>('');
   const [slippage, setSlippage] = useState<number>(0.5);
-  const [confirmedBuyAmount, setConfirmedBuyAmount] = useState<string>('');
-  const [confirmedSlippage, setConfirmedSlippage] = useState<number>(0.5);
 
-  const applySettings = () => {
-    setConfirmedBuyAmount(buyAmount);
-    setConfirmedSlippage(slippage);
-    setShowSettings(false);
+  // Fetch persisted settings from API
+  const settingsQuery = trpc.user.getIBuySettings.useQuery(undefined, {
+    enabled: visible,
+  });
+  const updateSettingsMutation = trpc.user.updateIBuySettings.useMutation();
+
+  // Fetch iBuy purchases from API
+  const purchasesQuery = trpc.social.getIBuyPurchases.useQuery(undefined, {
+    enabled: visible,
+  });
+
+  // Load settings when query completes
+  useEffect(() => {
+    if (settingsQuery.data) {
+      setBuyAmount(settingsQuery.data.buyAmount.toString());
+      setSlippage(settingsQuery.data.slippage);
+    }
+  }, [settingsQuery.data]);
+
+  // Transform purchases to Token format for display
+  const ibuyTokens: Token[] = React.useMemo(() => {
+    if (!purchasesQuery.data) return [];
+
+    // Group purchases by token and sum amounts
+    const tokenMap = new Map<string, Token>();
+    purchasesQuery.data.forEach((p: { tokenMint: string; tokenSymbol?: string | null; tokenName?: string | null; amountBought: number; priceInUsdc: number }) => {
+      const existing = tokenMap.get(p.tokenMint);
+      if (existing) {
+        existing.balance += p.amountBought;
+        existing.value += p.priceInUsdc;
+      } else {
+        tokenMap.set(p.tokenMint, {
+          symbol: p.tokenSymbol || p.tokenMint.slice(0, 6),
+          name: p.tokenName || 'Unknown Token',
+          balance: p.amountBought,
+          value: p.priceInUsdc,
+          change24h: 0, // TODO: Get live price data
+          address: p.tokenMint,
+        });
+      }
+    });
+    return Array.from(tokenMap.values());
+  }, [purchasesQuery.data]);
+
+  const applySettings = async () => {
+    try {
+      await updateSettingsMutation.mutateAsync({
+        buyAmount: parseFloat(buyAmount) || 10,
+        slippage: slippage,
+      });
+      setShowSettings(false);
+    } catch (error) {
+      logger.error('Failed to save iBuy settings:', error);
+    }
   };
 
   const handleSell = (token: Token, percentage: number) => {
@@ -66,7 +111,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   const handleBuyMore = (token: Token) => {
     // In a real app, this would navigate to buy screen
     logger.debug(
-      `Buying more ${token.symbol} with amount ${confirmedBuyAmount || '(unset)'} USDC and slippage ${confirmedSlippage}%`
+      `Buying more ${token.symbol} with amount ${buyAmount || '(unset)'} USDC and slippage ${slippage}%`
     );
   };
 
