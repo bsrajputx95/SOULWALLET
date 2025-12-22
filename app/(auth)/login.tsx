@@ -66,10 +66,20 @@ export default function LoginNewScreen() {
             } else {
                 setPassword('');
                 setErrorMessage('Invalid credentials');
+                Alert.alert(
+                    'Login Failed',
+                    'Email/username or password is incorrect. Please try again.',
+                    [{ text: 'OK' }]
+                );
             }
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'Login failed';
             setErrorMessage(errorMsg);
+            Alert.alert(
+                'Login Failed',
+                errorMsg,
+                [{ text: 'OK' }]
+            );
         } finally {
             setIsLoading(false);
         }
