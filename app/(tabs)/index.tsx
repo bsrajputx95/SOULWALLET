@@ -32,6 +32,8 @@ import { useWallet } from '../../hooks/wallet-store';
 import { trpc } from '../../lib/trpc';
 import { useSolanaWallet } from '../../hooks/solana-wallet-store';
 import { PublicKey } from '@solana/web3.js';
+import { SendModal } from '../../components/SendModal';
+import { ReceiveModal } from '../../components/ReceiveModal';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -778,14 +780,14 @@ export default function HomeScreen() {
                 icon={<ArrowUp size={isSmallScreen ? 16 : 20} color={COLORS.textPrimary} />}
                 color={COLORS.gradientPurple}
                 style={styles.quickActionButton}
-                onPress={() => router.push('/send-receive?flow=send')}
+                onPress={() => setShowSendModal(true)}
               />
               <QuickActionButton
                 title="RECEIVE"
                 icon={<ArrowDown size={isSmallScreen ? 16 : 20} color={COLORS.textPrimary} />}
                 color={COLORS.gradientPurple}
                 style={styles.quickActionButton}
-                onPress={() => router.push('/send-receive?flow=receive')}
+                onPress={() => setShowReceiveModal(true)}
               />
               <QuickActionButton
                 title="SWAP"
@@ -1409,6 +1411,19 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Send Modal */}
+      <SendModal
+        visible={showSendModal}
+        onClose={() => setShowSendModal(false)}
+        onSuccess={() => refetch()}
+      />
+
+      {/* Receive Modal */}
+      <ReceiveModal
+        visible={showReceiveModal}
+        onClose={() => setShowReceiveModal(false)}
+      />
     </SafeAreaView>
   );
 }
