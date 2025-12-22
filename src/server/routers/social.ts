@@ -947,7 +947,8 @@ export const socialRouter = router({
           tokenName: p.tokenName,
           amountBought: p.amountBought,
           priceInUsdc: p.priceInUsdc,
-          transactionSig: p.transactionSig,
+          buyTxSig: p.buyTxSig,
+          status: p.status,
           createdAt: p.createdAt,
           postId: p.postId,
         }));
