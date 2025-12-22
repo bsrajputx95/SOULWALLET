@@ -445,16 +445,16 @@ export default function UserProfileScreen() {
                   <SocialPost
                     key={post.id}
                     id={post.id}
-                    username={post.username}
-                    profileImage={userProfile.profileImage}
+                    username={post.user?.username || post.username || userProfile.username}
+                    profileImage={post.user?.profileImage || userProfile.profileImage}
                     content={post.content}
                     images={post.images}
-                    comments={post.comments}
-                    reposts={post.reposts}
-                    likes={post.likes}
-                    timestamp={post.timestamp}
-                    mentionedToken={post.mentionedToken}
-                    isVerified={userProfile.isVerified}
+                    comments={post.commentsCount || post.comments || 0}
+                    reposts={post.repostsCount || post.reposts || 0}
+                    likes={post.likesCount || post.likes || 0}
+                    timestamp={post.createdAt ? new Date(post.createdAt).toLocaleString() : post.timestamp}
+                    mentionedToken={post.mentionedTokenSymbol || post.mentionedTokenName || post.mentionedToken}
+                    isVerified={post.user?.isVerified || userProfile.isVerified}
                   />
                 ))
               ) : (

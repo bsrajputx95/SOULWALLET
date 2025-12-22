@@ -73,33 +73,102 @@ export default function SelfProfileScreen() {
 
 
 
-  // TODO: Fetch real posts from API
-  // const postsQuery = trpc.social.getUserPosts.useQuery({ userId: user?.id });
+  // Fetch user's posts from API
+  const userPostsQuery = trpc.social.getFeed.useQuery(
+    { feedType: 'user' as const, targetUserId: profileQuery.data?.id || '', limit: 50 },
+    { enabled: !!profileQuery.data?.id }
+  );
+
+  // Delete post mutation
+  const deletePostMutation = trpc.social.deletePost.useMutation({
+    onSuccess: () => {
+      userPostsQuery.refetch();
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to delete post');
+    },
+  });
+
+  const handleDeletePost = (postId: string) => {
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post?',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes',
+          style: 'destructive',
+          onPress: () => deletePostMutation.mutate({ postId }),
+        },
+      ]
+    );
+  };
+
+  // Filter posts by visibility tab
+  const allPosts = userPostsQuery.data?.posts || [];
+  const getPostsForTab = (tab: 'public' | 'followers' | 'vip') => {
+    return allPosts.filter((post: any) => {
+      const visibility = (post.visibility || 'PUBLIC').toUpperCase();
+      if (tab === 'public') return visibility === 'PUBLIC';
+      if (tab === 'followers') return visibility === 'FOLLOWERS';
+      if (tab === 'vip') return visibility === 'VIP';
+      return false;
+    });
+  };
 
   const renderTabContent = () => {
-    switch (activeTab) {
-      case 'public':
-        return (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No posts yet</Text>
-          </View>
-        );
-      case 'followers':
-        return (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No followers-only posts yet</Text>
-          </View>
-        );
-      case 'vip':
-        return (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No VIP posts yet</Text>
-          </View>
-        );
+    const visiblePosts = getPostsForTab(activeTab);
 
-      default:
-        return null;
+    if (userPostsQuery.isLoading) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>Loading posts...</Text>
+        </View>
+      );
     }
+
+    if (visiblePosts.length === 0) {
+      const messages = {
+        public: 'No posts yet',
+        followers: 'No followers-only posts yet',
+        vip: 'No VIP posts yet',
+      };
+      return (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>{messages[activeTab]}</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View>
+        {visiblePosts.map((post: any) => (
+          <View key={post.id} style={{ position: 'relative' }}>
+            <SocialPost
+              id={post.id}
+              username={post.user?.username || user?.username || 'Unknown'}
+              profileImage={post.user?.profileImage}
+              content={post.content}
+              images={post.images}
+              comments={post.commentsCount || 0}
+              reposts={post.repostsCount || 0}
+              likes={post.likesCount || 0}
+              timestamp={new Date(post.createdAt).toLocaleString()}
+              mentionedToken={post.mentionedTokenSymbol || post.mentionedTokenName}
+              mentionedTokenMint={post.mentionedTokenMint}
+              isVerified={post.user?.isVerified}
+            />
+            {/* Delete button - only in self view */}
+            <TouchableOpacity
+              style={styles.deletePostButton}
+              onPress={() => handleDeletePost(post.id)}
+            >
+              <X size={14} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        ))}
+      </View>
+    );
   };
 
   return (
@@ -863,5 +932,19 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  deletePostButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: COLORS.cardBackground,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    zIndex: 10,
   },
 });

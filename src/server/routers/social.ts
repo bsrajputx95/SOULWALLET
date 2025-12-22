@@ -52,6 +52,35 @@ export const socialRouter = router({
     }),
 
   /**
+   * Delete a post (owner only)
+   */
+  deletePost: protectedProcedure
+    .input(z.object({
+      postId: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Check if post exists and belongs to user
+      const post = await prisma.post.findUnique({
+        where: { id: input.postId },
+        select: { userId: true },
+      });
+
+      if (!post) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Post not found' });
+      }
+
+      if (post.userId !== ctx.user.id) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only delete your own posts' });
+      }
+
+      await prisma.post.delete({
+        where: { id: input.postId },
+      });
+
+      return { success: true };
+    }),
+
+  /**
    * Get feed posts
    */
   getFeed: protectedProcedure
@@ -713,39 +742,6 @@ export const socialRouter = router({
       }
     }),
 
-  /**
-   * Delete a post (owner only)
-   */
-  deletePost: protectedProcedure
-    .input(z.object({
-      postId: z.string(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const post = await prisma.post.findUnique({
-        where: { id: input.postId },
-        select: { userId: true },
-      });
-
-      if (!post) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Post not found',
-        });
-      }
-
-      if (post.userId !== ctx.user.id) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'You can only delete your own posts',
-        });
-      }
-
-      await prisma.post.delete({
-        where: { id: input.postId },
-      });
-
-      return { success: true };
-    }),
 
   /**
    * Report a post
