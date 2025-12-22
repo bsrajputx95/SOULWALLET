@@ -8,10 +8,12 @@ import {
   TextInput,
   Image,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { MessageSquare, Repeat, Heart, Send, X } from 'lucide-react-native';
+import { MessageSquare, Repeat, Heart, Send, X, Share2 } from 'lucide-react-native';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
@@ -113,6 +115,13 @@ export default function PostDetailScreen() {
     }
   };
 
+  const handleShare = async () => {
+    if (!id) return;
+    const postLink = `post:${id}`;
+    await Clipboard.setStringAsync(postLink);
+    Alert.alert('Link Copied!', `Share this link: ${postLink}\n\nPaste it in search or a post to share.`);
+  };
+
   const formatContent = (text: string) => {
     return text.split(' ').map((word, index) => {
       if (word.startsWith('#')) {
@@ -130,6 +139,18 @@ export default function PostDetailScreen() {
       } else if (word.startsWith('$')) {
         return (
           <Text key={index} style={styles.token}>
+            {word}{' '}
+          </Text>
+        );
+      } else if (word.startsWith('post:')) {
+        // Clickable post link
+        const postId = word.replace('post:', '');
+        return (
+          <Text
+            key={index}
+            style={styles.postLink}
+            onPress={() => router.push(`/post/${postId}`)}
+          >
             {word}{' '}
           </Text>
         );
@@ -366,6 +387,10 @@ export default function PostDetailScreen() {
               <MessageSquare size={20} color={COLORS.textSecondary} />
               <Text style={styles.actionCount}>{post.comments}</Text>
             </View>
+
+            <TouchableOpacity style={styles.action} onPress={handleShare}>
+              <Share2 size={20} color={COLORS.textSecondary} />
+            </TouchableOpacity>
           </View>
         </NeonCard>
         {/* Index: Agree / Disagree (moved above comment input) */}
@@ -610,6 +635,10 @@ const styles = StyleSheet.create({
   },
   token: {
     color: COLORS.success,
+  },
+  postLink: {
+    color: COLORS.solana,
+    textDecorationLine: 'underline',
   },
   postActions: {
     flexDirection: 'row',

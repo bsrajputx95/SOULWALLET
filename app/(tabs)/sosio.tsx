@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -55,7 +55,15 @@ export default function SosioScreen() {
     { enabled: cleanedSearchQuery.length >= 2 }
   );
 
-
+  // Detect post:id links in search and navigate directly
+  useEffect(() => {
+    const postLinkMatch = searchQuery.match(/^post:([a-zA-Z0-9_-]+)$/);
+    if (postLinkMatch) {
+      const postId = postLinkMatch[1];
+      setSearchQuery(''); // Clear search
+      router.push(`/post/${postId}`);
+    }
+  }, [searchQuery]);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
