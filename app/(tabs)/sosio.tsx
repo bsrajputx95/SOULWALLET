@@ -40,7 +40,7 @@ export default function SosioScreen() {
   const ibuyMutation = trpc.social.ibuyToken.useMutation()
   const ibuySettingsQuery = trpc.user.getIBuySettings.useQuery()
   const recordPurchaseMutation = trpc.social.recordIBuyPurchase.useMutation()
-  const { executeSwap, publicKey, balance } = useSolanaWallet()
+  const { executeSwap, publicKey, balance, tokenBalances } = useSolanaWallet()
   const [activeFeed, setActiveFeed] = useState<'all' | 'following' | 'vip'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchBar, setShowSearchBar] = useState(false);
@@ -430,12 +430,26 @@ export default function SosioScreen() {
                   return
                 }
 
-                // Check balance (need at least buy amount in SOL)
+                // Check balance - need SOL for gas and USDC/SOL for swap
                 const buyAmount = ibuySettingsQuery.data?.buyAmount || 10
+
+                // Check SOL for transaction fees
                 if ((balance || 0) < 0.01) {
                   Alert.alert(
-                    'Low Balance',
-                    `Your wallet balance is too low. You need at least 0.01 SOL plus ${buyAmount} USDC for iBuy.`,
+                    'Low SOL Balance',
+                    'You need at least 0.01 SOL for transaction fees.',
+                    [{ text: 'OK' }]
+                  )
+                  return
+                }
+
+                // Check USDC balance for the swap amount
+                const usdcToken = tokenBalances?.find((t: { symbol: string }) => t.symbol === 'USDC')
+                const usdcBalance = usdcToken?.uiAmount || 0
+                if (usdcBalance < buyAmount) {
+                  Alert.alert(
+                    'Insufficient USDC',
+                    `Your USDC balance (${usdcBalance.toFixed(2)}) is less than your iBuy amount (${buyAmount} USDC). Please add more USDC or lower your buy amount in settings.`,
                     [{ text: 'OK' }]
                   )
                   return
