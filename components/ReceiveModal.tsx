@@ -153,7 +153,9 @@ const styles = StyleSheet.create({
     overlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        justifyContent: 'flex-end',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
     },
     backdrop: {
         position: 'absolute',
@@ -164,9 +166,10 @@ const styles = StyleSheet.create({
     },
     modalContainer: {
         backgroundColor: COLORS.background,
-        borderTopLeftRadius: BORDER_RADIUS.large,
-        borderTopRightRadius: BORDER_RADIUS.large,
+        borderRadius: BORDER_RADIUS.large,
         paddingBottom: 30,
+        width: '100%',
+        maxWidth: 400,
     },
     header: {
         flexDirection: 'row',
