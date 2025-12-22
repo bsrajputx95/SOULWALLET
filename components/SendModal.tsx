@@ -14,7 +14,8 @@ import {
     FlatList,
     Image,
 } from 'react-native';
-import { X, ChevronDown } from 'lucide-react-native';
+import { X, ChevronDown, QrCode } from 'lucide-react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
@@ -52,6 +53,8 @@ export const SendModal: React.FC<SendModalProps> = ({
     const [isSending, setIsSending] = useState(false);
     const [addressError, setAddressError] = useState('');
     const [amountError, setAmountError] = useState('');
+    const [showScanner, setShowScanner] = useState(false);
+    const [permission, requestPermission] = useCameraPermissions();
 
     const availableTokens = useMemo(() => getAvailableTokens(), [getAvailableTokens]);
 
@@ -106,6 +109,30 @@ export const SendModal: React.FC<SendModalProps> = ({
         }
         setAmountError('');
         return true;
+    };
+
+    // Handle QR scan
+    const handleScanQR = async () => {
+        if (!permission?.granted) {
+            const result = await requestPermission();
+            if (!result.granted) {
+                Alert.alert('Camera Permission', 'Camera access is required to scan QR codes');
+                return;
+            }
+        }
+        setShowScanner(true);
+    };
+
+    // Handle barcode scanned
+    const handleBarcodeScanned = ({ data }: { data: string }) => {
+        setShowScanner(false);
+        // Extract address from QR (could be solana:address or just address)
+        let address = data;
+        if (data.startsWith('solana:')) {
+            address = data.replace('solana:', '').split('?')[0] || data;
+        }
+        setRecipientAddress(address);
+        validateAddress(address);
     };
 
     const handleSend = async () => {
@@ -245,7 +272,13 @@ export const SendModal: React.FC<SendModalProps> = ({
 
                         {/* Recipient Address */}
                         <View style={styles.inputCard}>
-                            <Text style={styles.label}>Recipient Address</Text>
+                            <View style={styles.labelRow}>
+                                <Text style={styles.label}>Recipient Address</Text>
+                                <TouchableOpacity onPress={handleScanQR} style={styles.scanButton}>
+                                    <QrCode size={20} color={COLORS.solana} />
+                                    <Text style={styles.scanButtonText}>Scan</Text>
+                                </TouchableOpacity>
+                            </View>
                             <TextInput
                                 style={[styles.input, styles.addressInput]}
                                 value={recipientAddress}
@@ -327,6 +360,31 @@ export const SendModal: React.FC<SendModalProps> = ({
                             }
                         />
                     </View>
+                </View>
+            </Modal>
+
+            {/* QR Scanner Modal */}
+            <Modal
+                visible={showScanner}
+                animationType="slide"
+                onRequestClose={() => setShowScanner(false)}
+            >
+                <View style={styles.scannerContainer}>
+                    <View style={styles.scannerHeader}>
+                        <Text style={styles.scannerTitle}>Scan QR Code</Text>
+                        <TouchableOpacity onPress={() => setShowScanner(false)}>
+                            <X size={24} color={COLORS.textPrimary} />
+                        </TouchableOpacity>
+                    </View>
+                    <CameraView
+                        style={styles.camera}
+                        facing="back"
+                        barcodeScannerSettings={{
+                            barcodeTypes: ['qr'],
+                        }}
+                        onBarcodeScanned={handleBarcodeScanned}
+                    />
+                    <Text style={styles.scannerHint}>Point at a Solana wallet QR code</Text>
                 </View>
             </Modal>
         </Modal>
@@ -525,6 +583,44 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         textAlign: 'center',
         padding: SPACING.l,
+    },
+    // Scanner styles
+    scanButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.xs,
+    },
+    scanButtonText: {
+        ...FONTS.phantomMedium,
+        fontSize: 12,
+        color: COLORS.solana,
+    },
+    scannerContainer: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+    },
+    scannerHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: SPACING.m,
+        backgroundColor: COLORS.background,
+    },
+    scannerTitle: {
+        ...FONTS.phantomBold,
+        fontSize: 18,
+        color: COLORS.textPrimary,
+    },
+    camera: {
+        flex: 1,
+    },
+    scannerHint: {
+        ...FONTS.phantomRegular,
+        fontSize: 14,
+        color: COLORS.textSecondary,
+        textAlign: 'center',
+        padding: SPACING.l,
+        backgroundColor: COLORS.background,
     },
 });
 
