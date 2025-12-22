@@ -26,7 +26,8 @@ import {
   Activity,
   Shield,
 } from 'lucide-react-native';
-import { LineChart, Grid, YAxis, XAxis } from 'react-native-svg-charts';
+import { CandlestickChart } from 'react-native-wagmi-charts';
+import { WebView } from 'react-native-webview';
 import { COLORS } from '../../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
@@ -188,18 +189,38 @@ export default function CoinDetailsScreen() {
     }
   );
 
-  // Extract close prices for line chart
+  // Convert data to candlestick format
   const chartData = useMemo(() => {
     if (!priceHistoryData?.data || priceHistoryData.data.length === 0) {
-      // Generate mock data if no real data available
+      // Generate mock candlestick data if no real data
+      const now = Date.now();
       return Array.from({ length: 50 }, (_, i) => {
         const base = coinData?.price || 100;
-        const variance = base * 0.05;
-        return base + (Math.random() - 0.5) * variance * 2;
+        const variance = base * 0.03;
+        const open = base + (Math.random() - 0.5) * variance;
+        const close = base + (Math.random() - 0.5) * variance;
+        const high = Math.max(open, close) + Math.random() * variance * 0.5;
+        const low = Math.min(open, close) - Math.random() * variance * 0.5;
+        return {
+          timestamp: now - (50 - i) * 60000,
+          open,
+          high,
+          low,
+          close,
+        };
       });
     }
-    return priceHistoryData.data.map((d: any) => d.close);
+    return priceHistoryData.data.map((d: any) => ({
+      timestamp: d.time * 1000, // Convert to milliseconds
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }));
   }, [priceHistoryData, coinData?.price]);
+
+  // TradingView modal state
+  const [showTradingView, setShowTradingView] = useState(false);
 
   const getMockSentiment = useCallback((tf: '1h' | '1d' | '1w' | '1m' | '1y') => {
     // Simple deterministic mock based on timeframe for consistent UI
@@ -758,34 +779,74 @@ export default function CoinDetailsScreen() {
               </View>
             ) : (
               <View style={styles.chartContainer}>
-                <View style={{ height: 200, flexDirection: 'row' }}>
-                  <YAxis
-                    data={chartData}
-                    contentInset={{ top: 20, bottom: 20 }}
-                    svg={{ fill: COLORS.textSecondary, fontSize: 10 }}
-                    numberOfTicks={5}
-                    formatLabel={(value: number) => `$${value.toFixed(value < 1 ? 4 : 2)}`}
+                <CandlestickChart.Provider data={chartData}>
+                  <CandlestickChart height={200}>
+                    <CandlestickChart.Candles
+                      positiveColor={COLORS.success}
+                      negativeColor={COLORS.error}
+                    />
+                    <CandlestickChart.Crosshair>
+                      <CandlestickChart.Tooltip />
+                    </CandlestickChart.Crosshair>
+                  </CandlestickChart>
+                  <CandlestickChart.PriceText
+                    style={styles.chartPriceText}
+                    format={({ value }: { value: string }) => {
+                      const num = parseFloat(value);
+                      return `$${num < 1 ? num.toFixed(6) : num.toFixed(2)}`;
+                    }}
                   />
-                  <LineChart
-                    style={{ flex: 1, marginLeft: 10 }}
-                    data={chartData}
-                    svg={{ stroke: COLORS.solana, strokeWidth: 2 }}
-                    contentInset={{ top: 20, bottom: 20 }}
-                  >
-                    <Grid svg={{ stroke: COLORS.cardBackground }} />
-                  </LineChart>
-                </View>
+                </CandlestickChart.Provider>
               </View>
             )}
 
-            {/* Chart Info */}
+            {/* Chart Info & TradingView Button */}
             <View style={styles.chartInfo}>
               <Text style={styles.chartInfoText}>
-                {priceHistoryData?.data?.length || 0} data points • {chartTimeframe} candles
+                {priceHistoryData?.data?.length || 0} candles • {chartTimeframe}
               </Text>
+              <TouchableOpacity
+                style={styles.tradingViewButton}
+                onPress={() => setShowTradingView(true)}
+              >
+                <Activity size={14} color={COLORS.solana} />
+                <Text style={styles.tradingViewButtonText}>TradingView</Text>
+              </TouchableOpacity>
             </View>
           </NeonCard>
         )}
+
+        {/* TradingView WebView Modal */}
+        <Modal
+          visible={showTradingView}
+          animationType="slide"
+          onRequestClose={() => setShowTradingView(false)}
+        >
+          <View style={styles.tradingViewContainer}>
+            <View style={styles.tradingViewHeader}>
+              <Text style={styles.tradingViewTitle}>
+                {coinData?.symbol} Chart
+              </Text>
+              <TouchableOpacity onPress={() => setShowTradingView(false)}>
+                <Text style={styles.tradingViewClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <WebView
+              source={{
+                uri: `https://www.dexscreener.com/solana/${coinData?.contractAddress}?embed=1&theme=dark&trades=0&info=0`
+              }}
+              style={{ flex: 1 }}
+              javaScriptEnabled={true}
+              startInLoadingState={true}
+              renderLoading={() => (
+                <View style={styles.webViewLoading}>
+                  <ActivityIndicator size="large" color={COLORS.solana} />
+                  <Text style={styles.webViewLoadingText}>Loading TradingView...</Text>
+                </View>
+              )}
+            />
+          </View>
+        </Modal>
 
         {activeTab === 'trades' && (
           <NeonCard style={styles.tradesCard}>
@@ -1389,12 +1450,74 @@ const styles = StyleSheet.create({
   },
   chartInfo: {
     marginTop: SPACING.s,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
   chartInfoText: {
     ...FONTS.phantomRegular,
     fontSize: 12,
     color: COLORS.textSecondary,
+  },
+  chartPriceText: {
+    ...FONTS.phantomMedium,
+    fontSize: 14,
+    color: COLORS.textPrimary,
+    textAlign: 'center',
+    marginTop: SPACING.xs,
+  },
+  tradingViewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.xs,
+    backgroundColor: COLORS.solana + '20',
+    borderRadius: BORDER_RADIUS.medium,
+  },
+  tradingViewButtonText: {
+    ...FONTS.phantomMedium,
+    fontSize: 12,
+    color: COLORS.solana,
+  },
+  tradingViewContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  tradingViewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: SPACING.m,
+    backgroundColor: COLORS.cardBackground,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  tradingViewTitle: {
+    ...FONTS.phantomBold,
+    fontSize: 18,
+    color: COLORS.textPrimary,
+  },
+  tradingViewClose: {
+    fontSize: 24,
+    color: COLORS.textSecondary,
+    padding: SPACING.xs,
+  },
+  webViewLoading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  webViewLoadingText: {
+    ...FONTS.phantomRegular,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.s,
   },
   tradesCard: {
     margin: SPACING.m,
