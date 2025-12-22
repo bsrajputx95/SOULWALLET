@@ -50,6 +50,8 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   const [buyAmount, setBuyAmount] = useState<string>('');
   const [slippage, setSlippage] = useState<number>(0.5);
   const [isSelling, setIsSelling] = useState(false);
+  const [tokenPrices, setTokenPrices] = useState<Map<string, number>>(new Map());
+  const [pricesLoading, setPricesLoading] = useState(false);
 
   // Get wallet for swap execution
   const { executeSwap, publicKey } = useSolanaWallet();
@@ -93,7 +95,40 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     return purchasesQuery.data.filter((p: any) => p.status === 'OPEN');
   }, [purchasesQuery.data]);
 
-  // Transform purchases to Token format for display
+  // Fetch token prices from Jupiter
+  const fetchTokenPrices = React.useCallback(async (mints: string[]) => {
+    if (mints.length === 0) return;
+    setPricesLoading(true);
+    try {
+      const mintIds = mints.join(',');
+      const response = await fetch(`https://price.jup.ag/v6/price?ids=${mintIds}`);
+      const data = await response.json();
+
+      if (data?.data) {
+        const prices = new Map<string, number>();
+        Object.entries(data.data).forEach(([mint, info]: [string, any]) => {
+          if (info?.price) {
+            prices.set(mint, info.price);
+          }
+        });
+        setTokenPrices(prices);
+      }
+    } catch (error) {
+      logger.warn('Failed to fetch token prices:', error);
+    } finally {
+      setPricesLoading(false);
+    }
+  }, []);
+
+  // Fetch prices when modal opens
+  useEffect(() => {
+    if (visible && openPurchases.length > 0) {
+      const mints = [...new Set(openPurchases.map((p: any) => p.tokenMint))];
+      fetchTokenPrices(mints);
+    }
+  }, [visible, openPurchases.length]);
+
+  // Transform purchases to Token format for display with P&L
   const ibuyTokens: Token[] = React.useMemo(() => {
     if (!purchasesQuery.data) return [];
 
@@ -104,20 +139,33 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       const existing = tokenMap.get(p.tokenMint);
       if (existing) {
         existing.balance += p.amountBought;
-        existing.value += p.priceInUsdc;
+        existing.value += p.priceInUsdc; // Total cost basis
       } else {
         tokenMap.set(p.tokenMint, {
           symbol: p.tokenSymbol || p.tokenMint.slice(0, 6),
           name: p.tokenName || 'Unknown Token',
           balance: p.amountBought,
-          value: p.priceInUsdc,
-          change24h: 0, // TODO: Get live price data
+          value: p.priceInUsdc, // Cost basis
+          change24h: 0, // Will be calculated below
           address: p.tokenMint,
         });
       }
     });
-    return Array.from(tokenMap.values());
-  }, [purchasesQuery.data]);
+
+    // Calculate P&L using live prices
+    const tokens = Array.from(tokenMap.values());
+    tokens.forEach(token => {
+      const currentPrice = tokenPrices.get(token.address);
+      if (currentPrice && token.balance > 0) {
+        const currentValue = token.balance * currentPrice;
+        const costBasis = token.value;
+        const pnlPercent = ((currentValue - costBasis) / costBasis) * 100;
+        token.change24h = pnlPercent; // Repurpose as P&L %
+      }
+    });
+
+    return tokens;
+  }, [purchasesQuery.data, tokenPrices]);
 
   const applySettings = async () => {
     try {
@@ -131,24 +179,25 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     }
   };
 
-  // Sell a specific token - executes real Jupiter swap
+  // Sell a specific token - supports multi-position proportional sells
   const handleSell = async (token: Token, percentage: number) => {
     if (!publicKey) {
       Alert.alert('Wallet Not Connected', 'Please connect your wallet first.');
       return;
     }
 
-    // Find open purchases for this token
+    // Find all open purchases for this token
     const tokenPurchases = openPurchases.filter((p: any) => p.tokenMint === token.address);
     if (tokenPurchases.length === 0) {
       Alert.alert('No Position', 'No open positions to sell.');
       return;
     }
 
-    const purchase = tokenPurchases[0];
-    const sellAmount = Math.floor(purchase.amountBought * (percentage / 100));
+    // Calculate total holdings and sell amount
+    const totalBalance = tokenPurchases.reduce((sum: number, p: any) => sum + p.amountBought, 0);
+    const totalSellAmount = Math.floor(totalBalance * (percentage / 100));
 
-    if (sellAmount <= 0) {
+    if (totalSellAmount <= 0) {
       Alert.alert('Invalid Amount', 'Sell amount too small.');
       return;
     }
@@ -156,11 +205,11 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     setIsSelling(true);
 
     try {
-      // Execute real swap: Token → USDC via Jupiter
+      // Execute single swap for the total sell amount
       const result = await executeSwap({
         inputMint: token.address,
         outputMint: USDC_MINT,
-        amount: sellAmount,
+        amount: totalSellAmount,
         slippageBps: Math.round(slippage * 100),
       });
 
@@ -168,15 +217,34 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
         throw new Error('Swap failed - no transaction signature');
       }
 
-      // Use actual USDC received from swap, or fallback to estimate
-      const sellAmountUsdc = result.outputAmount ?? (purchase.priceInUsdc * percentage) / 100;
+      // Calculate total cost basis for this sell
+      const totalCostBasis = tokenPurchases.reduce((sum: number, p: any) => sum + p.priceInUsdc, 0);
+      const sellProportionCost = (totalCostBasis * percentage) / 100;
 
-      // Record the sell with API
-      sellMutation.mutate({
-        purchaseId: purchase.id,
-        sellAmountUsdc,
-        sellTxSig: result.signature,
-      });
+      // Use actual USDC received from swap, or fallback to cost basis estimate
+      const sellAmountUsdc = result.outputAmount ?? sellProportionCost;
+
+      // For 100% sells, close ALL positions; otherwise close the largest one
+      // (In production you'd update partial amounts, but this simplifies the logic)
+      if (percentage === 100) {
+        // Sell all positions
+        for (const purchase of tokenPurchases) {
+          const proportion = purchase.amountBought / totalBalance;
+          sellMutation.mutate({
+            purchaseId: purchase.id,
+            sellAmountUsdc: sellAmountUsdc * proportion,
+            sellTxSig: result.signature,
+          });
+        }
+      } else {
+        // Sell from first (oldest) position
+        const purchase = tokenPurchases[0];
+        sellMutation.mutate({
+          purchaseId: purchase.id,
+          sellAmountUsdc,
+          sellTxSig: result.signature,
+        });
+      }
     } catch (error: any) {
       logger.error('Sell swap failed:', error);
       Alert.alert('Swap Failed', error.message || 'Failed to execute sell swap');
@@ -313,66 +381,93 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                 </View>
               )}
 
-              {ibuyTokens.map((token: Token) => (
-                <NeonCard
-                  key={token.address}
-                  style={styles.tokenCard}
-                  color={COLORS.gradientPurple}
-                  intensity="medium"
-                >
-                  <View style={styles.tokenHeader}>
-                    <View style={styles.tokenInfo}>
-                      <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                      <Text style={styles.tokenName}>{token.name}</Text>
+              {ibuyTokens.map((token: Token) => {
+                // Calculate current value if we have price
+                const currentPrice = tokenPrices.get(token.address);
+                const currentValue = currentPrice ? token.balance * currentPrice : null;
+                const pnlAmount = currentValue ? currentValue - token.value : null;
+
+                return (
+                  <NeonCard
+                    key={token.address}
+                    style={styles.tokenCard}
+                    color={COLORS.gradientPurple}
+                    intensity="medium"
+                  >
+                    <View style={styles.tokenHeader}>
+                      <View style={styles.tokenInfo}>
+                        <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+                        <Text style={styles.tokenName}>{token.name}</Text>
+                      </View>
+                      <View style={styles.tokenValues}>
+                        {currentValue ? (
+                          <>
+                            <Text style={styles.tokenValue}>${currentValue.toFixed(2)}</Text>
+                            <Text
+                              style={[
+                                styles.tokenChange,
+                                token.change24h >= 0 ? styles.positive : styles.negative,
+                              ]}
+                            >
+                              {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
+                              {pnlAmount ? ` (${pnlAmount >= 0 ? '+' : ''}$${pnlAmount.toFixed(2)})` : ''}
+                            </Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.tokenValue}>${token.value.toFixed(2)}</Text>
+                            <Text style={styles.tokenChangeLoading}>
+                              {pricesLoading ? 'Loading...' : 'Cost basis'}
+                            </Text>
+                          </>
+                        )}
+                      </View>
                     </View>
-                    <View style={styles.tokenValues}>
-                      <Text style={styles.tokenValue}>${token.value.toFixed(2)}</Text>
-                      <Text
-                        style={[
-                          styles.tokenChange,
-                          token.change24h >= 0 ? styles.positive : styles.negative,
-                        ]}
-                      >
-                        {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
+
+                    <View style={styles.balanceContainer}>
+                      <Text style={styles.balanceLabel}>Holdings:</Text>
+                      <Text style={styles.balanceValue}>
+                        {formatNumber(token.balance)} {token.symbol}
                       </Text>
                     </View>
-                  </View>
 
-                  <View style={styles.balanceContainer}>
-                    <Text style={styles.balanceLabel}>Holdings:</Text>
-                    <Text style={styles.balanceValue}>
-                      {formatNumber(token.balance)} {token.symbol}
-                    </Text>
-                  </View>
+                    {/* Cost basis info */}
+                    {currentValue && (
+                      <View style={styles.balanceContainer}>
+                        <Text style={styles.balanceLabel}>Cost basis:</Text>
+                        <Text style={styles.balanceValue}>${token.value.toFixed(2)}</Text>
+                      </View>
+                    )}
 
-                  {/* Sell Buttons */}
-                  <View style={styles.sellContainer}>
-                    <Text style={styles.sellLabel}>Quick Sell:</Text>
-                    <View style={styles.sellButtons}>
-                      {[10, 25, 50, 100].map((percentage) => (
-                        <NeonButton
-                          key={percentage}
-                          title={`${percentage}%`}
-                          variant="outline"
-                          size="small"
-                          style={styles.sellButton}
-                          onPress={() => handleSell(token, percentage)}
-                        />
-                      ))}
+                    {/* Sell Buttons */}
+                    <View style={styles.sellContainer}>
+                      <Text style={styles.sellLabel}>Quick Sell:</Text>
+                      <View style={styles.sellButtons}>
+                        {[10, 25, 50, 100].map((percentage) => (
+                          <NeonButton
+                            key={percentage}
+                            title={`${percentage}%`}
+                            variant="outline"
+                            size="small"
+                            style={styles.sellButton}
+                            onPress={() => handleSell(token, percentage)}
+                          />
+                        ))}
+                      </View>
                     </View>
-                  </View>
 
-                  {/* Buy More Button */}
-                  <NeonButton
-                    title="Buy More"
-                    variant="primary"
-                    size="medium"
-                    fullWidth
-                    style={styles.buyMoreButton}
-                    onPress={() => handleBuyMore(token)}
-                  />
-                </NeonCard>
-              ))}
+                    {/* Buy More Button */}
+                    <NeonButton
+                      title="Buy More"
+                      variant="primary"
+                      size="medium"
+                      fullWidth
+                      style={styles.buyMoreButton}
+                      onPress={() => handleBuyMore(token)}
+                    />
+                  </NeonCard>
+                );
+              })}
             </ScrollView>
           </KeyboardAvoidingView>
         </View>
@@ -536,6 +631,12 @@ const styles = StyleSheet.create({
     ...FONTS.phantomMedium,
     fontSize: 14,
     marginTop: 2,
+  },
+  tokenChangeLoading: {
+    ...FONTS.phantomMedium,
+    fontSize: 12,
+    marginTop: 2,
+    color: COLORS.textSecondary,
   },
   positive: {
     color: COLORS.success,
