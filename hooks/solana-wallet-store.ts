@@ -8,12 +8,12 @@ import { logger } from '@/lib/client-logger';
 import type {
   ParsedAccountData
 } from '@solana/web3.js';
-import { 
-  Connection, 
-  PublicKey, 
-  Keypair, 
-  Transaction, 
-  SystemProgram, 
+import {
+  Connection,
+  PublicKey,
+  Keypair,
+  Transaction,
+  SystemProgram,
   LAMPORTS_PER_SOL,
   sendAndConfirmTransaction
 } from '@solana/web3.js';
@@ -41,7 +41,7 @@ let currentRpcIndex = 0;
 async function createConnection(): Promise<Connection> {
   const maxAttempts = RPC_ENDPOINTS.length;
   let attempts = 0;
-  
+
   while (attempts < maxAttempts) {
     const endpoint = RPC_ENDPOINTS[currentRpcIndex];
     if (!endpoint) {
@@ -49,9 +49,9 @@ async function createConnection(): Promise<Connection> {
       attempts++;
       continue;
     }
-    
+
     const connection = new Connection(endpoint, 'confirmed');
-    
+
     try {
       // Test connection with timeout
       await Promise.race([
@@ -66,7 +66,7 @@ async function createConnection(): Promise<Connection> {
       attempts++;
     }
   }
-  
+
   // If all endpoints fail, return a connection anyway (offline mode)
   logger.warn('All RPC endpoints failed. Running in offline mode.');
   return new Connection(RPC_ENDPOINTS[0] || 'https://api.mainnet-beta.solana.com', 'confirmed');
@@ -78,7 +78,7 @@ const loadSplTokenFunctions = async () => {
     logger.info('SPL Token functions disabled on web');
     return;
   }
-  
+
   try {
     const splToken = await import('@solana/spl-token');
     TOKEN_PROGRAM_ID = splToken.TOKEN_PROGRAM_ID;
@@ -152,11 +152,11 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
   useEffect(() => {
     const initializeWallet = async () => {
       await loadSplTokenFunctions();
-      
+
       // Initialize connection with failover
       const connection = await createConnection();
       setState(prev => ({ ...prev, connection }));
-      
+
       await loadWallet();
     };
     initializeWallet();
@@ -233,9 +233,9 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     }
   };
 
-  
 
-  
+
+
 
   const importWalletEncrypted = async (privateKeyString: string, password: string) => {
     try {
@@ -248,9 +248,9 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       await AsyncStorage.setItem(ENCRYPTED_MARKER_KEY, 'true');
       await deleteSecureItem(STORAGE_KEY);
 
-      setState(prev => ({ 
-        ...prev, 
-        wallet, 
+      setState(prev => ({
+        ...prev,
+        wallet,
         publicKey,
         isLoading: false,
         needsUnlock: false,
@@ -274,31 +274,31 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
     try {
       setState(prev => ({ ...prev, isLoading: true }));
-      
+
       // Get SOL balance
       const solBalance = await state.connection.getBalance(currentWallet.publicKey);
       const solBalanceInSol = solBalance / LAMPORTS_PER_SOL;
-      
+
       // Get token balances (only if TOKEN_PROGRAM_ID is available)
       const tokenBalances: TokenBalance[] = [];
-      
+
       if (TOKEN_PROGRAM_ID) {
         try {
           const tokenAccounts = await state.connection.getParsedTokenAccountsByOwner(
             currentWallet.publicKey,
             { programId: TOKEN_PROGRAM_ID }
           );
-          
+
           for (const tokenAccount of tokenAccounts.value) {
             const accountData = tokenAccount.account.data as ParsedAccountData;
             const tokenInfo = accountData.parsed.info;
-            
+
             if (tokenInfo.tokenAmount.uiAmount > 0) {
               const mint = tokenInfo.mint;
               const tokenData = Object.entries(POPULAR_TOKENS).find(
                 ([_, data]) => data.mint === mint
               );
-              
+
               const tokenBalance: TokenBalance = {
                 mint,
                 symbol: tokenData?.[0] || mint.slice(0, 8),
@@ -307,11 +307,11 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
                 decimals: tokenInfo.tokenAmount.decimals,
                 uiAmount: tokenInfo.tokenAmount.uiAmount
               };
-              
+
               if (tokenData?.[1].logo) {
                 tokenBalance.logo = tokenData[1].logo;
               }
-              
+
               tokenBalances.push(tokenBalance);
             }
           }
@@ -319,16 +319,16 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
           logger.warn('Error loading token balances:', error);
         }
       }
-      
 
-      
-      setState(prev => ({ 
-        ...prev, 
+
+
+      setState(prev => ({
+        ...prev,
         balance: solBalanceInSol,
         tokenBalances,
-        isLoading: false 
+        isLoading: false
       }));
-      
+
     } catch (error) {
       if (__DEV__) logger.error('Error refreshing balances:', error);
       setState(prev => ({ ...prev, isLoading: false }));
@@ -339,13 +339,13 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
   // Send SOL with simulation and enhanced security
   const sendSol = async (toAddress: string, amount: number): Promise<string> => {
     if (!state.wallet) throw new Error('No wallet connected');
-    
+
     try {
       setState(prev => ({ ...prev, isLoading: true }));
-      
+
       const toPublicKey = new PublicKey(toAddress);
       const lamports = amount * LAMPORTS_PER_SOL;
-      
+
       // Create transaction
       const transaction = new Transaction().add(
         SystemProgram.transfer({
@@ -354,23 +354,23 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
           lamports,
         })
       );
-      
+
       // SIMULATE FIRST
       const simulation = await simulateTransaction(transaction);
       if (!simulation.success) {
         throw new Error(`Simulation failed: ${simulation.error}`);
       }
       logger.info('Simulation passed');
-      
+
       // Estimate fees
       const fee = await estimateTransactionFee(transaction);
-      
+
       // Check balance
       const required = (lamports + fee) / LAMPORTS_PER_SOL;
       if (state.balance < required) {
         throw new Error(`Insufficient balance. Required: ${required} SOL`);
       }
-      
+
       const CONFIRMATION_TIMEOUT_MS = 60000;
       const confirmationPromise = sendAndConfirmTransaction(
         state.connection,
@@ -380,13 +380,13 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       );
       const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Transaction confirmation timeout')), CONFIRMATION_TIMEOUT_MS));
       const signature = await Promise.race([confirmationPromise, timeoutPromise]);
-      
+
       logger.info('Transaction confirmed:', signature);
-      
+
       // Wait for finalization
       await waitForFinalization(signature);
       await refreshBalances();
-      
+
       setState(prev => ({ ...prev, isLoading: false }));
       return signature;
     } catch (error: any) {
@@ -400,16 +400,16 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
   const waitForFinalization = async (signature: string, maxAttempts: number = 30): Promise<void> => {
     for (let i = 0; i < maxAttempts; i++) {
       const status = await state.connection.getSignatureStatus(signature);
-      
+
       if (status.value?.confirmationStatus === 'finalized') {
         logger.info('Finalized');
         return;
       }
-      
+
       if (status.value?.err) {
         throw new Error(`Failed: ${JSON.stringify(status.value.err)}`);
       }
-      
+
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
     logger.warn('Not finalized after max attempts');
@@ -423,14 +423,14 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     unitsConsumed?: number;
   }> => {
     if (!state.wallet) throw new Error('No wallet connected');
-    
+
     try {
       const { blockhash } = await state.connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = state.wallet.publicKey;
-      
+
       const simulation = await state.connection.simulateTransaction(transaction);
-      
+
       if (simulation.value.err) {
         return {
           success: false,
@@ -438,7 +438,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
           logs: simulation.value.logs || [],
         };
       }
-      
+
       const result: {
         success: boolean;
         error?: string;
@@ -448,11 +448,11 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
         success: true,
         logs: simulation.value.logs || [],
       };
-      
+
       if (simulation.value.unitsConsumed !== undefined) {
         result.unitsConsumed = simulation.value.unitsConsumed;
       }
-      
+
       return result;
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -506,23 +506,23 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     if (!getAssociatedTokenAddress || !createTransferInstruction) {
       throw new Error('SPL Token functions not available');
     }
-    
+
     try {
       setState(prev => ({ ...prev, isLoading: true }));
-      
+
       const toPublicKey = new PublicKey(toAddress);
       const mintPublicKey = new PublicKey(tokenMint);
-      
+
       // Get source token account
       const sourceTokenAccount = await getAssociatedTokenAddress(
         mintPublicKey,
         state.wallet.publicKey
       );
-      
+
       const destinationTokenAccount = await getAssociatedTokenAddress(mintPublicKey, toPublicKey);
-      
+
       const transaction = new Transaction();
-      
+
       let destinationExists = true
       try {
         await getAccount(state.connection, destinationTokenAccount)
@@ -541,7 +541,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
           throw error
         }
       }
-      
+
       // Add transfer instruction
       const transferAmount = amount * Math.pow(10, decimals);
       transaction.add(
@@ -563,7 +563,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       if (solBalance < requiredSol) {
         throw new Error(`Insufficient SOL for transaction fees. Required: ${requiredSol / LAMPORTS_PER_SOL} SOL`)
       }
-      
+
       const CONFIRMATION_TIMEOUT_MS = 60000;
       const confirmationPromise = sendAndConfirmTransaction(
         state.connection,
@@ -572,15 +572,15 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       );
       const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Transaction confirmation timeout')), CONFIRMATION_TIMEOUT_MS));
       const signature = await Promise.race([confirmationPromise, timeoutPromise]);
-      
+
       logger.info('Token transfer successful:', signature);
-      
+
       // Refresh balances after successful transfer
       await refreshBalances();
-      
+
       setState(prev => ({ ...prev, isLoading: false }));
       return signature;
-      
+
     } catch (error) {
       logger.error('Error sending token:', error);
       setState(prev => ({ ...prev, isLoading: false }));
@@ -600,7 +600,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       await deleteSecureItem(STORAGE_KEY);
       await SecureStorage.deleteEncryptedPrivateKey();
       await AsyncStorage.removeItem(ENCRYPTED_MARKER_KEY);
-      
+
       setState({
         wallet: null,
         publicKey: null,
@@ -609,7 +609,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
         isLoading: false,
         connection: state.connection
       });
-      
+
       if (__DEV__) {
         logger.info('Wallet deleted successfully');
       }
@@ -619,18 +619,83 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       throw error;
     }
   };
-  
-  // Execute swap using Jupiter
-  const executeSwap = async (swapTransactionBase64: string): Promise<string> => {
+
+  // Execute swap using Jupiter - returns signature and output amount
+  const executeSwap = async (swapTransactionBase64OrParams: string | {
+    inputMint: string;
+    outputMint: string;
+    amount: number;
+    slippageBps?: number;
+  }): Promise<{ signature: string; outputAmount: number | undefined }> => {
     if (!state.wallet) throw new Error('No wallet connected');
-    
+
     try {
       setState(prev => ({ ...prev, isLoading: true }));
-      
-      // Deserialize the transaction
-      const transaction = Transaction.from(Buffer.from(swapTransactionBase64, 'base64'));
-      
-      // Sign and send the transaction
+
+      let transactionBase64: string;
+      let outputMint: string | undefined;
+
+      // Handle both string (pre-built tx) and params (need to build tx)
+      if (typeof swapTransactionBase64OrParams === 'string') {
+        transactionBase64 = swapTransactionBase64OrParams;
+      } else {
+        // Build swap transaction via Jupiter API
+        const params = swapTransactionBase64OrParams;
+        outputMint = params.outputMint;
+
+        // Get quote from Jupiter
+        const quoteResponse = await fetch(
+          `https://quote-api.jup.ag/v6/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${params.slippageBps || 50}`
+        );
+        const quote = await quoteResponse.json();
+
+        if (!quote || quote.error) {
+          throw new Error(quote?.error || 'Failed to get Jupiter quote');
+        }
+
+        // Get swap transaction
+        const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            quoteResponse: quote,
+            userPublicKey: state.wallet.publicKey.toString(),
+            wrapAndUnwrapSol: true,
+          }),
+        });
+        const swapResult = await swapResponse.json();
+
+        if (!swapResult.swapTransaction) {
+          throw new Error('Failed to get swap transaction');
+        }
+
+        transactionBase64 = swapResult.swapTransaction;
+      }
+
+      // Get pre-swap balances for output token (if we know it)
+      let preSwapBalance = 0;
+      if (outputMint && TOKEN_PROGRAM_ID) {
+        try {
+          const tokenAccounts = await state.connection.getParsedTokenAccountsByOwner(
+            state.wallet.publicKey,
+            { programId: TOKEN_PROGRAM_ID }
+          );
+          const outputAccount = tokenAccounts.value.find((acc: any) => {
+            const parsed = acc.account.data as ParsedAccountData;
+            return parsed.parsed.info.mint === outputMint;
+          });
+          if (outputAccount) {
+            const parsed = outputAccount.account.data as ParsedAccountData;
+            preSwapBalance = parsed.parsed.info.tokenAmount.uiAmount || 0;
+          }
+        } catch (e) {
+          logger.warn('Could not get pre-swap balance:', e);
+        }
+      }
+
+      // Deserialize and execute the transaction
+      const transaction = Transaction.from(Buffer.from(transactionBase64, 'base64'));
+
       const signature = await sendAndConfirmTransaction(
         state.connection,
         transaction,
@@ -640,15 +705,41 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
           commitment: 'confirmed'
         }
       );
-      
+
       logger.info('Swap executed successfully:', signature);
-      
+
+      // Get post-swap balance to calculate output amount
+      let outputAmount: number | undefined;
+      if (outputMint && TOKEN_PROGRAM_ID) {
+        try {
+          // Small delay to ensure balance is updated
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          const tokenAccounts = await state.connection.getParsedTokenAccountsByOwner(
+            state.wallet.publicKey,
+            { programId: TOKEN_PROGRAM_ID }
+          );
+          const outputAccount = tokenAccounts.value.find((acc: any) => {
+            const parsed = acc.account.data as ParsedAccountData;
+            return parsed.parsed.info.mint === outputMint;
+          });
+          if (outputAccount) {
+            const parsed = outputAccount.account.data as ParsedAccountData;
+            const postSwapBalance = parsed.parsed.info.tokenAmount.uiAmount || 0;
+            outputAmount = postSwapBalance - preSwapBalance;
+            logger.info(`Swap output: ${outputAmount} tokens (${preSwapBalance} -> ${postSwapBalance})`);
+          }
+        } catch (e) {
+          logger.warn('Could not get post-swap balance:', e);
+        }
+      }
+
       // Refresh balances after successful swap
       await refreshBalances();
-      
+
       setState(prev => ({ ...prev, isLoading: false }));
-      return signature;
-      
+      return { signature, outputAmount };
+
     } catch (error) {
       logger.error('Error executing swap:', error);
       setState(prev => ({ ...prev, isLoading: false }));
@@ -666,7 +757,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       logo: token.logo,
       balance: token.uiAmount
     }));
-    
+
     const popularTokens = Object.entries(POPULAR_TOKENS).map(([symbol, data]) => ({
       symbol,
       name: data.name,
@@ -675,7 +766,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       logo: data.logo,
       balance: walletTokens.find(t => t.mint === data.mint)?.balance || 0
     }));
-    
+
     // Add SOL
     const allTokens = [
       {
@@ -688,12 +779,12 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       },
       ...popularTokens
     ];
-    
+
     // Deduplicate by mint address
-    const uniqueTokens = allTokens.filter((token, index, self) => 
+    const uniqueTokens = allTokens.filter((token, index, self) =>
       index === self.findIndex(t => t.mint === token.mint)
     );
-    
+
     return uniqueTokens;
   };
 

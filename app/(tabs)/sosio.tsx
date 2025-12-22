@@ -442,19 +442,20 @@ export default function SosioScreen() {
 
                 try {
                   const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint: post.mentionedTokenMint })
-                  const txSig = await executeSwap(res.swapTransaction)
+                  const swapResult = await executeSwap(res.swapTransaction)
                   // Record the purchase after successful swap
-                  if (txSig) {
+                  if (swapResult?.signature) {
                     await recordPurchaseMutation.mutateAsync({
                       postId: post.id,
                       tokenMint: post.mentionedTokenMint,
                       tokenSymbol: post.mentionedToken,
                       tokenName: post.mentionedToken,
-                      amountBought: 0, // Will be updated from tx result
+                      amountBought: swapResult.outputAmount || 0, // Use actual amount from swap
                       priceInUsdc: buyAmount,
-                      transactionSig: txSig,
+                      transactionSig: swapResult.signature,
                     })
-                    Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || 'token'}!`)
+                    const amountText = swapResult.outputAmount ? ` (${swapResult.outputAmount.toFixed(4)} tokens)` : ''
+                    Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || 'token'}!${amountText}`)
                   }
                 } catch (e: any) {
                   console.error('iBuy error:', e)

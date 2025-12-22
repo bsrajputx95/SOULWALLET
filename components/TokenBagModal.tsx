@@ -168,9 +168,8 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
         throw new Error('Swap failed - no transaction signature');
       }
 
-      // Estimate USDC received (in production, parse from tx result)
-      // For now, use proportional calculation based on original buy price
-      const sellAmountUsdc = (purchase.priceInUsdc * percentage) / 100;
+      // Use actual USDC received from swap, or fallback to estimate
+      const sellAmountUsdc = result.outputAmount ?? (purchase.priceInUsdc * percentage) / 100;
 
       // Record the sell with API
       sellMutation.mutate({
