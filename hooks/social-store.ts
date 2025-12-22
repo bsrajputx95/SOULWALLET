@@ -30,6 +30,7 @@ export interface SocialPost {
   comments: number;
   reposts: number;
   mentionedToken?: string;
+  mentionedTokenMint?: string;
   visibility?: 'public' | 'vip' | 'followers';
 }
 
@@ -78,7 +79,7 @@ export const [SocialProvider, useSocial] = createContextHook(() => {
     likes: post.likesCount,
     comments: post.commentsCount,
     reposts: post.repostsCount,
-    mentionedToken: post.mentionedTokenSymbol || undefined,
+    mentionedToken: post.mentionedTokenSymbol || post.mentionedTokenName || (post.mentionedTokenMint ? `${post.mentionedTokenMint.slice(0, 6)}...` : undefined),
     mentionedTokenMint: post.mentionedTokenMint || undefined,
     visibility: post.visibility === 'PUBLIC' ? 'public' : post.visibility === 'VIP' ? 'vip' : 'followers',
   })) || [];

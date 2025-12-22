@@ -411,7 +411,7 @@ export default function SosioScreen() {
               likes={post.likes}
               timestamp={post.timestamp}
               mentionedToken={post.mentionedToken}
-              mentionedTokenMint={undefined}
+              mentionedTokenMint={post.mentionedTokenMint}
               isVerified={post.isVerified}
               onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
               onBuyPress={async () => {
