@@ -27,7 +27,7 @@ class ProfitSharing {
   private feePercentage = 0.05; // 5% fee
 
   constructor() {
-    const rpcUrl = process.env.HELIUS_RPC_URL || 
+    const rpcUrl = process.env.HELIUS_RPC_URL ||
       `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
     this.connection = new Connection(rpcUrl, 'confirmed');
   }
@@ -252,6 +252,62 @@ class ProfitSharing {
     } catch (error) {
       logger.error('Error converting USDC to SOL:', error);
       return usdcAmount / 150;
+    }
+  }
+
+  /**
+   * Send iBuy creator fee (5% of profit) to post creator's wallet
+   * Called when user sells iBuy token at profit
+   */
+  async sendIBuyCreatorFee(params: {
+    fromUserId: string;       // User who made the profit
+    creatorWallet: string;    // Post creator's wallet address
+    feeAmountUsdc: number;    // Fee amount in USDC
+    purchaseId: string;       // For logging
+    creatorUsername?: string; // For logging
+  }): Promise<string | null> {
+    try {
+      const { fromUserId, creatorWallet, feeAmountUsdc, purchaseId, creatorUsername } = params;
+
+      // Skip if fee too small (< $0.10 to make transfer worthwhile)
+      if (feeAmountUsdc < 0.10) {
+        logger.info(`iBuy fee too small ($${feeAmountUsdc.toFixed(2)}), skipping transfer`);
+        return null;
+      }
+
+      // Convert USDC fee to SOL
+      const feeInSOL = await this.convertUSDCtoSOL(feeAmountUsdc);
+
+      // Check minimum SOL threshold
+      if (feeInSOL < MIN_FEE_SOL) {
+        logger.info(`iBuy fee too small in SOL (${feeInSOL.toFixed(6)} < ${MIN_FEE_SOL}), skipping`);
+        return null;
+      }
+
+      logger.info(
+        `Sending iBuy creator fee:\n` +
+        `  Purchase: ${purchaseId}\n` +
+        `  Fee: $${feeAmountUsdc.toFixed(2)} (${feeInSOL.toFixed(4)} SOL)\n` +
+        `  To: @${creatorUsername || 'unknown'} (${creatorWallet})`
+      );
+
+      // Send fee using custodial wallet
+      const txSig = await this.sendFeeToTrader({
+        fromUserId,
+        toWallet: creatorWallet,
+        amountSOL: feeInSOL,
+      });
+
+      if (txSig) {
+        logger.info(`✅ iBuy creator fee sent: ${txSig}`);
+      } else {
+        logger.warn(`⚠️ iBuy creator fee transfer failed for ${purchaseId}`);
+      }
+
+      return txSig;
+    } catch (error) {
+      logger.error('Error sending iBuy creator fee:', error);
+      return null;
     }
   }
 

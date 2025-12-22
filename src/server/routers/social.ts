@@ -7,6 +7,7 @@ import { PostVisibility } from '@prisma/client';
 import prisma from '../../lib/prisma'
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { jupiterSwap } from '../../lib/services/jupiterSwap'
+import { profitSharing } from '../../lib/services/profitSharing'
 
 export const socialRouter = router({
   /**
@@ -1048,17 +1049,14 @@ export const socialRouter = router({
           // Only process fee if creator has wallet and fee is meaningful (> $0.01)
           const creatorWallet = purchase.post.user.walletAddress;
           if (creatorWallet && creatorFee >= 0.01) {
-            // Log the fee - actual transfer would happen here via profitSharing service
-            logger.info(
-              `iBuy Creator Fee: $${creatorFee.toFixed(2)} (5% of $${profit.toFixed(2)} profit)\n` +
-              `  From: ${ctx.user.id}\n` +
-              `  To: @${purchase.post.user.username} (${creatorWallet})\n` +
-              `  Token: ${purchase.tokenSymbol || purchase.tokenMint}`
-            );
-
-            // For now, mark as pending - actual SOL transfer can be added
-            // creatorFeeTxSig = await profitSharing.sendFeeToCreator(...);
-            creatorFeeTxSig = `pending_${Date.now()}`; // Placeholder for real tx
+            // Send real fee to creator wallet
+            creatorFeeTxSig = await profitSharing.sendIBuyCreatorFee({
+              fromUserId: ctx.user.id,
+              creatorWallet,
+              feeAmountUsdc: creatorFee,
+              purchaseId: input.purchaseId,
+              creatorUsername: purchase.post.user.username,
+            });
           }
         }
 
