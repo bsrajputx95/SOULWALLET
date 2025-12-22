@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   Animated,
   Easing,
+  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Settings, Search, X, Plus, Link, ShoppingBag } from 'lucide-react-native';
@@ -39,7 +40,7 @@ export default function SosioScreen() {
   const ibuyMutation = trpc.social.ibuyToken.useMutation()
   const ibuySettingsQuery = trpc.user.getIBuySettings.useQuery()
   const recordPurchaseMutation = trpc.social.recordIBuyPurchase.useMutation()
-  const { executeSwap } = useSolanaWallet()
+  const { executeSwap, publicKey, balance } = useSolanaWallet()
   const [activeFeed, setActiveFeed] = useState<'all' | 'following' | 'vip'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchBar, setShowSearchBar] = useState(false);
@@ -418,6 +419,28 @@ export default function SosioScreen() {
               onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
               onBuyPress={async () => {
                 if (!post.mentionedTokenMint) return
+
+                // Check wallet connection
+                if (!publicKey) {
+                  Alert.alert(
+                    'Connect Wallet',
+                    'Please connect your wallet to use iBuy.',
+                    [{ text: 'OK' }]
+                  )
+                  return
+                }
+
+                // Check balance (need at least buy amount in SOL)
+                const buyAmount = ibuySettingsQuery.data?.buyAmount || 10
+                if ((balance || 0) < 0.01) {
+                  Alert.alert(
+                    'Low Balance',
+                    `Your wallet balance is too low. You need at least 0.01 SOL plus ${buyAmount} USDC for iBuy.`,
+                    [{ text: 'OK' }]
+                  )
+                  return
+                }
+
                 try {
                   const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint: post.mentionedTokenMint })
                   const txSig = await executeSwap(res.swapTransaction)
@@ -429,12 +452,14 @@ export default function SosioScreen() {
                       tokenSymbol: post.mentionedToken,
                       tokenName: post.mentionedToken,
                       amountBought: 0, // Will be updated from tx result
-                      priceInUsdc: ibuySettingsQuery.data?.buyAmount || 10,
+                      priceInUsdc: buyAmount,
                       transactionSig: txSig,
                     })
+                    Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || 'token'}!`)
                   }
                 } catch (e: any) {
                   console.error('iBuy error:', e)
+                  Alert.alert('iBuy Failed', e.message || 'Failed to complete purchase')
                 }
               }}
             />
