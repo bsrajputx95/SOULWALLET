@@ -239,11 +239,13 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       } else {
         // Sell from first (oldest) position
         const purchase = tokenPurchases[0];
-        sellMutation.mutate({
-          purchaseId: purchase.id,
-          sellAmountUsdc,
-          sellTxSig: result.signature,
-        });
+        if (purchase) {
+          sellMutation.mutate({
+            purchaseId: purchase.id,
+            sellAmountUsdc,
+            sellTxSig: result.signature,
+          });
+        }
       }
     } catch (error: any) {
       logger.error('Sell swap failed:', error);
@@ -451,6 +453,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                             size="small"
                             style={styles.sellButton}
                             onPress={() => handleSell(token, percentage)}
+                            disabled={isSelling}
                           />
                         ))}
                       </View>
