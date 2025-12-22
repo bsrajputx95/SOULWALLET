@@ -34,6 +34,7 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const [newComment, setNewComment] = useState('');
   const [isLiked, setIsLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
   const [isReposted, setIsReposted] = useState(false);
   const { posts } = useSocial();
   const [userVote, setUserVote] = useState<null | 'agree' | 'disagree'>(null);
@@ -51,6 +52,8 @@ export default function PostDetailScreen() {
   const likePostMutation = trpc.social.toggleLike.useMutation({
     onSuccess: (data: any) => {
       setIsLiked(data.liked);
+      // Update like count: if liked, increment; if unliked, decrement
+      setLikeCount(prev => data.liked ? prev + 1 : Math.max(0, prev - 1));
       postQuery.refetch();
     },
   });
@@ -173,6 +176,13 @@ export default function PostDetailScreen() {
     }
     if (typeof (post as any)?.disagreeCount === 'number') {
       setDisagreeCount((post as any).disagreeCount);
+    }
+    // Sync like count and status from post data
+    if (typeof (post as any)?.likes === 'number') {
+      setLikeCount((post as any).likes);
+    }
+    if (typeof (post as any)?.isLiked === 'boolean') {
+      setIsLiked((post as any).isLiked);
     }
     // Sync user's existing vote from API
     if ((post as any)?.userVote === true) {
@@ -334,7 +344,7 @@ export default function PostDetailScreen() {
                 fill={isLiked ? COLORS.error : 'none'}
               />
               <Text style={[styles.actionCount, isLiked && styles.likedText]}>
-                {post.likes}
+                {likeCount}
               </Text>
             </TouchableOpacity>
 
