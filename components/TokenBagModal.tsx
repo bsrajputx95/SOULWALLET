@@ -56,6 +56,20 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     enabled: visible,
   });
 
+  // Sell iBuy token mutation
+  const sellMutation = trpc.social.sellIBuyToken.useMutation({
+    onSuccess: (data) => {
+      purchasesQuery.refetch();
+      // Show success message with profit info
+      const profitText = data.profit >= 0 ? `+$${data.profit.toFixed(2)}` : `-$${Math.abs(data.profit).toFixed(2)}`;
+      const feeText = data.creatorFee > 0 ? `\n5% creator fee: $${data.creatorFee.toFixed(2)} → @${data.creatorUsername}` : '';
+      alert(`Sold! ${profitText}${feeText}`);
+    },
+    onError: (error: any) => {
+      alert(`Sell failed: ${error.message}`);
+    },
+  });
+
   // Load settings when query completes
   useEffect(() => {
     if (settingsQuery.data) {
@@ -64,13 +78,20 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     }
   }, [settingsQuery.data]);
 
+  // Get OPEN purchases only (not sold yet)
+  const openPurchases = React.useMemo(() => {
+    if (!purchasesQuery.data) return [];
+    return purchasesQuery.data.filter((p: any) => p.status === 'OPEN');
+  }, [purchasesQuery.data]);
+
   // Transform purchases to Token format for display
   const ibuyTokens: Token[] = React.useMemo(() => {
     if (!purchasesQuery.data) return [];
 
     // Group purchases by token and sum amounts
     const tokenMap = new Map<string, Token>();
-    purchasesQuery.data.forEach((p: { tokenMint: string; tokenSymbol?: string | null; tokenName?: string | null; amountBought: number; priceInUsdc: number }) => {
+    purchasesQuery.data.forEach((p: { tokenMint: string; tokenSymbol?: string | null; tokenName?: string | null; amountBought: number; priceInUsdc: number; status: string }) => {
+      if (p.status !== 'OPEN') return; // Only show unsold
       const existing = tokenMap.get(p.tokenMint);
       if (existing) {
         existing.balance += p.amountBought;
@@ -101,9 +122,25 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     }
   };
 
+  // Sell a specific token - finds the first open purchase and sells it
   const handleSell = (token: Token, percentage: number) => {
-    // In a real app, this would call the sell API
-    logger.debug(`Selling ${percentage}% of ${token.symbol}`);
+    // Find open purchases for this token
+    const tokenPurchases = openPurchases.filter((p: any) => p.tokenMint === token.address);
+    if (tokenPurchases.length === 0) {
+      alert('No open positions to sell');
+      return;
+    }
+
+    // For now, sell the first purchase (100% of that position)
+    // In production, you'd do a Jupiter swap here first
+    const purchase = tokenPurchases[0];
+    const simulatedSellPrice = purchase.priceInUsdc * (1 + (Math.random() * 0.4 - 0.1)); // Simulate +/- price change
+
+    sellMutation.mutate({
+      purchaseId: purchase.id,
+      sellAmountUsdc: simulatedSellPrice * (percentage / 100),
+      sellTxSig: `sim_${Date.now()}`, // In production, this comes from Jupiter swap
+    });
   };
 
   const handleBuyMore = (token: Token) => {

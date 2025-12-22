@@ -821,3 +821,71 @@ model CustodialWallet {
   @@index([userId, isActive])
   @@map("custodial_wallets")
 }
+
+// ============================================
+// IBUY SYSTEM MODELS
+// ============================================
+
+// User's iBuy settings (buy amount, slippage)
+model IBuySettings {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  buyAmount Float    @default(10)   // USDC amount
+  slippage  Float    @default(0.5)  // percentage
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("ibuy_settings")
+}
+
+// iBuy Purchase record - tracks buy and sell for profit calculation
+model IBuyPurchase {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId          String
+  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  // Buy data
+  tokenMint       String
+  tokenSymbol     String?
+  tokenName       String?
+  amountBought    Float    // Amount of tokens received
+  priceInUsdc     Float    // USDC spent (buy price)
+  buyTxSig        String   @unique // Buy transaction signature
+  
+  // Sell data (filled when sold)
+  sellAmountUsdc  Float?   // USDC received on sell
+  sellTxSig       String?  // Sell transaction signature
+  soldAt          DateTime?
+  
+  // Profit sharing (5% to creator)
+  profitLoss      Float?   // sellAmountUsdc - priceInUsdc
+  creatorFee      Float?   // 5% of profit (if positive)
+  creatorFeeTxSig String?  // Fee payment transaction
+  
+  // Status: OPEN = holding, SOLD = sold, FEE_PAID = fee sent
+  status          String   @default("OPEN")
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([userId, status])
+  @@index([postId])
+  @@index([tokenMint, userId])
+  @@map("ibuy_purchases")
+}
+
+// Post voting (agree/disagree - Trust Index)
+model PostVote {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vote      Boolean  // true = agree, false = disagree
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, postId])
+  @@index([postId])
+  @@map("post_votes")
+}

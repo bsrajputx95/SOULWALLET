@@ -984,7 +984,7 @@ export const socialRouter = router({
             tokenName: input.tokenName,
             amountBought: input.amountBought,
             priceInUsdc: input.priceInUsdc,
-            transactionSig: input.transactionSig,
+            buyTxSig: input.transactionSig,
           },
         });
 
@@ -994,6 +994,102 @@ export const socialRouter = router({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to record iBuy purchase',
+        });
+      }
+    }),
+
+  /**
+   * Sell an iBuy token and process 5% creator profit share
+   * Simple flow: user sells token, if profit > 0, 5% goes to post creator
+   */
+  sellIBuyToken: protectedProcedure
+    .input(z.object({
+      purchaseId: z.string(),       // The iBuy purchase record to sell
+      sellAmountUsdc: z.number(),   // USDC amount received from sell
+      sellTxSig: z.string(),        // Sell transaction signature
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        // 1. Get purchase with post creator info
+        const purchase = await prisma.iBuyPurchase.findUnique({
+          where: { id: input.purchaseId },
+          include: {
+            post: {
+              include: {
+                user: { select: { id: true, username: true, walletAddress: true } }
+              }
+            }
+          },
+        });
+
+        if (!purchase) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Purchase not found' });
+        }
+
+        if (purchase.userId !== ctx.user.id) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Not your purchase' });
+        }
+
+        if (purchase.status !== 'OPEN') {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already sold' });
+        }
+
+        // 2. Calculate profit
+        const profit = input.sellAmountUsdc - purchase.priceInUsdc;
+
+        // 3. Calculate 5% creator fee (only if profit > 0)
+        let creatorFee = 0;
+        let creatorFeeTxSig: string | null = null;
+
+        if (profit > 0) {
+          creatorFee = profit * 0.05; // 5% of profit
+
+          // Only process fee if creator has wallet and fee is meaningful (> $0.01)
+          const creatorWallet = purchase.post.user.walletAddress;
+          if (creatorWallet && creatorFee >= 0.01) {
+            // Log the fee - actual transfer would happen here via profitSharing service
+            logger.info(
+              `iBuy Creator Fee: $${creatorFee.toFixed(2)} (5% of $${profit.toFixed(2)} profit)\n` +
+              `  From: ${ctx.user.id}\n` +
+              `  To: @${purchase.post.user.username} (${creatorWallet})\n` +
+              `  Token: ${purchase.tokenSymbol || purchase.tokenMint}`
+            );
+
+            // For now, mark as pending - actual SOL transfer can be added
+            // creatorFeeTxSig = await profitSharing.sendFeeToCreator(...);
+            creatorFeeTxSig = `pending_${Date.now()}`; // Placeholder for real tx
+          }
+        }
+
+        // 4. Update purchase record
+        const updatedPurchase = await prisma.iBuyPurchase.update({
+          where: { id: input.purchaseId },
+          data: {
+            sellAmountUsdc: input.sellAmountUsdc,
+            sellTxSig: input.sellTxSig,
+            soldAt: new Date(),
+            profitLoss: profit,
+            creatorFee: creatorFee > 0 ? creatorFee : null,
+            creatorFeeTxSig,
+            status: creatorFeeTxSig ? 'FEE_PENDING' : 'SOLD',
+          },
+        });
+
+        logger.info(`iBuy sell recorded: ${input.purchaseId}, profit: $${profit.toFixed(2)}`);
+
+        return {
+          success: true,
+          profit,
+          creatorFee: creatorFee > 0 ? creatorFee : 0,
+          creatorUsername: purchase.post.user.username,
+          status: updatedPurchase.status,
+        };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        logger.error('Sell iBuy token error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to process sell',
         });
       }
     }),
