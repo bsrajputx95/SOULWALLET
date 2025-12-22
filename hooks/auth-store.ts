@@ -105,12 +105,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Login failed';
       setError(errorMessage);
-      logger.error('Login error:', err);
-      // Capture login errors (without sensitive data)
-      captureException(err instanceof Error ? err : new Error(errorMessage), {
-        context: 'login',
-        identifierType: identifier.includes('@') ? 'email' : 'username'
-      });
+      // Only log minimal info in DEV, don't show full stack traces
+      if (__DEV__) {
+        console.log('[Login] Failed:', errorMessage);
+      }
       return false;
     } finally {
       setIsLoading(false);
