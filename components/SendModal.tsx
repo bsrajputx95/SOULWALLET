@@ -17,8 +17,6 @@ import {
 import { X, ChevronDown } from 'lucide-react-native';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { NeonCard } from './NeonCard';
-import { NeonButton } from './NeonButton';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 import { logger } from '../lib/client-logger';
 
@@ -196,7 +194,7 @@ export const SendModal: React.FC<SendModalProps> = ({
                         keyboardShouldPersistTaps="handled"
                     >
                         {/* Token Selector */}
-                        <NeonCard style={styles.inputCard}>
+                        <View style={styles.inputCard}>
                             <Text style={styles.label}>Token</Text>
                             <TouchableOpacity
                                 style={styles.tokenSelector}
@@ -219,10 +217,10 @@ export const SendModal: React.FC<SendModalProps> = ({
                                 </View>
                                 <ChevronDown size={20} color={COLORS.textSecondary} />
                             </TouchableOpacity>
-                        </NeonCard>
+                        </View>
 
                         {/* Amount Input */}
-                        <NeonCard style={styles.inputCard}>
+                        <View style={styles.inputCard}>
                             <View style={styles.labelRow}>
                                 <Text style={styles.label}>Amount</Text>
                                 <TouchableOpacity onPress={handleMaxAmount}>
@@ -243,10 +241,10 @@ export const SendModal: React.FC<SendModalProps> = ({
                             {amountError ? (
                                 <Text style={styles.errorText}>{amountError}</Text>
                             ) : null}
-                        </NeonCard>
+                        </View>
 
                         {/* Recipient Address */}
-                        <NeonCard style={styles.inputCard}>
+                        <View style={styles.inputCard}>
                             <Text style={styles.label}>Recipient Address</Text>
                             <TextInput
                                 style={[styles.input, styles.addressInput]}
@@ -263,18 +261,21 @@ export const SendModal: React.FC<SendModalProps> = ({
                             {addressError ? (
                                 <Text style={styles.errorText}>{addressError}</Text>
                             ) : null}
-                        </NeonCard>
+                        </View>
 
                         {/* Send Button */}
-                        <NeonButton
-                            title={isSending ? 'Sending...' : 'Send'}
+                        <TouchableOpacity
+                            style={[
+                                styles.sendButton,
+                                (isSending || !selectedToken || !amount || !recipientAddress) && styles.sendButtonDisabled
+                            ]}
                             onPress={handleSend}
                             disabled={isSending || !selectedToken || !amount || !recipientAddress}
-                            variant="primary"
-                            size="large"
-                            fullWidth
-                            style={styles.sendButton}
-                        />
+                        >
+                            <Text style={styles.sendButtonText}>
+                                {isSending ? 'Sending...' : 'Send'}
+                            </Text>
+                        </TouchableOpacity>
                     </ScrollView>
                 </KeyboardAvoidingView>
             </View>
@@ -442,6 +443,19 @@ const styles = StyleSheet.create({
     sendButton: {
         marginTop: SPACING.m,
         marginBottom: SPACING.l,
+        backgroundColor: COLORS.solana,
+        paddingVertical: SPACING.m,
+        borderRadius: BORDER_RADIUS.medium,
+        alignItems: 'center',
+    },
+    sendButtonDisabled: {
+        backgroundColor: COLORS.cardBackground,
+        opacity: 0.5,
+    },
+    sendButtonText: {
+        ...FONTS.phantomBold,
+        fontSize: 16,
+        color: COLORS.textPrimary,
     },
     // Token Selector Modal
     selectorOverlay: {

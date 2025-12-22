@@ -14,7 +14,6 @@ import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { NeonCard } from './NeonCard';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 
 interface ReceiveModalProps {
@@ -83,7 +82,7 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
 
                     <View style={styles.content}>
                         {/* QR Code */}
-                        <NeonCard style={styles.qrCard}>
+                        <View style={styles.qrCard}>
                             <View style={styles.qrContainer}>
                                 {walletAddress ? (
                                     <QRCode
@@ -99,10 +98,10 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
                             <Text style={styles.qrHint}>
                                 Scan this QR code to receive tokens
                             </Text>
-                        </NeonCard>
+                        </View>
 
                         {/* Wallet Address */}
-                        <NeonCard style={styles.addressCard}>
+                        <View style={styles.addressCard}>
                             <Text style={styles.addressLabel}>Your Wallet Address</Text>
                             <Text style={styles.addressFull} selectable>
                                 {walletAddress || '--'}
@@ -110,7 +109,7 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
                             <Text style={styles.addressShort}>
                                 {formatAddress(walletAddress)}
                             </Text>
-                        </NeonCard>
+                        </View>
 
                         {/* Action Buttons */}
                         <View style={styles.buttonRow}>
