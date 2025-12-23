@@ -1,3 +1,6 @@
+// Polyfill must be imported first before @solana/web3.js
+import 'react-native-get-random-values';
+
 import { useState, useEffect } from 'react';
 import createContextHook from '@/lib/create-context-hook';
 import { getSecureItem, setSecureItem, deleteSecureItem, SecureStorage } from '@/lib/secure-storage';
