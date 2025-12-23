@@ -17,10 +17,14 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ExternalLink, RefreshCw, AlertTriangle, Globe } from 'lucide-react-native';
+import Constants from 'expo-constants';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { useSolanaWallet } from '../../hooks/solana-wallet-store';
 import { NeonButton } from '../NeonButton';
+
+// Check if running in Expo Go (WebView doesn't work in Expo Go)
+const isExpoGo = Constants.appOwnership === 'expo';
 
 // Platform URLs
 const PLATFORM_URLS: Record<string, string> = {
@@ -132,6 +136,64 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             style={{ width: '100%', height: '100%', border: 'none' }}
             title={platformName}
           />
+        </View>
+      </View>
+    );
+  }
+
+  // Expo Go fallback - WebView doesn't work in Expo Go
+  if (isExpoGo) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.placeholderContainer}>
+          {/* Platform Icon */}
+          <View style={styles.platformIcon}>
+            <Globe size={40} color={COLORS.solana} />
+          </View>
+
+          {/* Platform Name */}
+          <Text style={styles.platformTitle}>{platformName}</Text>
+
+          {/* Description */}
+          <Text style={styles.description}>
+            Trade tokens directly on {platformName}
+          </Text>
+
+          {/* Wallet Status */}
+          <View style={styles.walletStatus}>
+            <View style={[
+              styles.statusDot,
+              { backgroundColor: publicKey ? COLORS.success : COLORS.warning }
+            ]} />
+            <Text style={styles.statusText}>
+              {publicKey
+                ? `Wallet: ${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
+                : 'Wallet not connected'
+              }
+            </Text>
+          </View>
+
+          {/* Open in Browser Button */}
+          <NeonButton
+            title={`Open ${platformName}`}
+            onPress={handleOpenInBrowser}
+            style={styles.openButton}
+          />
+
+          {/* Info Text */}
+          <Text style={styles.infoText}>
+            Opens in your default browser
+          </Text>
+
+          {/* Dev Build Note */}
+          <View style={styles.noteContainer}>
+            <Text style={styles.noteText}>
+              💡 In-app browsing requires a development build:
+            </Text>
+            <Text style={styles.codeText}>
+              npx expo run:android
+            </Text>
+          </View>
         </View>
       </View>
     );
