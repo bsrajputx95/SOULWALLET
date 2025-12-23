@@ -1,14 +1,11 @@
 /**
  * External Platform WebView Component
  * 
- * Displays external DEX platforms (Raydium, Pump.fun, BullX, DexScreener)
+ * Displays external DEX platforms (DexScreener, Raydium, Bonk, Pump.fun, Orca)
  * in a WebView with wallet connection capability.
- * 
- * Note: Requires react-native-webview to be installed:
- * npx expo install react-native-webview
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,8 +13,10 @@ import {
   TouchableOpacity,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react-native';
+import { WebView } from 'react-native-webview';
+import { ExternalLink, RefreshCw, AlertTriangle, Globe } from 'lucide-react-native';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { useSolanaWallet } from '../../hooks/solana-wallet-store';
@@ -47,17 +46,15 @@ interface ExternalPlatformWebViewProps {
 
 /**
  * WebView component for external DEX platforms
- * 
- * Currently shows a placeholder with option to open in browser.
- * Full WebView implementation requires react-native-webview package.
  */
 export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({
   platform,
   onError,
 }) => {
   const { publicKey } = useSolanaWallet();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const webViewRef = useRef<WebView>(null);
 
   const platformUrl = PLATFORM_URLS[platform] || '';
   const platformName = PLATFORM_NAMES[platform] || platform;
@@ -69,7 +66,6 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     }
 
     try {
-      setLoading(true);
       const supported = await Linking.canOpenURL(platformUrl);
 
       if (supported) {
@@ -82,15 +78,14 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
       const message = err instanceof Error ? err.message : 'Failed to open link';
       setError(message);
       onError?.(message);
-    } finally {
-      setLoading(false);
     }
   }, [platformUrl, platformName, onError]);
 
-  const handleRetry = useCallback(() => {
+  const handleRefresh = useCallback(() => {
     setError(null);
-    handleOpenInBrowser();
-  }, [handleOpenInBrowser]);
+    setLoading(true);
+    webViewRef.current?.reload();
+  }, []);
 
   // Error state
   if (error) {
@@ -100,7 +95,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
           <AlertTriangle size={48} color={COLORS.error} />
           <Text style={styles.errorTitle}>Failed to Load</Text>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+          <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
             <RefreshCw size={16} color={COLORS.textPrimary} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
@@ -109,25 +104,44 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     );
   }
 
+  // Web platform - use iframe or open in browser
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.webHeader}>
+          <View style={styles.walletStatus}>
+            <View style={[
+              styles.statusDot,
+              { backgroundColor: publicKey ? COLORS.success : COLORS.warning }
+            ]} />
+            <Text style={styles.statusText}>
+              {publicKey
+                ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
+                : 'Not connected'
+              }
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.externalButton} onPress={handleOpenInBrowser}>
+            <ExternalLink size={16} color={COLORS.solana} />
+            <Text style={styles.externalText}>Open</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.iframeContainer}>
+          <iframe
+            src={platformUrl}
+            style={{ width: '100%', height: '100%', border: 'none' }}
+            title={platformName}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  // Native mobile - use WebView
   return (
     <View style={styles.container}>
-      <View style={styles.placeholderContainer}>
-        {/* Platform Icon/Logo */}
-        <View style={styles.platformIcon}>
-          <Text style={styles.platformIconText}>
-            {platformName.charAt(0)}
-          </Text>
-        </View>
-
-        {/* Platform Name */}
-        <Text style={styles.platformTitle}>{platformName}</Text>
-
-        {/* Description */}
-        <Text style={styles.description}>
-          Trade tokens directly on {platformName}
-        </Text>
-
-        {/* Wallet Status */}
+      {/* Header with wallet status and actions */}
+      <View style={styles.webHeader}>
         <View style={styles.walletStatus}>
           <View style={[
             styles.statusDot,
@@ -135,50 +149,52 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
           ]} />
           <Text style={styles.statusText}>
             {publicKey
-              ? `Wallet: ${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
-              : 'Wallet not connected'
+              ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
+              : 'Not connected'
             }
           </Text>
         </View>
-
-        {/* Open in Browser Button */}
-        <NeonButton
-          title={loading ? 'Opening...' : `Open ${platformName}`}
-          onPress={handleOpenInBrowser}
-          disabled={loading}
-          style={styles.openButton}
-        />
-
-        {/* Alternative: Copy URL */}
-        <TouchableOpacity
-          style={styles.copyLinkButton}
-          onPress={() => {
-            // In a real app, use Clipboard API
-            if (__DEV__) console.log('Copy URL:', platformUrl);
-          }}
-        >
-          <ExternalLink size={14} color={COLORS.textSecondary} />
-          <Text style={styles.copyLinkText}>{platformUrl}</Text>
-        </TouchableOpacity>
-
-        {/* Info Text */}
-        <Text style={styles.infoText}>
-          {Platform.OS === 'web'
-            ? 'Click to open in a new tab'
-            : 'Opens in your default browser'
-          }
-        </Text>
-
-        {/* WebView Note */}
-        <View style={styles.noteContainer}>
-          <Text style={styles.noteText}>
-            💡 For in-app trading, install react-native-webview:
-          </Text>
-          <Text style={styles.codeText}>
-            npx expo install react-native-webview
-          </Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleRefresh}>
+            <RefreshCw size={18} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={handleOpenInBrowser}>
+            <ExternalLink size={18} color={COLORS.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
+
+      {/* Loading indicator */}
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={COLORS.solana} />
+          <Text style={styles.loadingText}>Loading {platformName}...</Text>
+        </View>
+      )}
+
+      {/* WebView */}
+      <WebView
+        ref={webViewRef}
+        source={{ uri: platformUrl }}
+        style={styles.webView}
+        onLoadStart={() => setLoading(true)}
+        onLoadEnd={() => setLoading(false)}
+        onError={(syntheticEvent) => {
+          const { nativeEvent } = syntheticEvent;
+          setError(nativeEvent.description || 'Failed to load page');
+          onError?.(nativeEvent.description || 'Failed to load page');
+        }}
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        startInLoadingState={true}
+        scalesPageToFit={true}
+        allowsInlineMediaPlayback={true}
+        mediaPlaybackRequiresUserAction={false}
+        allowsFullscreenVideo={true}
+        mixedContentMode="compatibility"
+        originWhitelist={['*']}
+        userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
+      />
     </View>
   );
 };
@@ -320,6 +336,68 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textPrimary,
     marginLeft: SPACING.xs,
+  },
+  // WebView specific styles
+  webHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    backgroundColor: COLORS.cardBackground,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.s,
+  },
+  actionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    zIndex: 10,
+  },
+  loadingText: {
+    ...FONTS.sfProMedium,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.m,
+  },
+  webView: {
+    flex: 1,
+  },
+  externalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.small,
+  },
+  externalText: {
+    ...FONTS.sfProMedium,
+    fontSize: 12,
+    color: COLORS.solana,
+    marginLeft: SPACING.xs,
+  },
+  iframeContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
   },
 });
 

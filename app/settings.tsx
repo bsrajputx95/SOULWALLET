@@ -46,10 +46,14 @@ export default function SettingsScreen() {
   const walletAddress = solanaPublicKey || user?.walletAddress || null;
   const hasWallet = !!walletAddress;
 
+  // Detect if wallet needs reconnection (server has address but no local private key access)
+  const needsReconnect = !solanaPublicKey && !!user?.walletAddress;
+  const isWalletUnlocked = !!solanaPublicKey;
+
   // Get wallet data from user or use fallback
   const walletData = {
     publicKey: walletAddress || 'No wallet connected',
-    privateKey: 'Encrypted - unlock to view',
+    privateKey: isWalletUnlocked ? 'Encrypted - unlock to view' : 'Import required',
     mnemonic: 'Not available - created without mnemonic',
   };
 
@@ -225,6 +229,23 @@ export default function SettingsScreen() {
                 title="Import Wallet"
                 onPress={() => router.push('/solana-setup')}
                 style={{ marginTop: SPACING.s }}
+                icon={<Key size={20} color={COLORS.textPrimary} />}
+              />
+            </View>
+          </NeonCard>
+        )}
+
+        {/* Wallet Needs Reconnection */}
+        {needsReconnect && (
+          <NeonCard style={[styles.warningCard, { backgroundColor: COLORS.warning + '10', borderColor: COLORS.warning + '30' }]}>
+            <Text style={[styles.warningTitle, { color: COLORS.warning }]}>⚠️ Wallet Needs Reconnection</Text>
+            <Text style={styles.warningText}>
+              Your wallet address is saved, but you need to import your private key to access transactions.
+            </Text>
+            <View style={{ marginTop: SPACING.s }}>
+              <NeonButton
+                title="Import Private Key"
+                onPress={() => router.push('/solana-setup')}
                 icon={<Key size={20} color={COLORS.textPrimary} />}
               />
             </View>
