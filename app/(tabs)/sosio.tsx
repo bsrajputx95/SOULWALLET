@@ -12,6 +12,7 @@ import {
   Animated,
   Easing,
   Alert,
+  Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Settings, Search, X, Plus, Link, ShoppingBag } from 'lucide-react-native';
@@ -227,11 +228,15 @@ export default function SosioScreen() {
         ]}
       >
         <View style={styles.profileButton}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user?.username?.charAt(0).toUpperCase() || 'U'}
-            </Text>
-          </View>
+          {profileQuery.data?.profileImage ? (
+            <Image source={{ uri: profileQuery.data.profileImage }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {user?.username?.charAt(0).toUpperCase() || 'U'}
+              </Text>
+            </View>
+          )}
           <Text style={styles.username} numberOfLines={1} ellipsizeMode="tail">
             @{user?.username ? (user.username.length > 15 ? user.username.slice(0, 15) + '...' : user.username) : 'user'}
           </Text>

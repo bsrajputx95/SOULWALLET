@@ -11,6 +11,7 @@ import {
   Modal,
   TextInput,
   useWindowDimensions,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Settings, Shield, Plus, X, DollarSign } from 'lucide-react-native';
@@ -175,11 +176,15 @@ export default function SelfProfileScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={[styles.header, { paddingHorizontal: responsivePadding }]}>
         <View style={styles.profileInfo}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user?.username?.charAt(0).toUpperCase() || 'U'}
-            </Text>
-          </View>
+          {profileQuery.data?.profileImage ? (
+            <Image source={{ uri: profileQuery.data.profileImage }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {user?.username?.charAt(0).toUpperCase() || 'U'}
+              </Text>
+            </View>
+          )}
           <View style={styles.userDetails}>
             <View style={styles.nameRow}>
               <Text style={styles.displayName} numberOfLines={1}>

@@ -66,6 +66,11 @@ export default function HomeScreen() {
     getAvailableTokens
   } = useSolanaWallet();
 
+  // ✅ Fetch user profile for profile image
+  const profileQuery = trpc.user.getProfile.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+
   // ✅ Fetch trending coins from market
   const { data: trendingData, isLoading: trendingLoading } = trpc.market.trending.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -732,7 +737,9 @@ export default function HomeScreen() {
           <View style={styles.header}>
             <View style={styles.profileContainer}>
               <View style={styles.avatarContainer}>
-                {user?.profileImage ? (
+                {profileQuery.data?.profileImage ? (
+                  <Image source={{ uri: profileQuery.data.profileImage }} style={styles.avatar} />
+                ) : user?.profileImage ? (
                   <Image source={{ uri: user.profileImage }} style={styles.avatar} />
                 ) : (
                   <View style={styles.defaultAvatar}>
