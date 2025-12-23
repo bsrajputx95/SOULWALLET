@@ -9,10 +9,10 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   TouchableOpacity,
   Linking,
   Platform,
@@ -25,21 +25,23 @@ import { NeonButton } from '../NeonButton';
 
 // Platform URLs
 const PLATFORM_URLS: Record<string, string> = {
-  raydium: 'https://raydium.io/swap/',
-  pumpfun: 'https://pump.fun/',
-  bullx: 'https://bullx.io/',
   dexscreener: 'https://dexscreener.com/solana',
+  raydium: 'https://raydium.io/swap/',
+  bonk: 'https://bonkbot.io/',
+  pumpfun: 'https://pump.fun/',
+  orca: 'https://www.orca.so/',
 };
 
 const PLATFORM_NAMES: Record<string, string> = {
-  raydium: 'Raydium',
-  pumpfun: 'Pump.fun',
-  bullx: 'BullX',
   dexscreener: 'DexScreener',
+  raydium: 'Raydium',
+  bonk: 'Bonk',
+  pumpfun: 'Pump.fun',
+  orca: 'Orca',
 };
 
 interface ExternalPlatformWebViewProps {
-  platform: 'raydium' | 'pumpfun' | 'bullx' | 'dexscreener';
+  platform: 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
   onError?: (error: string) => void;
 }
 
@@ -65,11 +67,11 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
       setError('Platform URL not configured');
       return;
     }
-    
+
     try {
       setLoading(true);
       const supported = await Linking.canOpenURL(platformUrl);
-      
+
       if (supported) {
         await Linking.openURL(platformUrl);
       } else {
@@ -119,7 +121,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
 
         {/* Platform Name */}
         <Text style={styles.platformTitle}>{platformName}</Text>
-        
+
         {/* Description */}
         <Text style={styles.description}>
           Trade tokens directly on {platformName}
@@ -132,7 +134,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             { backgroundColor: publicKey ? COLORS.success : COLORS.warning }
           ]} />
           <Text style={styles.statusText}>
-            {publicKey 
+            {publicKey
               ? `Wallet: ${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
               : 'Wallet not connected'
             }
@@ -148,7 +150,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         />
 
         {/* Alternative: Copy URL */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.copyLinkButton}
           onPress={() => {
             // In a real app, use Clipboard API
@@ -161,7 +163,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
 
         {/* Info Text */}
         <Text style={styles.infoText}>
-          {Platform.OS === 'web' 
+          {Platform.OS === 'web'
             ? 'Click to open in a new tab'
             : 'Opens in your default browser'
           }

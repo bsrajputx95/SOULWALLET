@@ -25,7 +25,7 @@ import { TokenCard } from '../../components/TokenCard';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
 
-type MarketTab = 'soulmarket' | 'raydium' | 'pumpfun' | 'bullx' | 'dexscreener';
+type MarketTab = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
 
 export default function MarketScreen() {
   const { width } = useWindowDimensions();
@@ -195,14 +195,16 @@ export default function MarketScreen() {
             )}
           </View>
         );
-      case 'raydium':
-        return <ExternalPlatformWebView platform="raydium" />;
-      case 'pumpfun':
-        return <ExternalPlatformWebView platform="pumpfun" />;
-      case 'bullx':
-        return <ExternalPlatformWebView platform="bullx" />;
       case 'dexscreener':
         return <ExternalPlatformWebView platform="dexscreener" />;
+      case 'raydium':
+        return <ExternalPlatformWebView platform="raydium" />;
+      case 'bonk':
+        return <ExternalPlatformWebView platform="bonk" />;
+      case 'pumpfun':
+        return <ExternalPlatformWebView platform="pumpfun" />;
+      case 'orca':
+        return <ExternalPlatformWebView platform="orca" />;
       default:
         return null;
     }
@@ -227,10 +229,11 @@ export default function MarketScreen() {
             >
               <Text style={styles.dropdownText}>
                 {activeTab === 'soulmarket' && 'SoulMarket'}
+                {activeTab === 'dexscreener' && 'DexScreener'}
                 {activeTab === 'raydium' && 'Raydium'}
+                {activeTab === 'bonk' && 'Bonk'}
                 {activeTab === 'pumpfun' && 'Pump.fun'}
-                {activeTab === 'bullx' && 'BullX'}
-                {activeTab === 'dexscreener' && 'Dexscreener'}
+                {activeTab === 'orca' && 'Orca'}
               </Text>
               <Text style={styles.dropdownIcon}>▼</Text>
             </Pressable>
@@ -282,6 +285,21 @@ export default function MarketScreen() {
             <Pressable
               style={[
                 styles.tab,
+                activeTab === 'dexscreener' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('dexscreener')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'dexscreener' && styles.activeTabText,
+              ]}>
+                DexScreener
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.tab,
                 activeTab === 'raydium' && styles.activeTab,
               ]}
               onPress={() => setActiveTab('raydium')}
@@ -291,6 +309,21 @@ export default function MarketScreen() {
                 activeTab === 'raydium' && styles.activeTabText,
               ]}>
                 Raydium
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab === 'bonk' && styles.activeTab,
+              ]}
+              onPress={() => setActiveTab('bonk')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'bonk' && styles.activeTabText,
+              ]}>
+                Bonk
               </Text>
             </Pressable>
 
@@ -312,30 +345,15 @@ export default function MarketScreen() {
             <Pressable
               style={[
                 styles.tab,
-                activeTab === 'bullx' && styles.activeTab,
+                activeTab === 'orca' && styles.activeTab,
               ]}
-              onPress={() => setActiveTab('bullx')}
+              onPress={() => setActiveTab('orca')}
             >
               <Text style={[
                 styles.tabText,
-                activeTab === 'bullx' && styles.activeTabText,
+                activeTab === 'orca' && styles.activeTabText,
               ]}>
-                BullX
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.tab,
-                activeTab === 'dexscreener' && styles.activeTab,
-              ]}
-              onPress={() => setActiveTab('dexscreener')}
-            >
-              <Text style={[
-                styles.tabText,
-                activeTab === 'dexscreener' && styles.activeTabText,
-              ]}>
-                Dexscreener
+                Orca
               </Text>
             </Pressable>
           </ScrollView>
