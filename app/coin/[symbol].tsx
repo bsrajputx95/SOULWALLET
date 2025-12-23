@@ -27,6 +27,7 @@ import {
   Shield,
 } from 'lucide-react-native';
 import { WebView } from 'react-native-webview';
+import { SimpleCandlestickChart } from '../../components/SimpleCandlestickChart';
 import { COLORS } from '../../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
@@ -188,17 +189,29 @@ export default function CoinDetailsScreen() {
     }
   );
 
-  // Extract close prices for line chart
+  // Convert to OHLCV format for candlestick chart
   const chartData = useMemo(() => {
     if (!priceHistoryData?.data || priceHistoryData.data.length === 0) {
-      // Generate mock data if no real data
+      // Generate mock OHLCV data if no real data
       return Array.from({ length: 50 }, (_, i) => {
         const base = coinData?.price || 100;
-        const variance = base * 0.05;
-        return base + (Math.random() - 0.5) * variance * 2;
+        const variance = base * 0.03;
+        const open = base + (Math.random() - 0.5) * variance;
+        const close = base + (Math.random() - 0.5) * variance;
+        return {
+          open,
+          high: Math.max(open, close) + Math.random() * variance * 0.3,
+          low: Math.min(open, close) - Math.random() * variance * 0.3,
+          close,
+        };
       });
     }
-    return priceHistoryData.data.map((d: any) => d.close);
+    return priceHistoryData.data.map((d: any) => ({
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }));
   }, [priceHistoryData, coinData?.price]);
 
   // TradingView modal state
@@ -753,35 +766,33 @@ export default function CoinDetailsScreen() {
               ))}
             </View>
 
-            {/* Candlestick Chart - DexScreener Embed */}
+            {/* Candlestick Chart */}
             <View style={styles.chartContainer}>
-              <WebView
-                source={{
-                  uri: `https://dexscreener.com/solana/${coinData?.contractAddress}?embed=1&theme=dark&trades=0&info=0`
-                }}
-                style={{ height: 220, backgroundColor: COLORS.cardBackground }}
-                scrollEnabled={false}
-                javaScriptEnabled={true}
-                startInLoadingState={true}
-                renderLoading={() => (
-                  <View style={styles.chartLoading}>
-                    <ActivityIndicator size="large" color={COLORS.solana} />
-                  </View>
-                )}
-              />
+              {isLoadingChart ? (
+                <View style={styles.chartLoading}>
+                  <ActivityIndicator size="large" color={COLORS.solana} />
+                </View>
+              ) : (
+                <SimpleCandlestickChart
+                  data={chartData}
+                  height={200}
+                  positiveColor={COLORS.success}
+                  negativeColor={COLORS.error}
+                />
+              )}
             </View>
 
             {/* Chart Info & TradingView Button */}
             <View style={styles.chartInfo}>
               <Text style={styles.chartInfoText}>
-                {chartTimeframe} • DexScreener
+                {chartData.length} candles • {chartTimeframe}
               </Text>
               <TouchableOpacity
                 style={styles.tradingViewButton}
                 onPress={() => setShowTradingView(true)}
               >
                 <Activity size={14} color={COLORS.solana} />
-                <Text style={styles.tradingViewButtonText}>Full Chart</Text>
+                <Text style={styles.tradingViewButtonText}>TradingView</Text>
               </TouchableOpacity>
             </View>
           </NeonCard>
