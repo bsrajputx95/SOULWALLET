@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import {
   User,
   Mail,
@@ -43,6 +44,8 @@ export default function AccountScreen() {
     isUpdating: isAccountUpdating,
     updateProfile,
     updateSecurity,
+    uploadProfileImage,
+    isUploadingImage,
   } = useAccount();
 
   // Session management
@@ -93,6 +96,82 @@ export default function AccountScreen() {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Sync form state when profile data loads
+  useEffect(() => {
+    if (profile) {
+      setFirstName(profile.firstName || '');
+      setLastName(profile.lastName || '');
+      setEmail(profile.email || '');
+      setPhone(profile.phone || '');
+      setDateOfBirth(profile.dateOfBirth || '');
+      setDefaultCurrency(profile.defaultCurrency || 'USD');
+      setLanguage(profile.language || 'English');
+      setTwoFactorEnabled(profile.twoFactorEnabled || false);
+    }
+  }, [profile]);
+
+  // Image picker handler
+  const handlePickImage = async () => {
+    Alert.alert(
+      'Change Profile Picture',
+      'Choose an option',
+      [
+        {
+          text: 'Take Photo',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission Required', 'Camera access is needed to take photos.');
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+              base64: true,
+            });
+            if (!result.canceled && result.assets[0]?.base64) {
+              await uploadImage(result.assets[0].base64, result.assets[0].mimeType || 'image/jpeg');
+            }
+          },
+        },
+        {
+          text: 'Choose from Library',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission Required', 'Photo library access is needed.');
+              return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+              base64: true,
+            });
+            if (!result.canceled && result.assets[0]?.base64) {
+              await uploadImage(result.assets[0].base64, result.assets[0].mimeType || 'image/jpeg');
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const uploadImage = async (base64: string, mimeType: string) => {
+    try {
+      const result = await uploadProfileImage(base64, mimeType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif');
+      if (result?.success) {
+        Alert.alert('Success', 'Profile picture updated!');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to upload image');
+    }
+  };
 
 
 
@@ -478,8 +557,16 @@ export default function AccountScreen() {
           <Text style={styles.sectionTitle}>Profile Information</Text>
 
           <View style={styles.profileImageContainer}>
-            <View style={styles.profileImageWrapper}>
-              {profile?.profileImage ? (
+            <TouchableOpacity
+              style={styles.profileImageWrapper}
+              onPress={handlePickImage}
+              disabled={isUploadingImage}
+            >
+              {isUploadingImage ? (
+                <View style={styles.defaultProfileImage}>
+                  <ActivityIndicator size="large" color={COLORS.solana} />
+                </View>
+              ) : profile?.profileImage ? (
                 <Image source={{ uri: profile.profileImage }} style={styles.profileImage} />
               ) : (
                 <View style={styles.defaultProfileImage}>
@@ -488,11 +575,11 @@ export default function AccountScreen() {
                   </Text>
                 </View>
               )}
-              <TouchableOpacity style={styles.cameraButton}>
+              <View style={styles.cameraButton}>
                 <Camera size={16} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.profileImageLabel}>Profile Picture</Text>
+              </View>
+            </TouchableOpacity>
+            <Text style={styles.profileImageLabel}>Tap to change</Text>
           </View>
 
           <View style={styles.inputGroup}>

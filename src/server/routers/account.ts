@@ -556,22 +556,29 @@ export const accountRouter = router({
 
   /**
    * Upload profile image
+   * Stores as data URL - for production, integrate with cloud storage (S3/Cloudinary)
    */
   uploadProfileImage: protectedProcedure
     .input(z.object({
-      imageBase64: z.string(),
-      mimeType: z.string(),
+      imageBase64: z.string().max(5 * 1024 * 1024), // Max 5MB base64 (roughly 3.75MB image)
+      mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
     }))
     .mutation(async ({ ctx, input }) => {
       try {
-        // In production, you would:
-        // 1. Validate the image
-        // 2. Upload to cloud storage (S3, Cloudinary, etc.)
-        // 3. Store the URL in the database
+        // Validate base64 format
+        const base64Regex = /^[A-Za-z0-9+/=]+$/;
+        if (!base64Regex.test(input.imageBase64.replace(/\s/g, ''))) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Invalid image data format',
+          });
+        }
 
-        // For now, store as data URL (not recommended for production)
-        const imageUrl = `data:${input.mimeType};base64,${input.imageBase64.substring(0, 100)}...`;
+        // Create full data URL for storage
+        // In production, upload to cloud storage and store URL instead
+        const imageUrl = `data:${input.mimeType};base64,${input.imageBase64}`;
 
+        // Update user profile image
         await prisma.user.update({
           where: { id: ctx.user.id },
           data: {
@@ -579,12 +586,15 @@ export const accountRouter = router({
           },
         });
 
+        logger.info(`Profile image updated for user ${ctx.user.id}`);
+
         return {
           success: true,
           imageUrl,
-          message: 'Profile image updated',
+          message: 'Profile image updated successfully',
         };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         logger.error('Upload profile image error:', error);
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -894,7 +904,7 @@ export const accountRouter = router({
         if (input.code.length === 6) {
           const secret = TwoFactorService.decryptSecret(security.totpSecret);
           const isValid = TwoFactorService.verifyToken(secret, input.code);
-          
+
           if (isValid) {
             return { success: true, method: 'totp' };
           }
@@ -903,12 +913,12 @@ export const accountRouter = router({
         // Try backup code
         if (security.backupCodes && security.backupCodes.length > 0) {
           const result = await TwoFactorService.verifyBackupCode(input.code, security.backupCodes);
-          
+
           if (result.valid) {
             // Remove used backup code
             const newBackupCodes = [...security.backupCodes];
             newBackupCodes.splice(result.index, 1);
-            
+
             await prisma.userSettings.update({
               where: { userId: ctx.user.id },
               data: {
@@ -919,8 +929,8 @@ export const accountRouter = router({
               },
             });
 
-            return { 
-              success: true, 
+            return {
+              success: true,
               method: 'backup',
               remainingBackupCodes: newBackupCodes.length,
             };
