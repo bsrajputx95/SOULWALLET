@@ -50,7 +50,9 @@ function deriveKey(password: string, saltHex: string, keyBytes: number, iteratio
 }
 
 async function encryptWithPassword(plaintext: string, password: string): Promise<string> {
-  const iter = 200000;
+  // Note: 10,000 iterations is a balance between security and mobile performance
+  // 200,000 caused UI freeze on React Native. Consider using native crypto for production.
+  const iter = 10000;
   const saltHex = randomHex(16);
   const ivHex = randomHex(16);
   const derived = deriveKey(password, saltHex, 64, iter);

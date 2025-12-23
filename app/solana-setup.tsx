@@ -50,7 +50,7 @@ const getResponsiveFontSize = (size: number) => {
 export default function SolanaSetupScreen() {
   const router = useRouter();
   const { createWalletEncrypted, importWalletEncrypted, isLoading } = useSolanaWallet();
-  
+
   const [mode, setMode] = useState<'create' | 'import' | null>(null);
   const [privateKey, setPrivateKey] = useState('');
   const [showPrivateKey, setShowPrivateKey] = useState(false);
@@ -60,16 +60,24 @@ export default function SolanaSetupScreen() {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleCreateWallet = async () => {
+    console.log('[SETUP] handleCreateWallet called');
+    console.log('[SETUP] Password length:', walletPassword?.length);
+    console.log('[SETUP] Password match:', walletPassword === confirmWalletPassword);
+    console.log('[SETUP] isLoading:', isLoading);
+
     try {
       if (!walletPassword || walletPassword !== confirmWalletPassword) {
         Alert.alert('Error', 'Please enter and confirm your wallet password');
         return;
       }
+      console.log('[SETUP] Calling createWalletEncrypted...');
       const wallet = await createWalletEncrypted(walletPassword);
+      console.log('[SETUP] Wallet created:', wallet?.publicKey?.toString());
       setGeneratedWallet(wallet);
       setMode('create');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to create wallet. Please try again.');
+    } catch (error: any) {
+      console.error('[SETUP] Create wallet error:', error);
+      Alert.alert('Error', error?.message || 'Failed to create wallet. Please try again.');
       if (__DEV__) logger.error('Create wallet error:', error);
     }
   };
@@ -265,7 +273,7 @@ export default function SolanaSetupScreen() {
             <View style={styles.privateKeyContainer}>
               <View style={styles.privateKeyBox}>
                 <Text style={styles.privateKeyText}>
-                  {showPrivateKey 
+                  {showPrivateKey
                     ? bs58.encode(generatedWallet.secretKey)
                     : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'
                   }
