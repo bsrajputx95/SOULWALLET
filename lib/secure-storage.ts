@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import * as ExpoCrypto from 'expo-crypto';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as CryptoJS from 'crypto-js';
@@ -34,7 +35,9 @@ function fromHex(hex: string): CryptoJS.lib.WordArray {
 }
 
 function randomHex(bytes: number): string {
-  return CryptoJS.lib.WordArray.random(bytes).toString(CryptoJS.enc.Hex);
+  // Use expo-crypto for secure random bytes (React Native compatible)
+  const randomBytes = ExpoCrypto.getRandomBytes(bytes);
+  return Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function deriveKey(password: string, saltHex: string, keyBytes: number, iterations: number) {
