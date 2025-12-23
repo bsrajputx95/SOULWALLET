@@ -159,32 +159,15 @@ export default function PortfolioScreen() {
             <View style={styles.portfolioTitleRow}>
               <Text style={styles.portfolioTitle}>Portfolio Value</Text>
               <Pressable
-                style={styles.periodDropdown}
-                onPress={() => setShowPeriodDropdown(!showPeriodDropdown)}
+                style={styles.periodButton}
+                onPress={() => {
+                  const periods: ('1d' | '7d' | '30d' | '1y')[] = ['1d', '7d', '30d', '1y'];
+                  const currentIndex = periods.indexOf(portfolioPeriod);
+                  const nextIndex = (currentIndex + 1) % periods.length;
+                  setPortfolioPeriod(periods[nextIndex]!);
+                }}
               >
-                <Text style={styles.periodText}>{portfolioPeriod}</Text>
-                <ChevronDown size={16} color={COLORS.textSecondary} />
-                {showPeriodDropdown && (
-                  <View style={styles.dropdownMenu}>
-                    {(['1d', '7d', '30d', '1y'] as const).map(period => (
-                      <Pressable
-                        key={period}
-                        style={styles.dropdownItem}
-                        onPress={() => {
-                          setPortfolioPeriod(period);
-                          setShowPeriodDropdown(false);
-                        }}
-                      >
-                        <Text style={[
-                          styles.dropdownItemText,
-                          portfolioPeriod === period && { color: COLORS.solana }
-                        ]}>
-                          {period}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
+                <Text style={styles.periodButtonText}>{portfolioPeriod.toUpperCase()}</Text>
               </Pressable>
             </View>
             <Text style={styles.portfolioValue}>${totalBalance.toLocaleString()}</Text>
@@ -199,7 +182,7 @@ export default function PortfolioScreen() {
                 styles.pnlPercentage,
                 { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
               ]}>
-                ({dailyPnl >= 0 ? '+' : ''}{(dailyPnl / (totalBalance - dailyPnl) * 100).toFixed(2)}%)
+                ({dailyPnl >= 0 ? '+' : ''}{totalBalance > dailyPnl ? ((dailyPnl / (totalBalance - dailyPnl) * 100) || 0).toFixed(2) : '0.00'}%)
               </Text>
             </View>
           </View>
@@ -229,7 +212,7 @@ export default function PortfolioScreen() {
               styles.tabText,
               activeTab === 'tokens' && styles.activeTabText,
             ]}>
-              Token Holdings
+              Holdings
             </Text>
           </Pressable>
 
@@ -244,7 +227,7 @@ export default function PortfolioScreen() {
               styles.tabText,
               activeTab === 'copied' && styles.activeTabText,
             ]}>
-              Copied Wallets
+              Copied
             </Text>
           </Pressable>
 
@@ -823,22 +806,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.xs
   },
-  periodDropdown: {
-    position: 'relative',
+  periodButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.background,
-    paddingHorizontal: SPACING.s,
+    backgroundColor: COLORS.solana + '20',
+    paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.xs,
     borderRadius: BORDER_RADIUS.small,
     borderWidth: 1,
-    borderColor: COLORS.solana + '20'
+    borderColor: COLORS.solana + '30',
+    minWidth: 50,
+    justifyContent: 'center',
   },
-  periodText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
+  periodButtonText: {
+    ...FONTS.sfProMedium,
+    color: COLORS.solana,
     fontSize: 12,
-    marginRight: SPACING.xs
+    fontWeight: '700',
   },
   dropdownMenu: {
     position: 'absolute',
