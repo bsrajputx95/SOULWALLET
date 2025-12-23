@@ -26,7 +26,6 @@ import {
   Activity,
   Shield,
 } from 'lucide-react-native';
-import { LineChart, Grid } from 'react-native-svg-charts';
 import { WebView } from 'react-native-webview';
 import { COLORS } from '../../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
@@ -754,36 +753,35 @@ export default function CoinDetailsScreen() {
               ))}
             </View>
 
-            {/* Price Chart */}
-            {isLoadingChart ? (
-              <View style={styles.chartLoading}>
-                <ActivityIndicator size="large" color={COLORS.solana} />
-                <Text style={styles.chartLoadingText}>Loading chart...</Text>
-              </View>
-            ) : (
-              <View style={styles.chartContainer}>
-                <LineChart
-                  style={{ height: 200 }}
-                  data={chartData}
-                  svg={{ stroke: COLORS.solana, strokeWidth: 2 }}
-                  contentInset={{ top: 20, bottom: 20 }}
-                >
-                  <Grid svg={{ stroke: COLORS.cardBackground + '50' }} />
-                </LineChart>
-              </View>
-            )}
+            {/* Candlestick Chart - DexScreener Embed */}
+            <View style={styles.chartContainer}>
+              <WebView
+                source={{
+                  uri: `https://dexscreener.com/solana/${coinData?.contractAddress}?embed=1&theme=dark&trades=0&info=0`
+                }}
+                style={{ height: 220, backgroundColor: COLORS.cardBackground }}
+                scrollEnabled={false}
+                javaScriptEnabled={true}
+                startInLoadingState={true}
+                renderLoading={() => (
+                  <View style={styles.chartLoading}>
+                    <ActivityIndicator size="large" color={COLORS.solana} />
+                  </View>
+                )}
+              />
+            </View>
 
             {/* Chart Info & TradingView Button */}
             <View style={styles.chartInfo}>
               <Text style={styles.chartInfoText}>
-                {priceHistoryData?.data?.length || 0} candles • {chartTimeframe}
+                {chartTimeframe} • DexScreener
               </Text>
               <TouchableOpacity
                 style={styles.tradingViewButton}
                 onPress={() => setShowTradingView(true)}
               >
                 <Activity size={14} color={COLORS.solana} />
-                <Text style={styles.tradingViewButtonText}>TradingView</Text>
+                <Text style={styles.tradingViewButtonText}>Full Chart</Text>
               </TouchableOpacity>
             </View>
           </NeonCard>
