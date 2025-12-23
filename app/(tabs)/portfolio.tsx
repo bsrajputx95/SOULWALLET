@@ -23,6 +23,7 @@ import { NeonCard } from '../../components/NeonCard';
 import { NeonButton } from '../../components/NeonButton';
 import { NeonInput } from '../../components/NeonInput';
 import { useAuth } from '../../hooks/auth-store';
+import { useSolanaWallet } from '../../hooks/solana-wallet-store';
 import type { Token, CopiedWallet } from '../../hooks/wallet-store';
 import { useWallet } from '../../hooks/wallet-store';
 import { trpc } from '../../lib/trpc';
@@ -34,6 +35,7 @@ type ChartType = 'line' | 'candle';
 export default function PortfolioScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { publicKey: solanaPublicKey } = useSolanaWallet();
   const { tokens, copiedWallets, totalBalance, dailyPnl, refetch, updateCopiedWallet } = useWallet();
   const openPositionsQuery = trpc.copyTrading.getOpenPositions.useQuery({}, { refetchInterval: 30000 });
 
@@ -117,16 +119,18 @@ export default function PortfolioScreen() {
           <Text style={styles.username}>@{user?.username || 'user'}</Text>
           <Pressable
             onPress={() => {
-              if (!user?.walletAddress) {
+              if (!solanaPublicKey && !user?.walletAddress) {
                 router.push('/solana-setup');
               }
             }}
           >
             <Text style={[
               styles.walletAddress,
-              !user?.walletAddress && { color: COLORS.solana }
+              !(solanaPublicKey || user?.walletAddress) && { color: COLORS.solana }
             ]}>
-              {user?.walletAddress || 'Connect wallet'}
+              {(solanaPublicKey || user?.walletAddress)
+                ? `${(solanaPublicKey || user?.walletAddress)!.slice(0, 6)}...${(solanaPublicKey || user?.walletAddress)!.slice(-4)}`
+                : 'Connect wallet'}
             </Text>
           </Pressable>
         </View>

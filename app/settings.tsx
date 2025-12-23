@@ -23,6 +23,7 @@ import {
   ExternalLink,
   Share2,
   Link,
+  Trash2,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 
@@ -31,25 +32,52 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { NeonCard } from '../components/NeonCard';
 import { NeonButton } from '../components/NeonButton';
 import { useAuth } from '../hooks/auth-store';
+import { useSolanaWallet } from '../hooks/solana-wallet-store';
 import { logger } from '../lib/client-logger';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { publicKey: solanaPublicKey, deleteWallet, isLoading: walletLoading } = useSolanaWallet();
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [showMnemonic, setShowMnemonic] = useState(false);
 
+  // Get wallet address from either Solana wallet store or user auth store
+  const walletAddress = solanaPublicKey || user?.walletAddress || null;
+  const hasWallet = !!walletAddress;
+
   // Get wallet data from user or use fallback
-  const walletData = user?.walletData || {
-    publicKey: user?.walletAddress || 'No wallet connected',
-    privateKey: 'No wallet connected',
-    mnemonic: 'No wallet connected',
+  const walletData = {
+    publicKey: walletAddress || 'No wallet connected',
+    privateKey: 'Encrypted - unlock to view',
+    mnemonic: 'Not available - created without mnemonic',
   };
-  const hasWallet = !!user?.walletAddress;
+
+  const handleRemoveWallet = () => {
+    Alert.alert(
+      '⚠️ Remove Wallet',
+      'Are you sure you want to remove this wallet? Make sure you have backed up your private key. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteWallet();
+              Alert.alert('Success', 'Wallet removed successfully.');
+            } catch (error: any) {
+              Alert.alert('Error', error?.message || 'Failed to remove wallet.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
-      // In a real app, you'd use Clipboard.setString(text)
+      await Clipboard.setStringAsync(text);
       Alert.alert('Copied!', `${label} copied to clipboard`);
     } catch (error) {
       Alert.alert('Error', 'Failed to copy to clipboard');
@@ -205,150 +233,158 @@ export default function SettingsScreen() {
 
         {/* Wallet Section */}
         {hasWallet && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Wallet Information</Text>
-          
-          <NeonCard style={styles.walletCard}>
-            <View style={styles.walletItem}>
-              <View style={styles.walletItemHeader}>
-                <Wallet size={20} color={COLORS.solana} />
-                <Text style={styles.walletItemTitle}>Public Key</Text>
-                <TouchableOpacity
-                  onPress={() => copyToClipboard(walletData.publicKey, 'Public key')}
-                  style={styles.copyButton}
-                >
-                  <Copy size={16} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.walletAddress}>
-                {walletData.publicKey.length > 16 
-                  ? `${walletData.publicKey.slice(0, 8)}...${walletData.publicKey.slice(-8)}`
-                  : walletData.publicKey}
-              </Text>
-            </View>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Wallet Information</Text>
 
-            <View style={styles.divider} />
-
-            <View style={styles.walletItem}>
-              <View style={styles.walletItemHeader}>
-                <Key size={20} color={COLORS.error} />
-                <Text style={styles.walletItemTitle}>Private Key</Text>
-                <View style={styles.walletActions}>
+            <NeonCard style={styles.walletCard}>
+              <View style={styles.walletItem}>
+                <View style={styles.walletItemHeader}>
+                  <Wallet size={20} color={COLORS.solana} />
+                  <Text style={styles.walletItemTitle}>Public Key</Text>
                   <TouchableOpacity
-                    onPress={() => setShowPrivateKey(!showPrivateKey)}
-                    style={styles.eyeButton}
+                    onPress={() => copyToClipboard(walletData.publicKey, 'Public key')}
+                    style={styles.copyButton}
                   >
-                    {showPrivateKey ? (
-                      <EyeOff size={16} color={COLORS.textSecondary} />
-                    ) : (
-                      <Eye size={16} color={COLORS.textSecondary} />
-                    )}
+                    <Copy size={16} color={COLORS.textSecondary} />
                   </TouchableOpacity>
-                  {showPrivateKey && (
-                    <TouchableOpacity
-                      onPress={() => copyToClipboard(walletData.privateKey, 'Private key')}
-                      style={styles.copyButton}
-                    >
-                      <Copy size={16} color={COLORS.textSecondary} />
-                    </TouchableOpacity>
-                  )}
                 </View>
+                <Text style={styles.walletAddress}>
+                  {walletData.publicKey.length > 16
+                    ? `${walletData.publicKey.slice(0, 8)}...${walletData.publicKey.slice(-8)}`
+                    : walletData.publicKey}
+                </Text>
               </View>
-              <Text style={styles.walletAddress}>
-                {showPrivateKey
-                  ? (walletData.privateKey.length > 16 
+
+              <View style={styles.divider} />
+
+              <View style={styles.walletItem}>
+                <View style={styles.walletItemHeader}>
+                  <Key size={20} color={COLORS.error} />
+                  <Text style={styles.walletItemTitle}>Private Key</Text>
+                  <View style={styles.walletActions}>
+                    <TouchableOpacity
+                      onPress={() => setShowPrivateKey(!showPrivateKey)}
+                      style={styles.eyeButton}
+                    >
+                      {showPrivateKey ? (
+                        <EyeOff size={16} color={COLORS.textSecondary} />
+                      ) : (
+                        <Eye size={16} color={COLORS.textSecondary} />
+                      )}
+                    </TouchableOpacity>
+                    {showPrivateKey && (
+                      <TouchableOpacity
+                        onPress={() => copyToClipboard(walletData.privateKey, 'Private key')}
+                        style={styles.copyButton}
+                      >
+                        <Copy size={16} color={COLORS.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+                <Text style={styles.walletAddress}>
+                  {showPrivateKey
+                    ? (walletData.privateKey.length > 16
                       ? `${walletData.privateKey.slice(0, 8)}...${walletData.privateKey.slice(-8)}`
                       : walletData.privateKey)
-                  : '•••••••••••••••••••••••••••••••••••••••••••••••••••••'}
-              </Text>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.walletItem}>
-              <View style={styles.walletItemHeader}>
-                <Key size={20} color={COLORS.binance} />
-                <Text style={styles.walletItemTitle}>Recovery Phrase</Text>
-                <View style={styles.walletActions}>
-                  <TouchableOpacity
-                    onPress={() => setShowMnemonic(!showMnemonic)}
-                    style={styles.eyeButton}
-                  >
-                    {showMnemonic ? (
-                      <EyeOff size={16} color={COLORS.textSecondary} />
-                    ) : (
-                      <Eye size={16} color={COLORS.textSecondary} />
-                    )}
-                  </TouchableOpacity>
-                  {showMnemonic && (
-                    <TouchableOpacity
-                      onPress={() => copyToClipboard(walletData.mnemonic, 'Recovery phrase')}
-                      style={styles.copyButton}
-                    >
-                      <Copy size={16} color={COLORS.textSecondary} />
-                    </TouchableOpacity>
-                  )}
-                </View>
+                    : '•••••••••••••••••••••••••••••••••••••••••••••••••••••'}
+                </Text>
               </View>
-              <Text style={styles.walletAddress}>
-                {showMnemonic
-                  ? walletData.mnemonic
-                  : '•••• •••• •••• •••• •••• •••• •••• •••• •••• •••• •••• ••••'}
-              </Text>
-            </View>
-          </NeonCard>
 
-          <NeonButton
-            title="Share Wallet Address"
-            onPress={shareWallet}
-            style={styles.shareButton}
-            icon={<Share2 size={20} color={COLORS.textPrimary} />}
-          />
-        </View>
+              <View style={styles.divider} />
+
+              <View style={styles.walletItem}>
+                <View style={styles.walletItemHeader}>
+                  <Key size={20} color={COLORS.binance} />
+                  <Text style={styles.walletItemTitle}>Recovery Phrase</Text>
+                  <View style={styles.walletActions}>
+                    <TouchableOpacity
+                      onPress={() => setShowMnemonic(!showMnemonic)}
+                      style={styles.eyeButton}
+                    >
+                      {showMnemonic ? (
+                        <EyeOff size={16} color={COLORS.textSecondary} />
+                      ) : (
+                        <Eye size={16} color={COLORS.textSecondary} />
+                      )}
+                    </TouchableOpacity>
+                    {showMnemonic && (
+                      <TouchableOpacity
+                        onPress={() => copyToClipboard(walletData.mnemonic, 'Recovery phrase')}
+                        style={styles.copyButton}
+                      >
+                        <Copy size={16} color={COLORS.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+                <Text style={styles.walletAddress}>
+                  {showMnemonic
+                    ? walletData.mnemonic
+                    : '•••• •••• •••• •••• •••• •••• •••• •••• •••• •••• •••• ••••'}
+                </Text>
+              </View>
+            </NeonCard>
+
+            <NeonButton
+              title="Share Wallet Address"
+              onPress={shareWallet}
+              style={styles.shareButton}
+              icon={<Share2 size={20} color={COLORS.textPrimary} />}
+            />
+            <TouchableOpacity
+              style={[styles.supportItem, { borderColor: COLORS.error + '30', borderWidth: 1, marginTop: SPACING.s }]}
+              onPress={handleRemoveWallet}
+              disabled={walletLoading}
+            >
+              <Trash2 size={20} color={COLORS.error} />
+              <Text style={[styles.supportText, { color: COLORS.error }]}>Remove Wallet</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Account Linking Section */}
         {hasWallet && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account Linking</Text>
-          
-          <TouchableOpacity style={styles.supportItem} onPress={linkGmail}>
-            <Mail size={20} color={COLORS.textSecondary} />
-            <Text style={styles.supportText}>Link Gmail Account</Text>
-            <Link size={16} color={COLORS.textSecondary} />
-          </TouchableOpacity>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Account Linking</Text>
 
-          <TouchableOpacity style={styles.supportItem} onPress={linkMobile}>
-            <Phone size={20} color={COLORS.textSecondary} />
-            <Text style={styles.supportText}>Link Mobile Number</Text>
-            <Link size={16} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.supportItem} onPress={linkGmail}>
+              <Mail size={20} color={COLORS.textSecondary} />
+              <Text style={styles.supportText}>Link Gmail Account</Text>
+              <Link size={16} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.supportItem} onPress={linkMobile}>
+              <Phone size={20} color={COLORS.textSecondary} />
+              <Text style={styles.supportText}>Link Mobile Number</Text>
+              <Link size={16} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Support Section */}
         {hasWallet && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Support & Help</Text>
-          
-          <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
-            <Mail size={20} color={COLORS.textSecondary} />
-            <Text style={styles.supportText}>Email Support</Text>
-            <ExternalLink size={16} color={COLORS.textSecondary} />
-          </TouchableOpacity>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Support & Help</Text>
 
-          <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
-            <Phone size={20} color={COLORS.textSecondary} />
-            <Text style={styles.supportText}>Phone Support</Text>
-            <ExternalLink size={16} color={COLORS.textSecondary} />
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
+              <Mail size={20} color={COLORS.textSecondary} />
+              <Text style={styles.supportText}>Email Support</Text>
+              <ExternalLink size={16} color={COLORS.textSecondary} />
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
-            <HelpCircle size={20} color={COLORS.textSecondary} />
-            <Text style={styles.supportText}>Help Center</Text>
-            <ExternalLink size={16} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
+              <Phone size={20} color={COLORS.textSecondary} />
+              <Text style={styles.supportText}>Phone Support</Text>
+              <ExternalLink size={16} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
+              <HelpCircle size={20} color={COLORS.textSecondary} />
+              <Text style={styles.supportText}>Help Center</Text>
+              <ExternalLink size={16} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Warning */}
