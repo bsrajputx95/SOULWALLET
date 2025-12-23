@@ -26,7 +26,7 @@ import {
   Activity,
   Shield,
 } from 'lucide-react-native';
-import { CandlestickChart } from 'react-native-wagmi-charts';
+import { LineChart, Grid } from 'react-native-svg-charts';
 import { WebView } from 'react-native-webview';
 import { COLORS } from '../../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
@@ -189,34 +189,17 @@ export default function CoinDetailsScreen() {
     }
   );
 
-  // Convert data to candlestick format
+  // Extract close prices for line chart
   const chartData = useMemo(() => {
     if (!priceHistoryData?.data || priceHistoryData.data.length === 0) {
-      // Generate mock candlestick data if no real data
-      const now = Date.now();
+      // Generate mock data if no real data
       return Array.from({ length: 50 }, (_, i) => {
         const base = coinData?.price || 100;
-        const variance = base * 0.03;
-        const open = base + (Math.random() - 0.5) * variance;
-        const close = base + (Math.random() - 0.5) * variance;
-        const high = Math.max(open, close) + Math.random() * variance * 0.5;
-        const low = Math.min(open, close) - Math.random() * variance * 0.5;
-        return {
-          timestamp: now - (50 - i) * 60000,
-          open,
-          high,
-          low,
-          close,
-        };
+        const variance = base * 0.05;
+        return base + (Math.random() - 0.5) * variance * 2;
       });
     }
-    return priceHistoryData.data.map((d: any) => ({
-      timestamp: d.time * 1000, // Convert to milliseconds
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
+    return priceHistoryData.data.map((d: any) => d.close);
   }, [priceHistoryData, coinData?.price]);
 
   // TradingView modal state
@@ -779,24 +762,14 @@ export default function CoinDetailsScreen() {
               </View>
             ) : (
               <View style={styles.chartContainer}>
-                <CandlestickChart.Provider data={chartData}>
-                  <CandlestickChart height={200}>
-                    <CandlestickChart.Candles
-                      positiveColor={COLORS.success}
-                      negativeColor={COLORS.error}
-                    />
-                    <CandlestickChart.Crosshair>
-                      <CandlestickChart.Tooltip />
-                    </CandlestickChart.Crosshair>
-                  </CandlestickChart>
-                  <CandlestickChart.PriceText
-                    style={styles.chartPriceText}
-                    format={({ value }: { value: string }) => {
-                      const num = parseFloat(value);
-                      return `$${num < 1 ? num.toFixed(6) : num.toFixed(2)}`;
-                    }}
-                  />
-                </CandlestickChart.Provider>
+                <LineChart
+                  style={{ height: 200 }}
+                  data={chartData}
+                  svg={{ stroke: COLORS.solana, strokeWidth: 2 }}
+                  contentInset={{ top: 20, bottom: 20 }}
+                >
+                  <Grid svg={{ stroke: COLORS.cardBackground + '50' }} />
+                </LineChart>
               </View>
             )}
 
