@@ -933,7 +933,7 @@ const styles = StyleSheet.create({
   earningsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: SPACING.l
+    marginBottom: SPACING.s
   },
   earningCard: {
     flex: 1,
