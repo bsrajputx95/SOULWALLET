@@ -324,8 +324,8 @@ export default function PostDetailScreen() {
         <NeonCard style={styles.postContainer}>
           <View style={styles.postHeader}>
             <View style={styles.profileContainer}>
-              {post.profileImage ? (
-                <Image source={{ uri: post.profileImage }} style={styles.avatar} />
+              {post.user?.profileImage || post.profileImage ? (
+                <Image source={{ uri: post.user?.profileImage || post.profileImage }} style={styles.avatar} />
               ) : (
                 <View style={[styles.avatar, styles.defaultAvatar]}>
                   <Text style={styles.avatarText}>
