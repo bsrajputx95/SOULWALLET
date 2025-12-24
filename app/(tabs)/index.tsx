@@ -421,8 +421,31 @@ export default function HomeScreen() {
   };
 
   const handleSwap = () => {
-    // Navigate to dedicated swap screen for real transaction
-    router.push('/swap');
+    // Validate inputs
+    const amount = parseFloat(swapAmount);
+    if (!swapAmount || isNaN(amount) || amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount to swap');
+      return;
+    }
+
+    // Check balance
+    const fromTokenData = availableTokens.find(t => t.symbol === fromToken);
+    if (fromTokenData && fromTokenData.balance < amount) {
+      Alert.alert('Insufficient Balance', `You don't have enough ${fromToken}. Balance: ${fromTokenData.balance.toFixed(6)}`);
+      return;
+    }
+
+    // Close modal and navigate to full swap screen with params
+    setShowSwapModal(false);
+    router.push({
+      pathname: '/swap',
+      params: {
+        fromSymbol: fromToken,
+        toSymbol: toToken,
+        amount: swapAmount,
+        slippage: slippage.toString(),
+      }
+    });
   };
 
   const handleBuy = () => {

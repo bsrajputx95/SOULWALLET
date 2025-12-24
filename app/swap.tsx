@@ -15,7 +15,7 @@ import {
   SafeAreaView,
   RefreshControl
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowUpDown, Settings, ChevronDown } from 'lucide-react-native';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 import { jupiterSwap } from '../services/jupiter-swap';
@@ -50,6 +50,14 @@ export default function SwapScreen() {
   const router = useRouter();
   const { wallet, publicKey, getAvailableTokens, refreshBalances, connection } = useSolanaWallet();
 
+  // Read params from modal navigation (if coming from home swap modal)
+  const routeParams = useLocalSearchParams<{
+    fromSymbol?: string;
+    toSymbol?: string;
+    amount?: string;
+    slippage?: string;
+  }>();
+
   const [fromToken, setFromToken] = useState<Token | null>(null);
   const [toToken, setToToken] = useState<Token | null>(null);
   const [fromAmount, setFromAmount] = useState<string>('');
@@ -70,6 +78,31 @@ export default function SwapScreen() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   const availableTokens = useMemo(() => getAvailableTokens(), [getAvailableTokens]);
+
+  // Pre-fill form from route params (from home swap modal)
+  useEffect(() => {
+    if (routeParams.amount) {
+      setFromAmount(routeParams.amount);
+    }
+    if (routeParams.slippage) {
+      const slip = parseFloat(routeParams.slippage);
+      if (!isNaN(slip)) setSlippage(slip);
+    }
+  }, [routeParams.amount, routeParams.slippage]);
+
+  // Pre-fill tokens from route params when availableTokens are ready
+  useEffect(() => {
+    if (availableTokens.length > 0) {
+      if (routeParams.fromSymbol) {
+        const from = availableTokens.find(t => t.symbol === routeParams.fromSymbol);
+        if (from) setFromToken(from);
+      }
+      if (routeParams.toSymbol) {
+        const to = availableTokens.find(t => t.symbol === routeParams.toSymbol);
+        if (to) setToToken(to);
+      }
+    }
+  }, [availableTokens, routeParams.fromSymbol, routeParams.toSymbol]);
 
   // tRPC queries
   const { data: supportedTokens } = trpc.swap.getSupportedTokens.useQuery();
