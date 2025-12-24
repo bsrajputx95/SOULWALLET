@@ -203,8 +203,8 @@ export default function HomeScreen() {
   const [coinsSearchQuery, setCoinsSearchQuery] = React.useState('');
   const [tradersSearchQuery, setTradersSearchQuery] = React.useState('');
   const [debouncedTradersSearch, setDebouncedTradersSearch] = React.useState('');
-  const [coinsTimeFilter, setCoinsTimeFilter] = React.useState<'1d' | '7d' | '1m' | '1y'>('1d');
-  const [tradersTimeFilter, setTradersTimeFilter] = React.useState<'1d' | '7d' | '1m' | '1y'>('1d');
+  const [coinsTimeFilter, setCoinsTimeFilter] = React.useState<'1h' | '1d' | '7d' | '1m' | '1y'>('1d');
+  const [tradersTimeFilter, setTradersTimeFilter] = React.useState<'1h' | '1d' | '7d' | '1m' | '1y'>('1d');
 
   // ✅ Debounced search for real-time market search
   const [debouncedCoinsSearch, setDebouncedCoinsSearch] = React.useState('');
@@ -479,7 +479,7 @@ export default function HomeScreen() {
                     <TouchableOpacity
                       style={styles.timeCycleButton}
                       onPress={() => {
-                        const periods: ('1d' | '7d' | '1m' | '1y')[] = ['1d', '7d', '1m', '1y'];
+                        const periods: ('1h' | '1d' | '7d' | '1m' | '1y')[] = ['1h', '1d', '7d', '1m', '1y'];
                         const currentIndex = periods.indexOf(coinsTimeFilter);
                         const nextIndex = (currentIndex + 1) % periods.length;
                         const nextPeriod = periods[nextIndex];
@@ -518,6 +518,7 @@ export default function HomeScreen() {
                   // Select the correct price change based on time filter
                   const getChangeForPeriod = () => {
                     switch (coinsTimeFilter) {
+                      case '1h': return coin.change1h || 0;
                       case '1d': return coin.change24h || 0;
                       case '7d': return coin.change7d || coin.change24h || 0;
                       case '1m': return (coin.change24h || 0) * 2; // Estimated
