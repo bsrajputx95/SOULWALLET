@@ -182,6 +182,17 @@ export default function SwapScreen() {
       return;
     }
 
+    // Check if user has sufficient balance
+    const swapAmount = parseFloat(fromAmount);
+    if (isNaN(swapAmount) || swapAmount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount to swap.');
+      return;
+    }
+    if (fromToken.balance < swapAmount) {
+      Alert.alert('Insufficient Balance', `You don't have enough ${fromToken.symbol}. Balance: ${fromToken.balance.toFixed(6)}`);
+      return;
+    }
+
     try {
       setIsSwapping(true);
 
