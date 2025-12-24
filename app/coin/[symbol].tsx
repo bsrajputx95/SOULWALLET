@@ -164,8 +164,7 @@ export default function CoinDetailsScreen() {
     return null;
   }, [apiData, symbol]);
 
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [topTraders, setTopTraders] = useState<TopTrader[]>([]);
+  // Removed: transactions and topTraders state - tabs now show "Coming Soon"
   const [activeTab, setActiveTab] = useState<'chart' | 'trades' | 'holders'>('chart');
   const [refreshing, setRefreshing] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
@@ -365,40 +364,7 @@ export default function CoinDetailsScreen() {
     });
   };
 
-  // Load mock transactions and traders (real data would come from separate API)
-  const loadMockData = useCallback(async () => {
-    if (!coinData) return;
-
-    const mockTransactions: Transaction[] = Array.from({ length: 50 }, (_, i) => ({
-      id: `tx-${i}`,
-      type: Math.random() > 0.5 ? 'buy' : 'sell',
-      amount: Math.random() * 10000,
-      price: coinData.price * (0.95 + Math.random() * 0.1),
-      timestamp: new Date(Date.now() - i * 60000).toISOString(),
-      wallet: generateMockAddress().slice(0, 8) + '...',
-      txHash: generateMockAddress(),
-    }));
-
-    const mockTopTraders: TopTrader[] = Array.from({ length: 10 }, (_, i) => ({
-      id: `trader-${i}`,
-      wallet: generateMockAddress().slice(0, 8) + '...',
-      username: `trader${i + 1}`,
-      pnl: (Math.random() - 0.3) * 100000,
-      winRate: 50 + Math.random() * 40,
-      trades: Math.floor(Math.random() * 1000),
-    }));
-
-    setTransactions(mockTransactions);
-    setTopTraders(mockTopTraders);
-  }, [coinData]);
-
-  // Load mock data when coin data is available - use symbol as dep instead of coinData/loadMockData to avoid loop
-  useEffect(() => {
-    if (coinData) {
-      loadMockData();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol]);
+  // Mock data loading removed - Trades and Holders tabs now show "Coming Soon"
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -833,70 +799,38 @@ export default function CoinDetailsScreen() {
         {activeTab === 'trades' && (
           <NeonCard style={styles.tradesCard}>
             <Text style={styles.sectionTitle}>Recent Transactions</Text>
-            {transactions.slice(0, 20).map((tx) => (
-              <View key={tx.id} style={styles.transactionItem}>
-                <View style={styles.transactionLeft}>
-                  <View
-                    style={[
-                      styles.transactionType,
-                      {
-                        backgroundColor:
-                          tx.type === 'buy' ? COLORS.success + '20' : COLORS.error + '20',
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.transactionTypeText,
-                        { color: tx.type === 'buy' ? COLORS.success : COLORS.error },
-                      ]}
-                    >
-                      {tx.type.toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.transactionDetails}>
-                    <Text style={styles.transactionAmount}>
-                      {formatLargeNumber(tx.amount)} {coinData.symbol}
-                    </Text>
-                    <Text style={styles.transactionWallet}>{tx.wallet}</Text>
-                  </View>
-                </View>
-                <View style={styles.transactionRight}>
-                  <Text style={styles.transactionPrice}>${formatPrice(tx.price)}</Text>
-                  <Text style={styles.transactionTime}>{formatTime(tx.timestamp)}</Text>
-                </View>
-              </View>
-            ))}
+            <View style={styles.comingSoonContainer}>
+              <Text style={styles.comingSoonText}>🚀 Coming Soon</Text>
+              <Text style={styles.comingSoonSubtext}>
+                Live transaction feed is under development
+              </Text>
+              <TouchableOpacity
+                style={styles.dexscreenerButton}
+                onPress={() => openLink(`https://dexscreener.com/solana/${coinData.contractAddress}`)}
+              >
+                <ExternalLink size={16} color={COLORS.solana} />
+                <Text style={styles.dexscreenerButtonText}>View on DexScreener</Text>
+              </TouchableOpacity>
+            </View>
           </NeonCard>
         )}
 
         {activeTab === 'holders' && (
           <NeonCard style={styles.holdersCard}>
-            <Text style={styles.sectionTitle}>Top Traders</Text>
-            {topTraders.map((trader, index) => (
-              <View key={trader.id} style={styles.traderItem}>
-                <View style={styles.traderLeft}>
-                  <Text style={styles.traderRank}>#{index + 1}</Text>
-                  <View style={styles.traderInfo}>
-                    <Text style={styles.traderName}>
-                      {trader.username || trader.wallet}
-                    </Text>
-                    <Text style={styles.traderTrades}>{trader.trades} trades</Text>
-                  </View>
-                </View>
-                <View style={styles.traderRight}>
-                  <Text
-                    style={[
-                      styles.traderPnl,
-                      { color: trader.pnl >= 0 ? COLORS.success : COLORS.error },
-                    ]}
-                  >
-                    {trader.pnl >= 0 ? '+' : ''}${formatLargeNumber(Math.abs(trader.pnl))}
-                  </Text>
-                  <Text style={styles.traderWinRate}>{trader.winRate.toFixed(1)}% WR</Text>
-                </View>
-              </View>
-            ))}
+            <Text style={styles.sectionTitle}>Token Holders</Text>
+            <View style={styles.comingSoonContainer}>
+              <Text style={styles.comingSoonText}>🚀 Coming Soon</Text>
+              <Text style={styles.comingSoonSubtext}>
+                Holder analytics is under development
+              </Text>
+              <TouchableOpacity
+                style={styles.dexscreenerButton}
+                onPress={() => openLink(`https://dexscreener.com/solana/${coinData.contractAddress}`)}
+              >
+                <ExternalLink size={16} color={COLORS.solana} />
+                <Text style={styles.dexscreenerButtonText}>View on DexScreener</Text>
+              </TouchableOpacity>
+            </View>
           </NeonCard>
         )}
 
@@ -1743,5 +1677,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: SPACING.m,
     textAlign: 'center',
+  },
+  // Coming Soon styles
+  comingSoonContainer: {
+    alignItems: 'center',
+    paddingVertical: SPACING.l,
+  },
+  comingSoonText: {
+    ...FONTS.orbitronBold,
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    marginBottom: SPACING.s,
+  },
+  comingSoonSubtext: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: SPACING.m,
+  },
+  dexscreenerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.solana + '20',
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.medium,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '40',
+  },
+  dexscreenerButtonText: {
+    ...FONTS.sfProMedium,
+    color: COLORS.solana,
+    fontSize: 14,
+    marginLeft: SPACING.xs,
   },
 });
