@@ -91,8 +91,25 @@ interface TopTrader {
 }
 
 export default function CoinDetailsScreen() {
-  const { symbol } = useLocalSearchParams<{ symbol: string }>();
-  if (__DEV__) console.log('CoinDetailsScreen - symbol param:', symbol);
+  // Read all params passed from home screen for data consistency
+  const params = useLocalSearchParams<{
+    symbol: string;
+    price?: string;
+    change?: string;
+    logo?: string;
+    contractAddress?: string;
+    pairAddress?: string;
+    name?: string;
+  }>();
+  const symbol = params.symbol;
+
+  // Use passed data if available (from home screen navigation)
+  const passedPrice = params.price ? parseFloat(params.price) : undefined;
+  const passedChange = params.change ? parseFloat(params.change) : undefined;
+  const passedLogo = params.logo || undefined;
+  const passedContractAddress = params.contractAddress || undefined;
+  const passedPairAddress = params.pairAddress || undefined;
+  const passedName = params.name || undefined;
 
   // Fetch real token data from API
   const {
@@ -109,14 +126,15 @@ export default function CoinDetailsScreen() {
     }
   );
 
-  // Transform API data to CoinData format - memoized to prevent recreation
+  // Transform API data to CoinData format - prefer passed params for consistency
   const coinData: CoinData | null = useMemo(() => {
     if (apiData) {
       return {
         symbol: apiData.symbol,
-        name: apiData.name,
-        price: apiData.price,
-        change24h: apiData.priceChange24h,
+        name: passedName || apiData.name,
+        // Use passed price/change from home screen for consistency
+        price: passedPrice !== undefined ? passedPrice : apiData.price,
+        change24h: passedChange !== undefined ? passedChange : apiData.priceChange24h,
         priceChange1h: apiData.priceChange1h,
         priceChange7d: apiData.priceChange7d,
         marketCap: apiData.marketCap,
@@ -124,11 +142,12 @@ export default function CoinDetailsScreen() {
         volume24h: apiData.volume24h,
         liquidity: apiData.liquidity,
         holders: apiData.holders || 0,
-        contractAddress: apiData.address,
+        contractAddress: passedContractAddress || apiData.address,
         verified: apiData.verified,
         age: apiData.pairAge ? `${apiData.pairAge}h` : 'Unknown',
         pairAge: apiData.pairAge,
-        logo: apiData.logo,
+        // Use passed logo from home screen for consistency
+        logo: passedLogo || apiData.logo,
         description: apiData.description,
         website: apiData.website,
         twitter: apiData.twitter,

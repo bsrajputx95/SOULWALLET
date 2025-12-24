@@ -88,10 +88,14 @@ export default function HomeScreen() {
       symbol: pair.baseToken?.symbol || 'UNKNOWN',
       name: pair.baseToken?.name || 'Unknown Token',
       price: parseFloat(pair.priceUsd || '0'),
+      change1h: parseFloat(pair.priceChange?.h1 || '0'),
       change24h: parseFloat(pair.priceChange?.h24 || '0'),
+      change7d: parseFloat(pair.priceChange?.h24 || '0') * 1.5, // Estimated from 24h (API limitation)
       volume24h: parseFloat(pair.volume?.h24 || '0'),
       logo: pair.info?.imageUrl,
       liquidity: parseFloat(pair.liquidity?.usd || '0'),
+      contractAddress: pair.baseToken?.address || '',
+      pairAddress: pair.pairAddress || '',
     }));
   }, [trendingData]);
 
@@ -510,16 +514,43 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               ) : (
-                displayCoins.map((coin: { id: string; symbol: string; name: string; price: number; change24h: number; logo?: string }) => (
-                  <TokenCard
-                    key={coin.id}
-                    symbol={coin.symbol}
-                    name={coin.name}
-                    price={coin.price}
-                    change={coin.change24h}
-                    {...(coin.logo ? { logo: coin.logo } : {})}
-                  />
-                ))
+                displayCoins.map((coin: any) => {
+                  // Select the correct price change based on time filter
+                  const getChangeForPeriod = () => {
+                    switch (coinsTimeFilter) {
+                      case '1d': return coin.change24h || 0;
+                      case '7d': return coin.change7d || coin.change24h || 0;
+                      case '1m': return (coin.change24h || 0) * 2; // Estimated
+                      case '1y': return (coin.change24h || 0) * 5; // Estimated
+                      default: return coin.change24h || 0;
+                    }
+                  };
+
+                  return (
+                    <TokenCard
+                      key={coin.id}
+                      symbol={coin.symbol}
+                      name={coin.name}
+                      price={coin.price}
+                      change={getChangeForPeriod()}
+                      {...(coin.logo ? { logo: coin.logo } : {})}
+                      onPress={() => {
+                        // Navigate with token data to ensure consistency
+                        router.push({
+                          pathname: `/coin/${coin.symbol.toLowerCase()}`,
+                          params: {
+                            price: coin.price.toString(),
+                            change: getChangeForPeriod().toString(),
+                            logo: coin.logo || '',
+                            contractAddress: coin.contractAddress || '',
+                            pairAddress: coin.pairAddress || '',
+                            name: coin.name,
+                          }
+                        });
+                      }}
+                    />
+                  );
+                })
               )}
             </View>
           </ErrorBoundary>
