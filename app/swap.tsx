@@ -177,12 +177,8 @@ export default function SwapScreen() {
       Alert.alert('Swap Disabled', 'Swaps are disabled in this environment.');
       return;
     }
-    if (!flags?.simulationMode) {
-      Alert.alert('Not Available', 'On-chain swaps are not enabled in this environment.');
-      return;
-    }
     if (!wallet || !publicKey || !quote || !fromToken || !toToken || routeOptions.length === 0) {
-      Alert.alert('Error', 'Missing required data for swap');
+      Alert.alert('Error', 'Missing required data for swap. Please ensure you have entered an amount and have a valid quote.');
       return;
     }
 
