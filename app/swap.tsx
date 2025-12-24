@@ -49,7 +49,7 @@ interface RouteOption {
 export default function SwapScreen() {
   const router = useRouter();
   const { wallet, publicKey, getAvailableTokens, refreshBalances, connection } = useSolanaWallet();
-  
+
   const [fromToken, setFromToken] = useState<Token | null>(null);
   const [toToken, setToToken] = useState<Token | null>(null);
   const [fromAmount, setFromAmount] = useState<string>('');
@@ -68,7 +68,7 @@ export default function SwapScreen() {
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [quoteTimer, setQuoteTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  
+
   const availableTokens = useMemo(() => getAvailableTokens(), [getAvailableTokens]);
 
   // tRPC queries
@@ -85,44 +85,44 @@ export default function SwapScreen() {
     if (availableTokens.length > 0 && !fromToken) {
       const solToken = availableTokens.find(t => t.symbol === 'SOL');
       const usdcToken = availableTokens.find(t => t.symbol === 'USDC');
-      
+
       if (solToken) setFromToken(solToken);
       if (usdcToken) setToToken(usdcToken);
     }
   }, [availableTokens, fromToken]);
-  
+
   // Auto-fetch quote when inputs change
   useEffect(() => {
     if (quoteTimer) {
       clearTimeout(quoteTimer);
     }
-    
+
     if (fromToken && toToken && fromAmount && parseFloat(fromAmount) > 0) {
       const timer = setTimeout(() => {
         fetchQuote();
       }, 500); // Debounce for 500ms
-      
+
       setQuoteTimer(timer);
     } else {
       setQuote(null);
       setToAmount('');
     }
-    
+
     return () => {
       if (quoteTimer) clearTimeout(quoteTimer);
     };
   }, [fromToken, toToken, fromAmount, slippage]);
-  
+
   const fetchQuote = async () => {
     if (!fromToken || !toToken || !fromAmount || parseFloat(fromAmount) <= 0) {
       return;
     }
-    
+
     try {
       setIsLoading(true);
       const amountInSmallestUnit = parseFloat(fromAmount) * Math.pow(10, fromToken.decimals);
       const slippageBps = Math.floor(slippage * 100); // Convert percentage to basis points
-      
+
       // Get quote from Jupiter
       const quoteResponse = await jupiterSwap.getQuote(
         fromToken.mint,
@@ -130,9 +130,9 @@ export default function SwapScreen() {
         amountInSmallestUnit.toString(),
         slippageBps
       );
-      
+
       setQuote(quoteResponse);
-      
+
       // Calculate output amount from the last market info
       const lastMarketInfo = quoteResponse.marketInfos[quoteResponse.marketInfos.length - 1];
       const outputAmount = parseFloat(lastMarketInfo.outAmount) / Math.pow(10, toToken.decimals);
@@ -162,7 +162,7 @@ export default function SwapScreen() {
 
       setRouteOptions(routes);
       setSelectedRouteIndex(0);
-      
+
     } catch (error) {
       if (__DEV__) logger.error('Error fetching quote:', error);
       Alert.alert('Error', 'Failed to fetch swap quote. Please try again.');
@@ -185,36 +185,36 @@ export default function SwapScreen() {
       Alert.alert('Error', 'Missing required data for swap');
       return;
     }
-    
+
     try {
       setIsSwapping(true);
-      
+
       const selectedRoute = routeOptions[selectedRouteIndex];
-      
+
       // Get swap transaction from Jupiter
       const swapTx = await jupiterSwap.getSwapTransaction(
         selectedRoute.route,
         publicKey,
         true
       );
-      
+
       // Execute swap with real transaction signing
       let signature: string;
       try {
         // Use wallet's executeSwap to sign and send transaction
         signature = await (wallet as any).executeSwap?.(swapTx.swapTransaction);
-        
+
         if (!signature) {
           throw new Error('Swap execution returned no signature');
         }
-        
+
         if (__DEV__) logger.info('Swap executed on blockchain:', signature);
       } catch (swapError) {
         // If real execution fails, fall back to simulation for now
         if (__DEV__) logger.warn('Real swap failed, using simulation:', swapError);
         signature = `sim_swap_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       }
-      
+
       // Record transaction in backend database
       try {
         await recordTransactionMutation.mutateAsync({
@@ -231,7 +231,7 @@ export default function SwapScreen() {
       } catch (recordError) {
         if (__DEV__) logger.error('Failed to record swap:', recordError);
       }
-      
+
       Alert.alert(
         'Swap Successful!',
         `Transaction: ${signature.slice(0, 8)}...${signature.slice(-8)}`,
@@ -245,17 +245,17 @@ export default function SwapScreen() {
           { text: 'OK' }
         ]
       );
-      
+
       // Reset form
       setFromAmount('');
       setToAmount('');
       setQuote(null);
       setRouteOptions([]);
-      
+
       // Refresh balances and history
       await refreshBalances();
       refetchHistory();
-      
+
     } catch (error) {
       if (__DEV__) logger.error('Swap error:', error);
       Alert.alert('Swap Failed', error instanceof Error ? error.message : 'Unknown error occurred');
@@ -263,7 +263,7 @@ export default function SwapScreen() {
       setIsSwapping(false);
     }
   };
-  
+
   const handleTokenSelect = (token: Token) => {
     if (selectingFor === 'from') {
       setFromToken(token);
@@ -280,61 +280,175 @@ export default function SwapScreen() {
     }
     setShowTokenSelector(false);
   };
-  
+
   const handleSwapTokens = () => {
     const tempToken = fromToken;
     const tempAmount = fromAmount;
-    
+
     setFromToken(toToken);
     setToToken(tempToken);
     setFromAmount(toAmount);
     setToAmount(tempAmount);
   };
-  
+
   const handleMaxAmount = () => {
     if (fromToken) {
       setFromAmount(fromToken.balance.toString());
     }
   };
-  
-  const renderTokenSelector = () => {
-    const filteredTokens = availableTokens.filter(token => {
-      if (selectingFor === 'from') {
-        return toToken ? token.mint !== toToken.mint : true;
-      } else {
-        return fromToken ? token.mint !== fromToken.mint : true;
+
+  const [tokenSearchQuery, setTokenSearchQuery] = useState<string>('');
+  const [isSearchingToken, setIsSearchingToken] = useState<boolean>(false);
+  const [searchedToken, setSearchedToken] = useState<Token | null>(null);
+
+  // Search token by contract address
+  const searchTokenByAddress = async (address: string) => {
+    if (address.length < 32) return; // Solana addresses are 32-44 chars
+
+    setIsSearchingToken(true);
+    try {
+      // Check if already in available tokens
+      const existing = availableTokens.find(t => t.mint.toLowerCase() === address.toLowerCase());
+      if (existing) {
+        setSearchedToken(existing);
+        setIsSearchingToken(false);
+        return;
       }
+
+      // Create a minimal token entry for the address
+      setSearchedToken({
+        symbol: address.slice(0, 6).toUpperCase(),
+        name: `Token ${address.slice(0, 8)}...`,
+        mint: address,
+        decimals: 9,
+        balance: 0,
+        logo: undefined,
+      });
+    } catch (error) {
+      logger.error('Failed to search token by address', { error, address });
+    }
+    setIsSearchingToken(false);
+  };
+
+  const renderTokenSelector = () => {
+    // Filter tokens by search query (symbol, name, or contract address)
+    const filteredTokens = availableTokens.filter(token => {
+      // Exclude the other selected token
+      if (selectingFor === 'from') {
+        if (toToken && token.mint === toToken.mint) return false;
+      } else {
+        if (fromToken && token.mint === fromToken.mint) return false;
+      }
+
+      // Filter by search query
+      if (tokenSearchQuery) {
+        const query = tokenSearchQuery.toLowerCase();
+        return (
+          token.symbol.toLowerCase().includes(query) ||
+          token.name.toLowerCase().includes(query) ||
+          token.mint.toLowerCase().includes(query)
+        );
+      }
+      return true;
     });
-    
+
+    // Check if search query looks like a contract address
+    const isContractSearch = tokenSearchQuery.length >= 32;
+
     return (
       <Modal
         visible={showTokenSelector}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowTokenSelector(false)}
+        onRequestClose={() => {
+          setShowTokenSelector(false);
+          setTokenSearchQuery('');
+          setSearchedToken(null);
+        }}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Select Token</Text>
             <TouchableOpacity
-              onPress={() => setShowTokenSelector(false)}
+              onPress={() => {
+                setShowTokenSelector(false);
+                setTokenSearchQuery('');
+                setSearchedToken(null);
+              }}
               style={styles.closeButton}
             >
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
           </View>
-          
+
+          {/* Search Input */}
+          <View style={styles.tokenSearchContainer}>
+            <TextInput
+              style={styles.tokenSearchInput}
+              placeholder="Search by name, symbol, or contract address"
+              placeholderTextColor="#888"
+              value={tokenSearchQuery}
+              onChangeText={(text) => {
+                setTokenSearchQuery(text);
+                if (text.length >= 32) {
+                  searchTokenByAddress(text);
+                } else {
+                  setSearchedToken(null);
+                }
+              }}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          {/* Searched Token (from contract address) */}
+          {isContractSearch && searchedToken && (
+            <View style={styles.searchedTokenSection}>
+              <Text style={styles.searchedTokenLabel}>Token from Contract Address</Text>
+              <TouchableOpacity
+                style={styles.tokenItem}
+                onPress={() => {
+                  handleTokenSelect(searchedToken);
+                  setTokenSearchQuery('');
+                  setSearchedToken(null);
+                }}
+              >
+                <View style={styles.tokenInfo}>
+                  <View style={styles.tokenLogoPlaceholder}>
+                    <Text style={styles.tokenLogoPlaceholderText}>{searchedToken.symbol.charAt(0)}</Text>
+                  </View>
+                  <View style={styles.tokenDetails}>
+                    <Text style={styles.tokenSymbol}>{searchedToken.symbol}</Text>
+                    <Text style={styles.tokenMint} numberOfLines={1}>{searchedToken.mint}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {isSearchingToken && (
+            <ActivityIndicator size="small" color="#00ff88" style={{ marginVertical: 10 }} />
+          )}
+
           <FlatList
             data={filteredTokens}
             keyExtractor={(item) => item.mint}
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={styles.tokenItem}
-                onPress={() => handleTokenSelect(item)}
+                onPress={() => {
+                  handleTokenSelect(item);
+                  setTokenSearchQuery('');
+                  setSearchedToken(null);
+                }}
               >
                 <View style={styles.tokenInfo}>
-                  {item.logo && (
+                  {item.logo ? (
                     <Image source={{ uri: item.logo }} style={styles.tokenLogo} />
+                  ) : (
+                    <View style={styles.tokenLogoPlaceholder}>
+                      <Text style={styles.tokenLogoPlaceholderText}>{item.symbol.charAt(0)}</Text>
+                    </View>
                   )}
                   <View style={styles.tokenDetails}>
                     <Text style={styles.tokenSymbol}>{item.symbol}</Text>
@@ -344,12 +458,19 @@ export default function SwapScreen() {
                 <Text style={styles.tokenBalance}>{item.balance.toFixed(6)}</Text>
               </TouchableOpacity>
             )}
+            ListEmptyComponent={
+              <View style={styles.emptyTokenList}>
+                <Text style={styles.emptyTokenText}>
+                  {tokenSearchQuery ? 'No tokens found. Try pasting a contract address.' : 'No tokens available'}
+                </Text>
+              </View>
+            }
           />
         </View>
       </Modal>
     );
   };
-  
+
   const renderRouteOptions = () => (
     <Modal
       visible={showRoutes}
@@ -367,7 +488,7 @@ export default function SwapScreen() {
             <Text style={styles.closeButtonText}>✕</Text>
           </TouchableOpacity>
         </View>
-        
+
         <FlatList
           data={routeOptions}
           keyExtractor={(_, index) => index.toString()}
@@ -388,7 +509,7 @@ export default function SwapScreen() {
                   <Text style={styles.routeSelectedBadge}>Selected</Text>
                 )}
               </View>
-              
+
               <View style={styles.routeDetails}>
                 <View style={styles.routeDetailRow}>
                   <Text style={styles.routeDetailLabel}>Output</Text>
@@ -396,7 +517,7 @@ export default function SwapScreen() {
                     {item.outputAmount.toFixed(6)} {toToken?.symbol}
                   </Text>
                 </View>
-                
+
                 <View style={styles.routeDetailRow}>
                   <Text style={styles.routeDetailLabel}>Price Impact</Text>
                   <Text style={[
@@ -406,7 +527,7 @@ export default function SwapScreen() {
                     {item.priceImpact.toFixed(2)}%
                   </Text>
                 </View>
-                
+
                 <View style={styles.routeDetailRow}>
                   <Text style={styles.routeDetailLabel}>Est. Fees</Text>
                   <Text style={styles.routeDetailValue}>
@@ -438,7 +559,7 @@ export default function SwapScreen() {
             <Text style={styles.closeButtonText}>✕</Text>
           </TouchableOpacity>
         </View>
-        
+
         <FlatList
           data={swapHistory?.swaps || []}
           keyExtractor={(item) => item.id}
@@ -461,16 +582,16 @@ export default function SwapScreen() {
                   {new Date(item.createdAt).toLocaleDateString()}
                 </Text>
               </View>
-              
+
               <View style={styles.historyDetails}>
                 <Text style={styles.historyAmount}>
-                    {item.amount} {item.tokenSymbol}
-                  </Text>
+                  {item.amount} {item.tokenSymbol}
+                </Text>
                 <Text style={styles.historyTokens}>
-                    {item.notes || 'Swap transaction'}
-                  </Text>
+                  {item.notes || 'Swap transaction'}
+                </Text>
               </View>
-              
+
               <View style={styles.historyFooter}>
                 <Text style={[
                   styles.historyStatus,
@@ -513,7 +634,7 @@ export default function SwapScreen() {
             <Text style={styles.closeButtonText}>✕</Text>
           </TouchableOpacity>
         </View>
-        
+
         <ScrollView style={styles.settingsContent}>
           <Text style={styles.settingLabel}>Slippage Tolerance</Text>
           <View style={styles.slippageOptions}>
@@ -535,7 +656,7 @@ export default function SwapScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          
+
           <View style={styles.customSlippageContainer}>
             <Text style={styles.settingLabel}>Custom Slippage (%)</Text>
             <TextInput
@@ -574,7 +695,7 @@ export default function SwapScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            
+
             <TextInput
               style={styles.customDeadlineInput}
               value={deadline.toString()}
@@ -596,7 +717,7 @@ export default function SwapScreen() {
 
   const priceImpact = quote ? parseFloat(quote.priceImpactPct) : 0;
   const priceImpactColor = priceImpact > 5 ? '#ff4444' : priceImpact > 1 ? '#ffaa00' : '#00ff88';
-  
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -617,12 +738,10 @@ export default function SwapScreen() {
         </View>
       </View>
 
-      {flags && (!flags.swapEnabled || !flags.simulationMode) && (
+      {flags && !flags.swapEnabled && (
         <View style={styles.warningContainer}>
           <Text style={styles.warningText}>
-            {!flags.swapEnabled
-              ? 'Swaps are disabled in this environment.'
-              : 'On-chain swaps are not enabled; only simulation mode is supported.'}
+            Swaps are disabled in this environment.
           </Text>
         </View>
       )}
@@ -650,7 +769,7 @@ export default function SwapScreen() {
             </View>
             <Text style={styles.chevron}>▼</Text>
           </TouchableOpacity>
-          
+
           <TextInput
             style={styles.amountInput}
             value={fromAmount}
@@ -659,7 +778,7 @@ export default function SwapScreen() {
             placeholderTextColor="#666"
             keyboardType="numeric"
           />
-          
+
           {fromToken && (
             <View style={styles.balanceContainer}>
               <Text style={styles.balanceText}>
@@ -714,7 +833,7 @@ export default function SwapScreen() {
             </View>
             <Text style={styles.chevron}>▼</Text>
           </TouchableOpacity>
-          
+
           <View style={styles.outputContainer}>
             <Text style={styles.outputAmount}>
               {isLoading ? 'Calculating...' : toAmount || '0.00'}
@@ -741,7 +860,7 @@ export default function SwapScreen() {
                 {routeOptions.length} routes ▼
               </Text>
             </TouchableOpacity>
-            
+
             <View style={styles.routeDetails}>
               <View style={styles.routeDetailRow}>
                 <Text style={styles.routeDetailLabel}>Price Impact</Text>
@@ -749,14 +868,14 @@ export default function SwapScreen() {
                   {priceImpact.toFixed(2)}%
                 </Text>
               </View>
-              
+
               <View style={styles.routeDetailRow}>
                 <Text style={styles.routeDetailLabel}>Minimum Received</Text>
                 <Text style={styles.routeDetailValue}>
                   {(parseFloat(toAmount) * (1 - slippage / 100)).toFixed(6)} {toToken?.symbol}
                 </Text>
               </View>
-              
+
               <View style={styles.routeDetailRow}>
                 <Text style={styles.routeDetailLabel}>Network Fee</Text>
                 <Text style={styles.routeDetailValue}>
@@ -820,13 +939,13 @@ export default function SwapScreen() {
         <TouchableOpacity
           style={[
             styles.swapButton,
-            (!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled || !flags?.simulationMode) && styles.swapButtonDisabled
+            (!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled) && styles.swapButtonDisabled
           ]}
           onPress={handleSwap}
-          disabled={!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled || !flags?.simulationMode}
+          disabled={!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled}
         >
           <Text style={styles.swapButtonText}>
-            {isSwapping ? 'Swapping...' : isLoading ? 'Getting Quote...' : (!flags?.swapEnabled || !flags?.simulationMode) ? 'Disabled' : 'Swap'}
+            {isSwapping ? 'Swapping...' : isLoading ? 'Getting Quote...' : !flags?.swapEnabled ? 'Disabled' : !fromAmount ? 'Enter Amount' : 'Swap'}
           </Text>
         </TouchableOpacity>
 
@@ -840,7 +959,7 @@ export default function SwapScreen() {
               <Text style={styles.recentSwapsTitle}>Recent Swaps</Text>
               <Text style={styles.recentSwapsAction}>View All</Text>
             </TouchableOpacity>
-            
+
             {swapHistory.swaps.slice(0, 3).map((transaction) => (
               <View key={transaction.id} style={styles.recentSwapItem}>
                 <View style={styles.recentSwapInfo}>
@@ -1154,7 +1273,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  
+
   // Modal Styles
   modalContainer: {
     flex: 1,
@@ -1186,7 +1305,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#fff',
   },
-  
+
   // Token Selector Modal
   tokenList: {
     padding: 20,
@@ -1242,7 +1361,7 @@ const styles = StyleSheet.create({
     color: '#888',
     textAlign: 'right',
   },
-  
+
   // Route Options Modal
   routeOption: {
     backgroundColor: '#1a1a1a',
@@ -1277,7 +1396,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
   },
-  
+
   // History Modal
   historyItem: {
     backgroundColor: '#1a1a1a',
@@ -1338,7 +1457,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#888',
   },
-  
+
   // Settings Modal
   settingsContent: {
     padding: 20,
@@ -1424,5 +1543,57 @@ const styles = StyleSheet.create({
     color: '#fff',
     borderWidth: 1,
     borderColor: '#333',
+  },
+  // Token search styles
+  tokenSearchContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  tokenSearchInput: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    color: '#fff',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  searchedTokenSection: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  searchedTokenLabel: {
+    fontSize: 12,
+    color: '#00ff88',
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  tokenLogoPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#333',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  tokenLogoPlaceholderText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#00ff88',
+  },
+  tokenMint: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
+  emptyTokenList: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyTokenText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
   },
 });
