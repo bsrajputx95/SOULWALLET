@@ -216,31 +216,21 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
   const createWalletEncrypted = async (password: string) => {
     try {
-      console.log('[WALLET] Starting createWalletEncrypted...');
       setState(prev => ({ ...prev, isLoading: true }));
 
-      console.log('[WALLET] Generating keypair...');
       const wallet = Keypair.generate();
-      console.log('[WALLET] Keypair generated successfully');
-
       const privateKeyString = bs58.encode(wallet.secretKey);
       const publicKey = wallet.publicKey.toString();
-      console.log('[WALLET] Public key:', publicKey);
 
-      console.log('[WALLET] Storing encrypted private key...');
       await SecureStorage.setEncryptedPrivateKey(privateKeyString, password);
-      console.log('[WALLET] Encrypted private key stored');
-
       await AsyncStorage.setItem(ENCRYPTED_MARKER_KEY, 'true');
       await deleteSecureItem(STORAGE_KEY);
 
       setState(prev => ({ ...prev, wallet, publicKey, isLoading: false, needsUnlock: false }));
       await syncWalletAddressToBackend(publicKey);
-      console.log('[WALLET] Wallet created successfully:', publicKey);
       logger.info('New encrypted wallet created:', publicKey);
       return wallet;
     } catch (error) {
-      console.error('[WALLET] Error creating wallet:', error);
       if (__DEV__) logger.error('Error creating encrypted wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw new Error('Failed to create encrypted wallet. Please try again.');

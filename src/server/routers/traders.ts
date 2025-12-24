@@ -11,9 +11,9 @@ import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
 import NodeCache from 'node-cache';
 
-const cache = new NodeCache({ stdTTL: 300 });
+const cache = new NodeCache({ stdTTL: 86400 }); // 24 hours cache for featured traders
 
- 
+
 
 export const tradersRouter = router({
   /**
@@ -82,9 +82,9 @@ export const tradersRouter = router({
         return { success: true, data: sortedTraders, count: sortedTraders.length };
       } catch (error) {
         logger.error('Error fetching top traders:', error);
-        throw new TRPCError({ 
-          code: 'INTERNAL_SERVER_ERROR', 
-          message: 'Failed to fetch top traders' 
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch top traders'
         });
       }
     }),
@@ -106,24 +106,24 @@ export const tradersRouter = router({
             ],
           },
         });
-        
+
         if (!trader) {
-          throw new TRPCError({ 
-            code: 'NOT_FOUND', 
-            message: 'Trader not found' 
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Trader not found'
           });
         }
-        
+
         const [pnlData, tokensData] = await Promise.all([
           birdeyeData.getWalletPnL(trader.walletAddress),
           birdeyeData.getWalletTokens(trader.walletAddress),
         ]);
-        
+
         const totalPnL = (pnlData as any)?.data?.total_pnl_usd || 0;
         const realizedProfit = (pnlData as any)?.data?.total_realized_profit_usd || 0;
         const unrealizedProfit = (pnlData as any)?.data?.total_unrealized_profit_usd || 0;
         const roi = (pnlData as any)?.data?.roi_percentage || 0;
-        
+
         return {
           success: true,
           data: {
@@ -149,9 +149,9 @@ export const tradersRouter = router({
         };
       } catch (error) {
         logger.error(`Error fetching trader ${input.identifier}:`, error);
-        throw new TRPCError({ 
-          code: 'INTERNAL_SERVER_ERROR', 
-          message: 'Failed to fetch trader details' 
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch trader details'
         });
       }
     }),

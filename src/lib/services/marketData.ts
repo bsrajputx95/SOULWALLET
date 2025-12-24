@@ -147,12 +147,20 @@ class MarketDataService {
     const cached = this.cache.get(key);
     if (cached) return cached;
 
+    // Stablecoins to exclude
+    const STABLECOIN_SYMBOLS = ['USDC', 'USDT', 'DAI', 'BUSD', 'TUSD', 'USDP', 'FRAX', 'LUSD', 'GUSD', 'PAX', 'PYUSD', 'USDD'];
+    const STABLECOIN_ADDRESSES = [
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+      'FtgGSFADXBtroxq8VCausXRr2of47QBf5AS1NtZCu4GD', // BRZ
+    ];
+
     try {
-      // Search for popular Solana ecosystem tokens
-      const popularTokens = ['SOL', 'USDC', 'BONK', 'WIF', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY'];
+      // Search for popular trending Solana meme/utility tokens (NO stablecoins)
+      const trendingTokens = ['BONK', 'WIF', 'POPCAT', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY', 'ORCA', 'PENGU', 'AI16Z', 'GOAT', 'FARTCOIN'];
 
       const results = await Promise.all(
-        popularTokens.map(async (token) => {
+        trendingTokens.map(async (token) => {
           try {
             return await this.search(token);
           } catch (error) {
@@ -164,20 +172,48 @@ class MarketDataService {
       // Combine all pairs
       const allPairs = results.flatMap(r => r.pairs || []);
 
-      // Sort by 24h volume (descending)
-      const sortedByVolume = allPairs.sort((a: any, b: any) => {
-        const volumeA = parseFloat(a.volume?.h24 || '0');
-        const volumeB = parseFloat(b.volume?.h24 || '0');
-        return volumeB - volumeA;
+      // Apply quality filters
+      const filteredPairs = allPairs.filter((pair: any) => {
+        // Must be Solana chain
+        if (pair.chainId !== 'solana') return false;
+
+        // Filter out stablecoins by symbol
+        const symbol = pair.baseToken?.symbol?.toUpperCase() || '';
+        if (STABLECOIN_SYMBOLS.includes(symbol)) return false;
+
+        // Filter out stablecoins by address
+        const address = pair.baseToken?.address || '';
+        if (STABLECOIN_ADDRESSES.includes(address)) return false;
+
+        // Minimum liquidity $50,000
+        const liquidity = parseFloat(pair.liquidity?.usd || '0');
+        if (liquidity < 50000) return false;
+
+        // Minimum 24h volume $25,000
+        const volume24h = parseFloat(pair.volume?.h24 || '0');
+        if (volume24h < 25000) return false;
+
+        // Must have valid price
+        const price = parseFloat(pair.priceUsd || '0');
+        if (price <= 0) return false;
+
+        return true;
+      });
+
+      // Sort by absolute price change (most volatile = trending)
+      const sortedByTrending = filteredPairs.sort((a: any, b: any) => {
+        const changeA = Math.abs(parseFloat(a.priceChange?.h24 || '0'));
+        const changeB = Math.abs(parseFloat(b.priceChange?.h24 || '0'));
+        return changeB - changeA;
       });
 
       // Remove duplicates based on base token address
-      const uniquePairs = sortedByVolume.filter((pair: any, index: number, self: any[]) =>
+      const uniquePairs = sortedByTrending.filter((pair: any, index: number, self: any[]) =>
         index === self.findIndex((p: any) => p.baseToken?.address === pair.baseToken?.address)
       );
 
-      const trending = { pairs: uniquePairs.slice(0, 50) };
-      this.cache.set(key, trending, 300); // Cache for 5 minutes
+      const trending = { pairs: uniquePairs.slice(0, 20) };
+      this.cache.set(key, trending, 120); // Cache for 2 minutes for fresher data
       return trending;
     } catch (error) {
       // Fallback to simple solana search

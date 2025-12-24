@@ -244,8 +244,8 @@ export default function HomeScreen() {
 
   // ✅ Fetch top traders from backend (Birdeye data)
   const { data: tradersData, isLoading: tradersLoading } = trpc.traders.getTopTraders.useQuery(
-    { limit: 10, period: '7d' },
-    { enabled: isAuthenticated, staleTime: 300_000, refetchInterval: 300_000, refetchOnWindowFocus: false }
+    { limit: 5, period: '7d' },
+    { enabled: isAuthenticated, staleTime: 86_400_000, refetchInterval: 86_400_000, refetchOnWindowFocus: false }
   );
 
   const topTraders = tradersData?.data || [];
