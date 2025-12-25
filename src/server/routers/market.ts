@@ -3,6 +3,34 @@ import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { marketData } from '../../lib/services/marketData';
 
+// Well-known token logos for popular Solana tokens as fallback
+const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
+  'SOL': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+  'RAY': 'https://raw.githubusercontent.com/raydium-io/media-assets/master/logo/logo_200x200.png',
+  'JUP': 'https://static.jup.ag/jup/icon.png',
+  'USDC': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
+  'USDT': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+  'BONK': 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
+  'WIF': 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link',
+  'POPCAT': 'https://bafkreidvnhdzuq3pvhnzq26hjydmhrr2xw2flkxkflg7swmrxnx7c7xvey.ipfs.nftstorage.link',
+  'PYTH': 'https://pyth.network/token.svg',
+  'JTO': 'https://metadata.jito.network/token/jto/icon.png',
+  'ORCA': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE/logo.png',
+  'MNGO': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/MangoCzJ36AjZyKwVj3VnYU4GTonjfVEnJmvvWaxLac/token.png',
+  'RENDER': 'https://assets.coingecko.com/coins/images/11636/small/rndr.png',
+  'FIDA': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EchesyfXePKdLtoiZSL8pBe8Myagyy8ZRqsACNCFGnvp/logo.svg',
+  'STEP': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/StepAscQoEioFxxWGnh2sLBDFp9d8rvKz2Yp39iDpyT/logo.png',
+  'SRM': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt/logo.png',
+  'COPE': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/8HGyAAB1yoM1ttS7pXjHMa3dukTFGQggnFFH3hJZgzQh/logo.png',
+  'SAMO': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU/logo.png',
+  'MEME': 'https://assets.coingecko.com/coins/images/31614/small/meme_logo.png',
+};
+
+function getWellKnownTokenLogo(symbol?: string): string | null {
+  if (!symbol) return null;
+  return WELL_KNOWN_TOKEN_LOGOS[symbol.toUpperCase()] || null;
+}
+
 export const marketRouter = router({
   // Get token details by mint/address
   getToken: protectedProcedure
@@ -50,7 +78,11 @@ export const marketRouter = router({
           symbol: pair.baseToken?.symbol || input.symbol,
           name: pair.baseToken?.name || 'Unknown',
           decimals: pair.baseToken?.decimals || 9,
-          logo: pair.info?.imageUrl || null,
+          // Logo with multiple fallback sources
+          logo: pair.info?.imageUrl
+            || pair.info?.header  // Some tokens have header image
+            || getWellKnownTokenLogo(pair.baseToken?.symbol) // Fallback to well-known tokens
+            || null,
 
           // Price Data
           price: parseFloat(pair.priceUsd || '0'),
