@@ -10,6 +10,7 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronDown, UserPlus, UserMinus, X, Zap, Copy } from 'lucide-react-native';
@@ -224,9 +225,16 @@ export default function UserProfileScreen() {
       <View style={styles.header}>
         <View style={styles.userInfo}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {userProfile.username.charAt(0).toUpperCase()}
-            </Text>
+            {userProfile.profileImage ? (
+              <Image
+                source={{ uri: userProfile.profileImage }}
+                style={styles.avatarImage}
+              />
+            ) : (
+              <Text style={styles.avatarText}>
+                {userProfile.username.charAt(0).toUpperCase()}
+              </Text>
+            )}
           </View>
 
           <View style={styles.userDetails}>
@@ -712,6 +720,11 @@ const styles = StyleSheet.create({
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
     fontSize: 20,
+  },
+  avatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
   },
   userDetails: {
     flex: 1,
