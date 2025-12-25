@@ -366,7 +366,7 @@ export default function PortfolioScreen() {
                 let token = tokens.find(t => t.symbol.toUpperCase() === symbol);
 
                 // If not in wallet, check trending market data
-                let marketToken = null;
+                let marketToken: { symbol: string; name: string; price: number; change24h: number; logo?: string; volume24h?: number; } | null = null;
                 if (!token && trendingData?.pairs) {
                   const pair = trendingData.pairs.find(
                     (p: any) => p.baseToken?.symbol?.toUpperCase() === symbol
@@ -378,6 +378,7 @@ export default function PortfolioScreen() {
                       price: parseFloat(pair.priceUsd || '0'),
                       change24h: parseFloat(pair.priceChange?.h24 || '0'),
                       logo: pair.info?.imageUrl,
+                      volume24h: parseFloat(pair.volume?.h24 || '0'),
                     };
                   }
                 }
@@ -443,10 +444,14 @@ export default function PortfolioScreen() {
                     </View>
                     <View style={styles.tokenValue}>
                       <Text style={styles.tokenValueText}>
-                        {token && 'value' in token ? `$${token.value.toLocaleString()}` : '—'}
+                        {token && 'value' in token
+                          ? `$${token.value.toLocaleString()}`
+                          : marketToken?.volume24h
+                            ? `Vol: $${(marketToken.volume24h >= 1000000 ? (marketToken.volume24h / 1000000).toFixed(1) + 'M' : marketToken.volume24h >= 1000 ? (marketToken.volume24h / 1000).toFixed(1) + 'K' : marketToken.volume24h.toFixed(0))}`
+                            : '—'}
                       </Text>
                       <Text style={styles.tokenPercentage}>
-                        {token && 'value' in token ? `(${getTokenPercentage(token.value).toFixed(0)}%)` : '(—)'}
+                        {token && 'value' in token ? `(${getTokenPercentage(token.value).toFixed(0)}%)` : '24h'}
                       </Text>
                     </View>
                   </Pressable>
