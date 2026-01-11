@@ -1,0 +1,20 @@
+diff --git a/node_modules/lucide-react-native/dist/esm/icons/infinity.js b/node_modules/lucide-react-native/dist/esm/icons/infinity.js
+index fb6267d..fdf0851 100644
+--- a/node_modules/lucide-react-native/dist/esm/icons/infinity.js
++++ b/node_modules/lucide-react-native/dist/esm/icons/infinity.js
+@@ -7,7 +7,7 @@
+ 
+ import createLucideIcon from '../createLucideIcon.js';
+ 
+-const Infinity = createLucideIcon("Infinity", [
++const InfinityIcon = createLucideIcon("Infinity", [
+   [
+     "path",
+     {
+@@ -17,5 +17,5 @@ const Infinity = createLucideIcon("Infinity", [
+   ]
+ ]);
+ 
+-export { Infinity as default };
++export { InfinityIcon as default };
+ //# sourceMappingURL=infinity.js.map
