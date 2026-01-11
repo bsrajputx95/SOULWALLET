@@ -79,7 +79,7 @@ COPY --from=dependencies --chown=soulwallet:nodejs /app/node_modules ./node_modu
 COPY --from=builder --chown=soulwallet:nodejs /app/dist ./dist
 COPY --from=builder --chown=soulwallet:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=soulwallet:nodejs /app/package*.json ./
-COPY --from=builder --chown=soulwallet:nodejs /app/tsconfig.server.json ./
+COPY --from=builder --chown=soulwallet:nodejs /app/tsconfig.server.json ./tsconfig.json
 
 # Set proper working directory permissions
 RUN chown -R soulwallet:nodejs /app
