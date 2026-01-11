@@ -38,6 +38,14 @@ config.resolver = {
         /.*\.test\.(js|ts|tsx)$/,
         /.*\.spec\.(js|ts|tsx)$/,
     ],
+    // Node.js polyfills for crypto packages (ed25519-hd-key, etc.)
+    extraNodeModules: {
+        stream: require.resolve('readable-stream'),
+        string_decoder: require.resolve('string_decoder'),
+        buffer: require.resolve('buffer'),
+        events: require.resolve('events'),
+        util: require.resolve('util'),
+    },
 };
 
 // Optimize serializer
