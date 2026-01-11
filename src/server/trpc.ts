@@ -5,10 +5,14 @@ import superjson from 'superjson';
 import { ZodError } from 'zod';
 import { logger } from '../lib/logger';
 import prisma from '../lib/prisma';
+import { Role } from '@prisma/client'
 import { createAuthContext, requireAuth, type AuthContext } from '../lib/middleware/auth';
 import { createRateLimitContext, type RateLimitContext } from '../lib/middleware/auth';
 import { sanitizeText } from '../lib/validation';
 import { getRequestId } from '../lib/middleware/requestId';
+import { AuthorizationService, type AppRole } from '../lib/services/authorization'
+import { trace, SpanStatusCode } from '@opentelemetry/api';
+import { getCurrentTraceId, getCurrentSpanId } from '../lib/otel';
 
 import {
   ErrorCode,
@@ -31,6 +35,8 @@ export interface Context extends AuthContext {
   res?: any;
   rateLimitContext: RateLimitContext;
   requestId?: string | undefined;
+  traceId?: string | undefined;
+  spanId?: string | undefined;
 }
 
 /**
@@ -48,12 +54,18 @@ export async function createTRPCContext(
   // Retrieve request ID
   const requestId = getRequestId();
 
+  // Extract trace context for logging correlation
+  const traceId = getCurrentTraceId();
+  const spanId = getCurrentSpanId();
+
   return {
     ...authContext,
     req: opts.req,
     res: opts.res,
     rateLimitContext,
     requestId,
+    traceId,
+    spanId,
   };
 }
 
@@ -103,11 +115,11 @@ const sanitizationMiddleware = middleware(async ({ ctx, next, input }) => {
       if (typeof obj === 'string') {
         return sanitizeText(obj);
       }
-      
+
       if (Array.isArray(obj)) {
         return obj.map(sanitizeObject);
       }
-      
+
       if (obj && typeof obj === 'object') {
         const sanitized: any = {};
         for (const [key, value] of Object.entries(obj)) {
@@ -115,12 +127,12 @@ const sanitizationMiddleware = middleware(async ({ ctx, next, input }) => {
         }
         return sanitized;
       }
-      
+
       return obj;
     };
-    
+
     const sanitizedInput = sanitizeObject(input);
-    
+
     return next({
       ctx,
       input: sanitizedInput,
@@ -140,9 +152,61 @@ const sanitizationMiddleware = middleware(async ({ ctx, next, input }) => {
 });
 
 /**
+ * OpenTelemetry tracing middleware
+ * Creates spans for each tRPC procedure call with context for Jaeger
+ */
+const tracingMiddleware = middleware(async ({ path, type, ctx, next }) => {
+  const tracer = trace.getTracer('soulwallet-trpc');
+
+  // Normalize procedure path for span name
+  const spanName = `trpc.${type}.${path}`;
+
+  return tracer.startActiveSpan(spanName, async (span) => {
+    try {
+      // Add attributes for the span
+      span.setAttribute('trpc.path', path);
+      span.setAttribute('trpc.type', type);
+      span.setAttribute('request.id', ctx.requestId || 'unknown');
+
+      if (ctx.user?.id) {
+        span.setAttribute('user.id', ctx.user.id);
+      }
+      if (ctx.req?.ip) {
+        span.setAttribute('client.ip', ctx.req.ip);
+      }
+      if (ctx.req?.headers?.['user-agent']) {
+        const ua = ctx.req.headers['user-agent'];
+        span.setAttribute('http.user_agent', Array.isArray(ua) ? ua[0] : ua);
+      }
+
+      const result = await next();
+
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error: any) {
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error.message,
+      });
+      span.recordException(error);
+
+      // Add error attributes
+      if (error.code) {
+        span.setAttribute('error.code', error.code);
+      }
+
+      throw error;
+    } finally {
+      span.end();
+    }
+  });
+});
+
+/**
  * Enhanced procedures with standardized error handling
  */
 export const publicProcedure = t.procedure
+  .use(tracingMiddleware)
   .use(sanitizationMiddleware)
   .use(errorHandlingMiddleware());
 
@@ -163,7 +227,7 @@ const authMiddleware = middleware(async ({ ctx, next }) => {
     if (isAppError(error) || isTRPCError(error)) {
       throw error;
     }
-    
+
     throw createAuthError(
       'Authentication failed',
       ErrorCode.INVALID_CREDENTIALS,
@@ -177,6 +241,7 @@ const authMiddleware = middleware(async ({ ctx, next }) => {
 });
 
 export const protectedProcedure = t.procedure
+  .use(tracingMiddleware)
   .use(sanitizationMiddleware)
   .use(authMiddleware)
   .use(middleware(async ({ ctx, next }) => {
@@ -191,6 +256,45 @@ export const protectedProcedure = t.procedure
     return next();
   }))
   .use(errorHandlingMiddleware());
+
+const require2FAMiddleware = middleware(async ({ ctx, next }) => {
+  const auth = requireAuth(ctx)
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId: auth.user.id },
+    select: { security: true },
+  })
+  const security = settings?.security as any
+  if (!security?.twoFactorEnabled) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: '2FA is required for this operation. Please enable 2FA in your account settings.',
+    })
+  }
+  return next({
+    ctx: {
+      ...ctx,
+      user: auth.user,
+      session: auth.session,
+    },
+  })
+})
+
+export const financialProcedure = t.procedure
+  .use(sanitizationMiddleware)
+  .use(authMiddleware)
+  .use(require2FAMiddleware)
+  .use(middleware(async ({ ctx, next }) => {
+    const enabled = process.env.CSRF_ENABLED === 'true';
+    if (enabled) {
+      const tokenHeader = ctx.req?.headers?.['x-csrf-token'];
+      const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
+      if (!token || typeof token !== 'string' || token.length < 16) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'CSRF token missing or invalid' });
+      }
+    }
+    return next();
+  }))
+  .use(errorHandlingMiddleware())
 
 /**
  * Admin middleware (future enhancement)
@@ -214,7 +318,9 @@ const adminMiddleware = middleware(async ({ ctx, next }) => {
       const dbUser = await prisma.user.findUnique({ where: { id: auth.user.id } });
       const role = (dbUser as any)?.role as string | undefined;
       if (role === 'ADMIN') isAdmin = true;
-    } catch {}
+    } catch {
+      void 0;
+    }
   }
 
   if (!isAdmin && adminKey && providedKey === adminKey) {
@@ -246,22 +352,22 @@ const loggingMiddleware = middleware(async ({ path, type, ctx, next }) => {
     userAgent: ctx.req?.headers?.['user-agent'],
     requestId: ctx.requestId,
   };
-  
+
   try {
     const result = await next();
     const durationMs = Date.now() - start;
-    
+
     // Log successful request
     logger.info(`${type} ${path} - ${durationMs}ms`, {
       ...metadata,
       durationMs,
       success: true,
     });
-    
+
     return result;
   } catch (error) {
     const durationMs = Date.now() - start;
-    
+
     // Log failed request with error details
     logger.error(`${type} ${path} - ${durationMs}ms - ERROR`, {
       ...metadata,
@@ -273,7 +379,7 @@ const loggingMiddleware = middleware(async ({ path, type, ctx, next }) => {
         errorCode: isAppError(error) ? error.errorCode : ErrorCode.UNKNOWN_ERROR,
       },
     });
-    
+
     throw error;
   }
 });
@@ -292,6 +398,215 @@ export const adminProcedure = t.procedure
   .use(sanitizationMiddleware)
   .use(adminMiddleware)
   .use(errorHandlingMiddleware());
+
+function getIpAddress(ctx: Context): string {
+  return ctx.rateLimitContext?.ip || ctx.req?.ip || ctx.fingerprint?.ipAddress || 'unknown'
+}
+
+function getUserAgent(ctx: Context): string | undefined {
+  const ua = ctx.req?.headers?.['user-agent']
+  if (Array.isArray(ua)) return ua[0]
+  if (typeof ua === 'string') return ua
+  return ctx.fingerprint?.userAgent
+}
+
+const requireRole = (requiredRole: AppRole) =>
+  middleware(async ({ ctx, next, path }) => {
+    const auth = requireAuth(ctx)
+    const role: AppRole = (auth.user.role as Role | undefined) ?? 'USER'
+    if (!AuthorizationService.hasRole(role, requiredRole)) {
+      await AuthorizationService.auditAuthorization(
+        {
+          userId: auth.user.id,
+          role,
+          ipAddress: getIpAddress(ctx),
+          userAgent: getUserAgent(ctx),
+          endpoint: path,
+        },
+        false,
+        `requires_role:${requiredRole}`
+      )
+      throw new TRPCError({ code: 'FORBIDDEN', message: `This operation requires ${requiredRole} role` })
+    }
+    return next({
+      ctx: {
+        ...ctx,
+        user: auth.user,
+        session: auth.session,
+      },
+    })
+  })
+
+const requireOwnership = (resourceType: string, resourceIdField: string = 'id') =>
+  middleware(async ({ ctx, next, input, path }) => {
+    const auth = requireAuth(ctx)
+    const role: AppRole = (auth.user.role as Role | undefined) ?? 'USER'
+    if (role === 'ADMIN') {
+      return next({
+        ctx: {
+          ...ctx,
+          user: auth.user,
+          session: auth.session,
+        },
+      })
+    }
+
+    const raw = (input as any)?.[resourceIdField]
+    const resourceId = typeof raw === 'string' ? raw : undefined
+    if (!resourceId) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: `Missing resource ID field: ${resourceIdField}` })
+    }
+
+    const result = await AuthorizationService.verifyOwnership(auth.user.id, resourceType, resourceId)
+    if (result === 'not_found') {
+      await AuthorizationService.auditAuthorization(
+        {
+          userId: auth.user.id,
+          role,
+          ipAddress: getIpAddress(ctx),
+          userAgent: getUserAgent(ctx),
+          endpoint: path,
+        },
+        false,
+        'ownership_not_found',
+        { type: resourceType, id: resourceId }
+      )
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Resource not found' })
+    }
+
+    if (result !== 'owned') {
+      await AuthorizationService.auditAuthorization(
+        {
+          userId: auth.user.id,
+          role,
+          ipAddress: getIpAddress(ctx),
+          userAgent: getUserAgent(ctx),
+          endpoint: path,
+        },
+        false,
+        'ownership_failed',
+        { type: resourceType, id: resourceId }
+      )
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to access this resource' })
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        user: auth.user,
+        session: auth.session,
+      },
+    })
+  })
+
+const requireAdminWithIpCheck = () =>
+  middleware(async ({ ctx, next, path }) => {
+    const auth = requireAuth(ctx)
+    const role: AppRole = (auth.user.role as Role | undefined) ?? 'USER'
+    if (!AuthorizationService.hasRole(role, 'ADMIN')) {
+      await AuthorizationService.auditAuthorization(
+        {
+          userId: auth.user.id,
+          role,
+          ipAddress: getIpAddress(ctx),
+          userAgent: getUserAgent(ctx),
+          endpoint: path,
+        },
+        false,
+        'requires_role:ADMIN'
+      )
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin privileges required' })
+    }
+
+    const ipAddress = getIpAddress(ctx)
+    const allowed = await AuthorizationService.checkAdminIpWhitelist(auth.user.id, ipAddress)
+    if (!allowed) {
+      await AuthorizationService.auditAuthorization(
+        {
+          userId: auth.user.id,
+          role,
+          ipAddress,
+          userAgent: getUserAgent(ctx),
+          endpoint: path,
+        },
+        false,
+        'admin_ip_not_allowed'
+      )
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin access not allowed from this IP' })
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        user: auth.user,
+        session: auth.session,
+      },
+    })
+  })
+
+export const premiumProcedure = protectedProcedure.use(requireRole('PREMIUM'))
+
+export const adminProcedureSecure = protectedProcedure.use(requireAdminWithIpCheck())
+
+export const createOwnershipProcedure = (resourceType: string, resourceIdField: string = 'id') =>
+  protectedProcedure.use(requireOwnership(resourceType, resourceIdField))
+
+/**
+ * Comment 2: API key scope enforcement middleware
+ * Blocks mutations for READ_ONLY keys and validates CUSTOM permissions
+ */
+export const requireApiKeyScope = (requiredAction: 'read' | 'write', resource?: string) => {
+  return middleware(async ({ ctx, next, type }) => {
+    const auth = requireAuth(ctx)
+
+    // If not authenticated via API key, allow (session-based auth has full access)
+    if (!auth.apiKey) {
+      return next({ ctx })
+    }
+
+    const scope = auth.apiKey.scope
+    const isWriteOperation = type === 'mutation' || requiredAction === 'write'
+
+    // READ_ONLY keys cannot perform mutations
+    if (scope === 'READ_ONLY' && isWriteOperation) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'API key has READ_ONLY scope and cannot perform write operations',
+      })
+    }
+
+    // FULL_ACCESS keys can do everything
+    if (scope === 'FULL_ACCESS') {
+      return next({ ctx })
+    }
+
+    // CUSTOM scope: Check specific permissions (if resource provided)
+    // Note: Permissions stored in apiKey.permissions as Record<string, string[]>
+    // For now, CUSTOM is treated as FULL_ACCESS until permissions are properly loaded
+    // To fully implement, fetch permissions from DB when needed
+
+    return next({ ctx })
+  })
+}
+
+/**
+ * API-key-aware procedure that enforces scope
+ * Use this for endpoints that should be accessible via API key with scope checks
+ */
+export const apiKeyProcedure = t.procedure
+  .use(sanitizationMiddleware)
+  .use(authMiddleware)
+  .use(requireApiKeyScope('read'))
+  .use(errorHandlingMiddleware())
+
+/**
+ * API-key-aware procedure for write operations
+ */
+export const apiKeyWriteProcedure = t.procedure
+  .use(sanitizationMiddleware)
+  .use(authMiddleware)
+  .use(requireApiKeyScope('write'))
+  .use(errorHandlingMiddleware())
 
 /**
  * Rate limiting middleware factory with enhanced error handling

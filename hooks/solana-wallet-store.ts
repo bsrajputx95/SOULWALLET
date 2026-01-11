@@ -7,6 +7,12 @@ import { getSecureItem, setSecureItem, deleteSecureItem, SecureStorage } from '@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trpcClient } from '@/lib/trpc';
 import { logger } from '@/lib/client-logger';
+import {
+  applyOptimisticBalanceUpdate,
+  confirmOptimisticBalanceUpdate,
+  revertOptimisticBalanceUpdate,
+  SOL_MINT
+} from './optimistic-updates';
 
 import type {
   ParsedAccountData
@@ -77,8 +83,9 @@ async function createConnection(): Promise<Connection> {
 
 // Dynamically import SPL token functions only on native platforms
 const loadSplTokenFunctions = async () => {
+  // Platform gate: skip SPL token loading on web to avoid bundler/runtime errors
   if (Platform.OS === 'web') {
-    logger.info('SPL Token functions disabled on web');
+    logger.info('Skipping SPL Token loading on web platform');
     return;
   }
 
@@ -162,7 +169,9 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
       await loadWallet();
     };
-    initializeWallet();
+    void initializeWallet().catch((error) => {
+      if (__DEV__) logger.error('Failed to initialize wallet:', error);
+    });
   }, []);
 
   // Sync wallet address with backend
@@ -217,12 +226,12 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
   const createWalletEncrypted = async (password: string) => {
     try {
       setState(prev => ({ ...prev, isLoading: true }));
+      const { WalletManager } = await import('./wallet-creation-store');
+      const result = await WalletManager.createNewWallet(password);
+      const wallet = result.keypair;
+      const publicKey = result.publicKey;
 
-      const wallet = Keypair.generate();
-      const privateKeyString = bs58.encode(wallet.secretKey);
-      const publicKey = wallet.publicKey.toString();
-
-      await SecureStorage.setEncryptedPrivateKey(privateKeyString, password);
+      await setSecureItem('wallet_public_key', publicKey);
       await AsyncStorage.setItem(ENCRYPTED_MARKER_KEY, 'true');
       await deleteSecureItem(STORAGE_KEY);
 
@@ -340,9 +349,14 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     }
   };
 
-  // Send SOL with simulation and enhanced security
+  // Send SOL with simulation, enhanced security, and optimistic updates
   const sendSol = async (toAddress: string, amount: number): Promise<string> => {
     if (!state.wallet) throw new Error('No wallet connected');
+
+    // Apply optimistic update BEFORE transaction for instant UI feedback
+    const currentBalance = state.balance;
+    applyOptimisticBalanceUpdate(SOL_MINT, -amount, currentBalance);
+    logger.info('Applied optimistic update for SOL send:', -amount);
 
     try {
       setState(prev => ({ ...prev, isLoading: true }));
@@ -387,6 +401,10 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
       logger.info('Transaction confirmed:', signature);
 
+      // Confirm optimistic update on success
+      await confirmOptimisticBalanceUpdate(SOL_MINT);
+      logger.info('Confirmed optimistic update for SOL send');
+
       // Wait for finalization
       await waitForFinalization(signature);
       await refreshBalances();
@@ -394,6 +412,10 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       setState(prev => ({ ...prev, isLoading: false }));
       return signature;
     } catch (error: any) {
+      // Revert optimistic update on failure
+      revertOptimisticBalanceUpdate(SOL_MINT);
+      logger.info('Reverted optimistic update after failure');
+
       logger.error('Transaction failed:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw new Error(`Transaction failed: ${error.message}`);
@@ -630,8 +652,36 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     outputMint: string;
     amount: number;
     slippageBps?: number;
+    expectedOutputAmount?: number; // For optimistic updates
   }): Promise<{ signature: string; outputAmount: number | undefined }> => {
     if (!state.wallet) throw new Error('No wallet connected');
+
+    // Track mints for optimistic updates
+    let inputMintForOptimistic: string | undefined;
+    let outputMintForOptimistic: string | undefined;
+    let inputAmountForOptimistic: number = 0;
+    let expectedOutputForOptimistic: number = 0;
+
+    // Extract mint info for optimistic updates if params provided
+    if (typeof swapTransactionBase64OrParams !== 'string') {
+      inputMintForOptimistic = swapTransactionBase64OrParams.inputMint;
+      outputMintForOptimistic = swapTransactionBase64OrParams.outputMint;
+      inputAmountForOptimistic = swapTransactionBase64OrParams.amount / 1e9; // Convert from lamports
+      expectedOutputForOptimistic = swapTransactionBase64OrParams.expectedOutputAmount || 0;
+    }
+
+    // Apply optimistic updates BEFORE transaction for instant UI feedback
+    if (inputMintForOptimistic) {
+      // Use SOL balance from state if SOL, otherwise default to 0 (will be looked up on refresh)
+      const currentInputBalance = inputMintForOptimistic === SOL_MINT ? state.balance : 0;
+      applyOptimisticBalanceUpdate(inputMintForOptimistic, -inputAmountForOptimistic, currentInputBalance);
+      logger.info('Applied optimistic update for swap input:', -inputAmountForOptimistic);
+    }
+    if (outputMintForOptimistic && expectedOutputForOptimistic > 0) {
+      const currentOutputBalance = outputMintForOptimistic === SOL_MINT ? state.balance : 0;
+      applyOptimisticBalanceUpdate(outputMintForOptimistic, expectedOutputForOptimistic, currentOutputBalance);
+      logger.info('Applied optimistic update for swap output:', expectedOutputForOptimistic);
+    }
 
     try {
       setState(prev => ({ ...prev, isLoading: true }));
@@ -712,12 +762,22 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
       logger.info('Swap executed successfully:', signature);
 
+      // Confirm optimistic updates on success
+      if (inputMintForOptimistic) {
+        await confirmOptimisticBalanceUpdate(inputMintForOptimistic);
+        logger.info('Confirmed optimistic update for swap input');
+      }
+      if (outputMintForOptimistic && expectedOutputForOptimistic > 0) {
+        await confirmOptimisticBalanceUpdate(outputMintForOptimistic);
+        logger.info('Confirmed optimistic update for swap output');
+      }
+
       // Get post-swap balance to calculate output amount
       let outputAmount: number | undefined;
       if (outputMint && TOKEN_PROGRAM_ID) {
         try {
-          // Small delay to ensure balance is updated
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await state.connection.confirmTransaction(signature, 'finalized');
+          await new Promise(resolve => setTimeout(resolve, 2000));
 
           const tokenAccounts = await state.connection.getParsedTokenAccountsByOwner(
             state.wallet.publicKey,
@@ -739,12 +799,24 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       }
 
       // Refresh balances after successful swap
+      await state.connection.confirmTransaction(signature, 'finalized');
+      await new Promise(resolve => setTimeout(resolve, 2000));
       await refreshBalances();
 
       setState(prev => ({ ...prev, isLoading: false }));
       return { signature, outputAmount };
 
     } catch (error) {
+      // Revert optimistic updates on failure
+      if (inputMintForOptimistic) {
+        revertOptimisticBalanceUpdate(inputMintForOptimistic);
+        logger.info('Reverted optimistic update for swap input after failure');
+      }
+      if (outputMintForOptimistic && expectedOutputForOptimistic > 0) {
+        revertOptimisticBalanceUpdate(outputMintForOptimistic);
+        logger.info('Reverted optimistic update for swap output after failure');
+      }
+
       logger.error('Error executing swap:', error);
       setState(prev => ({ ...prev, isLoading: false }));
       throw error;

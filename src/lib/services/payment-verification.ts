@@ -6,16 +6,16 @@ import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { logger } from '../logger';
 import prisma from '../prisma';
 import { TRPCError } from '@trpc/server';
+import { rpcManager } from './rpcManager';
 
 const PLATFORM_WALLET = process.env.PLATFORM_WALLET_ADDRESS || '';
 const MIN_CONFIRMATION = 15; // Wait for 15 confirmations (finalized)
 
 export class PaymentVerificationService {
-  private connection: Connection;
+  constructor() {}
 
-  constructor() {
-    const rpcUrl = process.env.SOLANA_RPC_URL || process.env.EXPO_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-    this.connection = new Connection(rpcUrl, 'confirmed');
+  private async getConnection(): Promise<Connection> {
+    return rpcManager.getConnection();
   }
 
   /**
@@ -32,8 +32,9 @@ export class PaymentVerificationService {
     timestamp: Date;
   }> {
     try {
+      const connection = await this.getConnection();
       // Get transaction details
-      const tx = await this.connection.getTransaction(transactionSignature, {
+      const tx = await connection.getTransaction(transactionSignature, {
         maxSupportedTransactionVersion: 0,
       });
 
@@ -54,7 +55,7 @@ export class PaymentVerificationService {
 
       // Verify confirmations (finality)
       const slot = tx.slot;
-      const currentSlot = await this.connection.getSlot('finalized');
+      const currentSlot = await connection.getSlot('finalized');
       const confirmations = currentSlot - slot;
 
       if (confirmations < MIN_CONFIRMATION) {
@@ -195,7 +196,8 @@ export class PaymentVerificationService {
     timestamp: Date;
   }> {
     try {
-      const tx = await this.connection.getParsedTransaction(transactionSignature, {
+      const connection = await this.getConnection();
+      const tx = await connection.getParsedTransaction(transactionSignature, {
         maxSupportedTransactionVersion: 0,
       });
 
@@ -289,7 +291,8 @@ export class PaymentVerificationService {
     commitment: 'confirmed' | 'finalized' = 'finalized'
   ): Promise<boolean> {
     try {
-      const result = await this.connection.confirmTransaction(
+      const connection = await this.getConnection();
+      const result = await connection.confirmTransaction(
         signature,
         commitment
       );
@@ -311,7 +314,8 @@ export class PaymentVerificationService {
    */
   async getTransactionFeePayer(signature: string): Promise<string | null> {
     try {
-      const tx = await this.connection.getTransaction(signature, {
+      const connection = await this.getConnection();
+      const tx = await connection.getTransaction(signature, {
         maxSupportedTransactionVersion: 0,
       });
 
@@ -331,12 +335,13 @@ export class PaymentVerificationService {
    */
   async estimateTransactionFee(): Promise<number> {
     try {
-      const recentBlockhash = await this.connection.getLatestBlockhash('confirmed');
+      const connection = await this.getConnection();
+      const recentBlockhash = await connection.getLatestBlockhash('confirmed');
       const tx = new Transaction();
       tx.recentBlockhash = recentBlockhash.blockhash;
       // Use a dummy fee payer if none configured
       tx.feePayer = new PublicKey(PLATFORM_WALLET || '11111111111111111111111111111111');
-      const feeCalculator = await this.connection.getFeeForMessage(tx.compileMessage());
+      const feeCalculator = await connection.getFeeForMessage(tx.compileMessage());
 
       if (!feeCalculator.value) {
         return 5000; // Default to 5000 lamports

@@ -5,6 +5,9 @@ import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
 import bcrypt from 'bcryptjs';
 import { TwoFactorService } from '../../lib/services/twoFactor';
+import { redisCache } from '../../lib/redis'
+// Comment 1: Import centralized validation limits for consistent username validation
+import { VALIDATION_LIMITS, validateDateOfBirth, validatePhoneNumber } from '../../lib/validation';
 
 export const accountRouter = router({
   /**
@@ -81,11 +84,21 @@ export const accountRouter = router({
    */
   updateUserProfile: protectedProcedure
     .input(z.object({
-      username: z.string().min(3).max(30).optional(),
+      // Comment 1: Use centralized VALIDATION_LIMITS for username (50 chars max)
+      username: z.string()
+        .min(VALIDATION_LIMITS.USERNAME_MIN)
+        .max(VALIDATION_LIMITS.USERNAME_MAX)
+        .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores')
+        .optional(),
       firstName: z.string().max(50).optional(),
       lastName: z.string().max(50).optional(),
-      phone: z.string().max(20).optional(),
-      dateOfBirth: z.string().optional(),
+      phone: z.string().max(20).optional().refine((val) => {
+        if (!val) return true;
+        return validatePhoneNumber(val).isValid;
+      }, { message: 'Invalid phone number format' }),
+      dateOfBirth: z.string().optional().refine((val) => {
+        return validateDateOfBirth(val).isValid;
+      }, { message: 'Invalid date of birth (must be 13+ years old)' }),
       defaultCurrency: z.string().max(10).optional(),
       language: z.string().max(10).optional(),
     }))
@@ -262,6 +275,8 @@ export const accountRouter = router({
             security: newSecurity,
           },
         });
+
+        await redisCache.del(`user:${ctx.user.id}:profile`)
 
         const user = await prisma.user.findUnique({
           where: { id: ctx.user.id },
@@ -540,6 +555,8 @@ export const accountRouter = router({
           },
         });
 
+        await redisCache.del(`user:${ctx.user.id}:profile`)
+
         return {
           success: true,
           codes, // Return plain codes to user (only time they'll see them)
@@ -713,6 +730,8 @@ export const accountRouter = router({
           create: { userId: ctx.user.id, security: newSecurity },
         });
 
+        await redisCache.del(`user:${ctx.user.id}:profile`)
+
         return {
           success: true,
           qrCodeUrl: setupData.qrCodeUrl,
@@ -779,6 +798,8 @@ export const accountRouter = router({
           where: { userId: ctx.user.id },
           data: { security: newSecurity },
         });
+
+        await redisCache.del(`user:${ctx.user.id}:profile`)
 
         return {
           success: true,
@@ -863,6 +884,8 @@ export const accountRouter = router({
           where: { userId: ctx.user.id },
           data: { security: newSecurity },
         });
+
+        await redisCache.del(`user:${ctx.user.id}:profile`)
 
         return {
           success: true,
@@ -1013,6 +1036,8 @@ export const accountRouter = router({
           },
         });
 
+        await redisCache.del(`user:${ctx.user.id}:profile`)
+
         return {
           success: true,
           codes: backupCodes,
@@ -1024,6 +1049,119 @@ export const accountRouter = router({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to regenerate backup codes',
+        });
+      }
+    }),
+
+  // ============================================
+  // Device Management Endpoints (Comment 2 fix)
+  // ============================================
+
+  /**
+   * List all devices for the current user
+   */
+  listDevices: protectedProcedure
+    .query(async ({ ctx }) => {
+      try {
+        const { DeviceService } = await import('../../lib/services/device');
+        const devices = await DeviceService.listDevices(ctx.user!.id);
+        return { devices };
+      } catch (error) {
+        logger.error('List devices error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to list devices',
+        });
+      }
+    }),
+
+  /**
+   * Trust a device
+   */
+  trustDevice: protectedProcedure
+    .input(z.object({
+      deviceId: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { DeviceService } = await import('../../lib/services/device');
+        const success = await DeviceService.trustDevice(ctx.user!.id, input.deviceId);
+
+        if (!success) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Device not found',
+          });
+        }
+
+        return { success: true, message: 'Device trusted' };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        logger.error('Trust device error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to trust device',
+        });
+      }
+    }),
+
+  /**
+   * Revoke/remove a device
+   */
+  revokeDevice: protectedProcedure
+    .input(z.object({
+      deviceId: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { DeviceService } = await import('../../lib/services/device');
+        const success = await DeviceService.revokeDevice(ctx.user!.id, input.deviceId);
+
+        if (!success) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Device not found',
+          });
+        }
+
+        return { success: true, message: 'Device revoked' };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        logger.error('Revoke device error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to revoke device',
+        });
+      }
+    }),
+
+  /**
+   * Rename a device
+   */
+  renameDevice: protectedProcedure
+    .input(z.object({
+      deviceId: z.string(),
+      name: z.string().min(1).max(50),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { DeviceService } = await import('../../lib/services/device');
+        const success = await DeviceService.renameDevice(ctx.user!.id, input.deviceId, input.name);
+
+        if (!success) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Device not found',
+          });
+        }
+
+        return { success: true, message: 'Device renamed' };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        logger.error('Rename device error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to rename device',
         });
       }
     }),

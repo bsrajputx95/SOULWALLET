@@ -3,9 +3,9 @@
  * Updates PENDING transactions to CONFIRMED/FAILED based on blockchain status
  */
 
-import { Connection } from '@solana/web3.js';
 import prisma from '../lib/prisma';
 import { logger } from '../lib/logger';
+import { rpcManager } from '../lib/services/rpcManager';
 
 let updateInterval: NodeJS.Timeout | null = null;
 let isUpdating = false;
@@ -18,11 +18,6 @@ export async function startTransactionStatusUpdater() {
 
   logger.info('Starting transaction status updater...');
   isUpdating = true;
-
-  const connection = new Connection(
-    process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-    'confirmed'
-  );
 
   // Check transaction status every 60 seconds
   updateInterval = setInterval(async () => {
@@ -59,10 +54,9 @@ export async function startTransactionStatusUpdater() {
           }
 
           // Check transaction status on blockchain
-          const txInfo = await connection.getTransaction(tx.signature, {
-            maxSupportedTransactionVersion: 0,
-            commitment: 'confirmed'
-          });
+          const txInfo = await rpcManager.withFailover((connection) =>
+            connection.getTransaction(tx.signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' })
+          );
 
           if (txInfo) {
             // Transaction found - update status

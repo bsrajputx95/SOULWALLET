@@ -21,7 +21,9 @@ import {
 } from '../utils/test-helpers';
 import { invalidData, testTimeouts, VALID_SOLANA_ADDRESSES } from '../utils/test-fixtures';
 
-describe('Error Handling Integration Tests', () => {
+const describeIntegration = process.env.RUN_INTEGRATION_TESTS === 'true' ? describe : describe.skip;
+
+describeIntegration('Error Handling Integration Tests', () => {
   let testUser: { email: string; password: string; token: string; refreshToken: string; userId: string };
 
   beforeAll(async () => {

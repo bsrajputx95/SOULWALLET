@@ -1,0 +1,9 @@
+export const DECIMALS = {
+  SOL: 9,
+  USDC: 6,
+  USDT: 6,
+  DEFAULT_TOKEN: 6,
+  LAMPORTS_PER_SOL: 1_000_000_000,
+  MICRO_LAMPORTS: 1_000_000,
+} as const;
+

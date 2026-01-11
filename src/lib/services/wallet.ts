@@ -52,6 +52,11 @@ class WalletService {
         throw new Error('Invalid Solana wallet address');
       }
 
+      const existingUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { walletAddress: true },
+      })
+
       // Store only the public wallet address
       await prisma.user.update({
         where: { id: userId },
@@ -60,6 +65,15 @@ class WalletService {
           walletVerifiedAt: null, // Will be verified separately
         },
       });
+
+      const { AuthService } = await import('./auth')
+      await AuthService.invalidateUserCache(userId)
+
+      const { birdeyeData } = await import('./birdeyeData')
+      if (existingUser?.walletAddress) {
+        birdeyeData.clearCache(existingUser.walletAddress)
+      }
+      birdeyeData.clearCache(walletAddress)
 
       logger.info(`Registered wallet address for user ${userId}: ${walletAddress}`);
       return true;
@@ -109,6 +123,9 @@ class WalletService {
             walletVerifiedAt: new Date(),
           },
         });
+
+        const { AuthService } = await import('./auth')
+        await AuthService.invalidateUserCache(userId)
         
         logger.info(`Wallet ownership verified for user ${userId}`);
       }

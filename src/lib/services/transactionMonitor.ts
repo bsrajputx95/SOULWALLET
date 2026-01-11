@@ -1,9 +1,10 @@
 import WebSocket from 'ws';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import prisma from '../prisma';
 import { logger } from '../logger';
 import { executionQueue } from './executionQueue';
 import { priceMonitor } from './priceMonitor';
+import { messageQueue } from './messageQueue'
 
 interface HeliusTransaction {
   signature: string;
@@ -55,15 +56,16 @@ interface ParsedSwap {
 
 export class TransactionMonitor {
   private ws: WebSocket | null = null;
-  private connection: Connection;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private isRunning = false;
   private monitoredWallets: Map<string, string> = new Map(); // wallet -> traderId
 
-  constructor() {
-    const rpcUrl = process.env.HELIUS_RPC_URL || `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
-    this.connection = new Connection(rpcUrl, 'confirmed');
-  }
+  constructor() { }
+
+  // Exponential backoff configuration for reconnection
+  private reconnectAttempts = 0;
+  private maxReconnectDelay = 30000; // 30 seconds max
+  private heartbeatInterval: NodeJS.Timeout | null = null;
 
   async start() {
     if (this.isRunning) {
@@ -80,13 +82,13 @@ export class TransactionMonitor {
     // Connect to WebSocket
     this.connectWebSocket();
 
-    // Refresh monitored wallets every 5 minutes
-    setInterval(() => this.loadMonitoredWallets(), 5 * 60 * 1000);
+    // Refresh monitored wallets every 30 seconds (reduced from 5 min for faster new trader detection)
+    setInterval(() => this.loadMonitoredWallets(), 30 * 1000);
   }
 
   async stop() {
     this.isRunning = false;
-    
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -124,19 +126,21 @@ export class TransactionMonitor {
     if (!this.isRunning) return;
 
     const wsUrl = process.env.HELIUS_WS_URL || `wss://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
-    
+
     try {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.on('open', () => {
         logger.info('WebSocket connected to Helius');
+        this.reconnectAttempts = 0; // Reset backoff on successful connection
+        this.startHeartbeat();
         this.subscribeToWallets();
       });
 
       this.ws.on('message', async (data) => {
         try {
           const message = JSON.parse(data.toString());
-          
+
           if (message.method === 'transactionNotification') {
             await this.handleTransaction(message.params.result);
           }
@@ -151,6 +155,7 @@ export class TransactionMonitor {
 
       this.ws.on('close', () => {
         logger.warn('WebSocket disconnected');
+        this.stopHeartbeat();
         this.scheduleReconnect();
       });
     } catch (error) {
@@ -186,21 +191,44 @@ export class TransactionMonitor {
     }
   }
 
+  // Heartbeat: ping WebSocket every 30s to detect stale connections
+  private startHeartbeat() {
+    this.stopHeartbeat(); // Clear any existing
+    this.heartbeatInterval = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.ping();
+      }
+    }, 30000);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+
   private scheduleReconnect() {
     if (!this.isRunning || this.reconnectTimeout) return;
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s max
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
+    this.reconnectAttempts++;
+
+    logger.info(`Scheduling WebSocket reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null;
       logger.info('Attempting to reconnect WebSocket...');
       this.connectWebSocket();
-    }, 5000); // Reconnect after 5 seconds
+    }, delay);
   }
 
   private async handleTransaction(tx: HeliusTransaction) {
     try {
       // Parse the transaction to determine if it's a swap
       const parsed = this.parseJupiterSwap(tx);
-      
+
       if (!parsed) {
         // Not a swap transaction, ignore
         return;
@@ -252,11 +280,11 @@ export class TransactionMonitor {
   private parseJupiterSwap(tx: HeliusTransaction): ParsedSwap | null {
     // Jupiter Program ID
     const JUPITER_PROGRAM_ID = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
-    
+
     // Check if this is a Jupiter swap
-    const isJupiterSwap = tx.type === 'SWAP' || 
-                         (tx.accountData && tx.accountData.some(a => 
-                           a.account === JUPITER_PROGRAM_ID));
+    const isJupiterSwap = tx.type === 'SWAP' ||
+      (tx.accountData && tx.accountData.some(a =>
+        a.account === JUPITER_PROGRAM_ID));
 
     if (!isJupiterSwap) {
       return null;
@@ -271,7 +299,7 @@ export class TransactionMonitor {
     const firstTransfer = tokenTransfers[0]
     if (!firstTransfer) return null
     const walletAddress = firstTransfer.fromUserAccount;
-    
+
     // Check if wallet is monitored
     if (!this.monitoredWallets.has(walletAddress)) {
       return null;
@@ -279,7 +307,7 @@ export class TransactionMonitor {
 
     // Determine trade type
     const isBuy = firstTransfer.fromUserAccount === walletAddress;
-    
+
     return {
       walletId: walletAddress,
       signature: tx.signature,
@@ -322,7 +350,7 @@ export class TransactionMonitor {
 
       // Create copy orders for each copier
       let copiesCreated = 0;
-      
+
       for (const copyRelation of copiers) {
         try {
           // Check if user has budget available
@@ -351,13 +379,27 @@ export class TransactionMonitor {
           // Add to execution queue - only handle BUY orders here
           // SELL orders are handled by priceMonitor.handleTraderSell to avoid duplicates
           if (parsed.type === 'BUY') {
-            await executionQueue.addBuyOrder({
+            // Comment 2: Priority based on trader status (featured = 1, standard = 3)
+            const priority = monitoredWallet.trader.isFeatured ? 1 : 3;
+
+            const orderData = {
               userId: copyRelation.userId,
               copyTradingId: copyRelation.id,
               tokenMint: parsed.tokenMint,
               amount: copyRelation.amountPerTrade,
               detectedTxId,
-            });
+              priority,
+            }
+            const executionQueueId = await executionQueue.createBuyOrderRecord(orderData)
+            try {
+              await messageQueue.publishCopyTradeBuy({ executionQueueId, ...orderData })
+            } catch (mqError) {
+              logger.warn('RabbitMQ publish failed; enqueuing copy trade directly', {
+                error: mqError instanceof Error ? mqError.message : String(mqError),
+                executionQueueId,
+              })
+              await executionQueue.enqueueBuyOrderJobOnly(orderData)
+            }
             copiesCreated++;
           }
           // Note: SELL orders with exitWithTrader are handled by priceMonitor.handleTraderSell

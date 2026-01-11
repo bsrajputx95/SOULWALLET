@@ -1,0 +1,59 @@
+# Prometheus Configuration for SoulWallet
+# Scrapes metrics from the SoulWallet API and external exporters
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'soulwallet-production'
+    environment: 'production'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+
+# Rule files for alerts
+rule_files:
+  - '/etc/prometheus/alerts.yml'
+
+# Scrape configs
+scrape_configs:
+  # SoulWallet API metrics
+  - job_name: 'soulwallet-api'
+    static_configs:
+      - targets: ['backend:3001']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    honor_labels: true
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.+):.*'
+        replacement: '${1}'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Redis metrics (if redis-exporter is running)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+
+  # PostgreSQL metrics (if postgres-exporter is running)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+
+  # Node exporter for system metrics (if running)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s

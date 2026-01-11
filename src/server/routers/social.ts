@@ -1,13 +1,15 @@
 import { z } from 'zod';
-import { router, protectedProcedure, publicProcedure } from '../trpc';
+import { router, protectedProcedure, publicProcedure, createOwnershipProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server'
-import { SocialService } from '../../lib/services/social';
+import { SocialService, CreatePostInput, FeedOptions } from '../../lib/services/social';
 import { logger } from '../../lib/logger';
 import { PostVisibility } from '@prisma/client';
 import prisma from '../../lib/prisma'
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { jupiterSwap } from '../../lib/services/jupiterSwap'
 import { profitSharing } from '../../lib/services/profitSharing'
+import { applyRateLimit } from '../../lib/middleware/rateLimit';
+import { MAX_SLIPPAGE_BPS, VALIDATION_LIMITS } from '../../lib/validation';
 
 export const socialRouter = router({
   /**
@@ -15,12 +17,13 @@ export const socialRouter = router({
    */
   createPost: protectedProcedure
     .input(z.object({
-      content: z.string().min(1).max(2000),
+      content: z.string().min(1).max(VALIDATION_LIMITS.POST_CONTENT_MAX),
       visibility: z.nativeEnum(PostVisibility),
       mentionedTokenName: z.string().optional(),
       mentionedTokenSymbol: z.string().optional(),
       mentionedTokenMint: z.string().optional(),
-      images: z.array(z.string()).optional(),
+      // Plan2 Step 5: Validate images array (max 4 URLs)
+      images: z.array(z.string().url()).max(VALIDATION_LIMITS.IMAGES_PER_POST_MAX).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       let tokenInfo: { symbol?: string; name?: string } | null = null
@@ -36,44 +39,33 @@ export const socialRouter = router({
             }
           } catch {
             // Token not in Jupiter - that's OK, use user-provided name
-            console.log(`Token ${input.mentionedTokenMint} not found in Jupiter, using user-provided name`)
+            logger.debug(`Token ${input.mentionedTokenMint} not found in Jupiter, using user-provided name`)
           }
         } catch {
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid token address format' })
         }
       }
-      return await (SocialService as any).createPost(ctx.user.id, {
+
+      const postInput: CreatePostInput = {
         content: input.content,
         visibility: input.visibility,
-        mentionedTokenName: (input.mentionedTokenName || tokenInfo?.name) as any,
-        mentionedTokenSymbol: (input.mentionedTokenSymbol || tokenInfo?.symbol) as any,
-        mentionedTokenMint: input.mentionedTokenMint as any,
-        images: input.images as any,
-      })
+        mentionedTokenName: input.mentionedTokenName || tokenInfo?.name,
+        mentionedTokenSymbol: input.mentionedTokenSymbol || tokenInfo?.symbol,
+        mentionedTokenMint: input.mentionedTokenMint,
+        images: input.images,
+      };
+
+      return await SocialService.createPost(ctx.user.id, postInput);
     }),
 
   /**
    * Delete a post (owner only)
    */
-  deletePost: protectedProcedure
+  deletePost: createOwnershipProcedure('Post', 'postId')
     .input(z.object({
       postId: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Check if post exists and belongs to user
-      const post = await prisma.post.findUnique({
-        where: { id: input.postId },
-        select: { userId: true },
-      });
-
-      if (!post) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Post not found' });
-      }
-
-      if (post.userId !== ctx.user.id) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only delete your own posts' });
-      }
-
       await prisma.post.delete({
         where: { id: input.postId },
       });
@@ -86,22 +78,24 @@ export const socialRouter = router({
    */
   getFeed: protectedProcedure
     .input(z.object({
-      feedType: z.enum(['all', 'following', 'vip', 'user']),
+      feedType: z.enum(['all', 'following', 'vip', 'user', 'forYou']),
       targetUserId: z.string().optional(),
       limit: z.number().min(1).max(50).default(20),
       cursor: z.string().optional(),
       tokenFilter: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      return await (SocialService as any).getFeed({
+      const feedOptions: FeedOptions = {
         userId: ctx.user.id,
         viewerId: ctx.user.id,
         feedType: input.feedType,
-        targetUserId: (input.targetUserId || '') as any,
+        targetUserId: input.targetUserId,
         limit: input.limit,
-        cursor: (input.cursor || undefined) as any,
-        tokenFilter: (input.tokenFilter || undefined) as any,
-      });
+        cursor: input.cursor,
+        tokenFilter: input.tokenFilter,
+      };
+
+      return await SocialService.getFeed(feedOptions);
     }),
 
   /**
@@ -543,7 +537,7 @@ export const socialRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const updated = await prisma.user.update({
-        where: { id: ctx.user.id },
+        where: { id: ctx.user!.id },
         data: input as any,
         select: {
           id: true,
@@ -656,7 +650,7 @@ export const socialRouter = router({
         },
       });
 
-      return posts.map(post => ({
+      return posts.map((post: any) => ({
         ...post,
         likesCount: post._count.likes,
         commentsCount: post._count.comments,
@@ -675,12 +669,12 @@ export const socialRouter = router({
     .query(async ({ ctx, input }) => {
       // Get users the current user is not following
       const following = await prisma.follow.findMany({
-        where: { followerId: ctx.user.id },
+        where: { followerId: ctx.user!.id },
         select: { followingId: true },
       });
 
-      const followingIds = following.map(f => f.followingId);
-      followingIds.push(ctx.user.id); // Exclude self
+      const followingIds = following.map((f: any) => f.followingId);
+      followingIds.push(ctx.user!.id); // Exclude self
 
       const suggestedUsers = await prisma.user.findMany({
         where: {
@@ -717,7 +711,7 @@ export const socialRouter = router({
       type: z.enum(['all', 'social', 'trading']).default('all'),
     }))
     .query(async ({ ctx, input }) => {
-      const where: any = { userId: ctx.user.id };
+      const where: any = { userId: ctx.user!.id };
 
       if (input.type === 'social') {
         where.type = 'SOCIAL';
@@ -765,14 +759,7 @@ export const socialRouter = router({
       return { success: true, message: 'Post reported successfully' };
     }),
 
-  /**
-   * Get user's draft posts (future feature)
-   */
-  getDrafts: protectedProcedure
-    .query(async ({ ctx }) => {
-      // Placeholder for draft posts feature
-      return { drafts: [] };
-    }),
+  // Note: getDrafts placeholder removed - feature not implemented (Audit Issue #16)
 
   /**
    * Update trading stats (admin/system only)
@@ -794,60 +781,111 @@ export const socialRouter = router({
       return { success: true };
     }),
 
+  /**
+   * iBuy Token - Queue swap for execution with priority processing
+   * Uses custodial wallet with Jito MEV protection for trades >= $50
+   * Returns jobId for status polling
+   */
   ibuyToken: protectedProcedure
     .input(z.object({
       postId: z.string(),
       tokenMint: z.string(),
+      inputMint: z.string().optional(), // SOL or USDC - default from settings
     }))
     .mutation(async ({ ctx, input }) => {
+      // Apply rate limiting to swap operations
+      await applyRateLimit('swapExecute', ctx.rateLimitContext);
+
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+      // Get user's custodial wallet for execution
+      const { custodialWalletService } = await import('../../lib/services/custodialWallet');
+      const userWallet = await custodialWalletService.getKeypair(ctx.user.id);
+      if (!userWallet) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'No custodial wallet found' });
+      }
+
+      // Get post and validate token
       const post = await prisma.post.findUnique({
         where: { id: input.postId },
         include: { user: { select: { id: true, username: true, walletAddress: true } } },
-      })
+      });
       if (!post) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Post not found' })
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Post not found' });
       }
       if (post.mentionedTokenMint !== input.tokenMint) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Token mismatch' })
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Token mismatch' });
       }
-      const settings = await prisma.userSettings.findUnique({ where: { userId: ctx.user.id } })
-      const amountUsd = (settings as any)?.preferences?.ibuyAmount || 10
-      const slippage = (settings as any)?.preferences?.ibuySlippage || 1
-      const me = await prisma.user.findUnique({ where: { id: ctx.user.id }, select: { walletAddress: true } })
-      if (!me?.walletAddress) {
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'No wallet connected' })
+
+      // Get user iBuy settings (includes inputCurrency)
+      const ibuySettings = await prisma.iBuySettings.findUnique({ where: { userId: ctx.user.id } });
+      const amountUsd = ibuySettings?.buyAmount || 10;
+      const slippage = ibuySettings?.slippage || 1;
+      const settingsInputCurrency = ibuySettings?.inputCurrency || 'SOL';
+
+      // Use input.inputMint if provided, otherwise use settings
+      const inputMint = input.inputMint || (settingsInputCurrency === 'USDC' ? USDC_MINT : SOL_MINT);
+      const isSolInput = inputMint === SOL_MINT;
+
+      // Validate amount
+      const validation = custodialWalletService.validateCopyTradeBudget(amountUsd, amountUsd);
+      if (!validation.valid) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: validation.error || 'Invalid swap amount' });
       }
-      const quote = await jupiterSwap.getQuote({
-        inputMint: 'So11111111111111111111111111111111111111112',
-        outputMint: input.tokenMint,
-        amount: Math.round(amountUsd * LAMPORTS_PER_SOL),
-        slippageBps: Math.round(slippage * 100),
-        asLegacyTransaction: false,
-      })
-      if (!quote) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to get quote' })
+
+      // Check balance before queueing (fail fast)
+      if (isSolInput) {
+        const balance = await custodialWalletService.getBalance(ctx.user.id);
+        const requiredSol = amountUsd / 100; // Rough USD to SOL estimate
+        if (balance < requiredSol) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: `Insufficient SOL balance. Have: ${balance.toFixed(4)} SOL, Need: ~${requiredSol.toFixed(4)} SOL`
+          });
+        }
+      } else {
+        // USDC balance check
+        const usdcBalance = await custodialWalletService.getTokenBalance(ctx.user.id, USDC_MINT);
+        if (usdcBalance < amountUsd) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: `Insufficient USDC balance. Have: ${usdcBalance.toFixed(2)} USDC, Need: ${amountUsd.toFixed(2)} USDC`
+          });
+        }
       }
-      const resp = await fetch('https://quote-api.jup.ag/v6/swap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          quoteResponse: quote,
-          userPublicKey: me.walletAddress,
-          wrapAndUnwrapSol: true,
-          asLegacyTransaction: false,
-          useSharedAccounts: true,
-          dynamicComputeUnitLimit: true,
-          skipUserAccountsRpcCalls: false,
-        }),
-      })
-      if (!resp.ok) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to get swap transaction' })
-      }
-      const swapData = (await resp.json()) as { swapTransaction?: string }
-      if (!swapData?.swapTransaction) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to get swap transaction' })
-      }
-      return { success: true, swapTransaction: swapData.swapTransaction }
+
+      // Queue the order for execution with high priority
+      const { executionQueue } = await import('../../lib/services/executionQueue');
+      const jobId = await executionQueue.addIBuyOrder({
+        userId: ctx.user.id,
+        postId: input.postId,
+        tokenMint: input.tokenMint,
+        inputMint,
+        amountUsd,
+        slippageBps: Math.min(Math.round(slippage * 100), MAX_SLIPPAGE_BPS),
+      }, { priority: 3 }); // High priority for iBuy
+
+      logger.info(`[iBuy] Order queued: jobId=${jobId}, user=${ctx.user.id}, token=${input.tokenMint.slice(0, 8)}...`);
+
+      return {
+        success: true,
+        jobId,
+        amountUsd,
+      };
+    }),
+
+  /**
+   * Get iBuy job status for polling
+   */
+  getIBuyJobStatus: protectedProcedure
+    .input(z.object({
+      jobId: z.string(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { executionQueue } = await import('../../lib/services/executionQueue');
+      const status = await executionQueue.getIBuyJobStatus(input.jobId);
+      return status;
     }),
 
   /**
@@ -859,6 +897,9 @@ export const socialRouter = router({
       vote: z.boolean(), // true = agree, false = disagree
     }))
     .mutation(async ({ ctx, input }) => {
+      // Audit Issue #5: Apply rate limiting to voting
+      await applyRateLimit('general', ctx.rateLimitContext);
+
       try {
         // Check if user already voted
         const existingVote = await prisma.postVote.findUnique({
@@ -947,6 +988,7 @@ export const socialRouter = router({
           tokenSymbol: p.tokenSymbol,
           tokenName: p.tokenName,
           amountBought: p.amountBought,
+          amountRemaining: p.amountRemaining,
           priceInUsdc: p.priceInUsdc,
           buyTxSig: p.buyTxSig,
           status: p.status,
@@ -985,6 +1027,7 @@ export const socialRouter = router({
             tokenSymbol: input.tokenSymbol,
             tokenName: input.tokenName,
             amountBought: input.amountBought,
+            amountRemaining: input.amountBought,
             priceInUsdc: input.priceInUsdc,
             buyTxSig: input.transactionSig,
           },
@@ -1004,13 +1047,17 @@ export const socialRouter = router({
    * Sell an iBuy token and process 5% creator profit share
    * Simple flow: user sells token, if profit > 0, 5% goes to post creator
    */
-  sellIBuyToken: protectedProcedure
+  sellIBuyToken: createOwnershipProcedure('IBuyPurchase', 'purchaseId')
     .input(z.object({
       purchaseId: z.string(),       // The iBuy purchase record to sell
       sellAmountUsdc: z.number(),   // USDC amount received from sell
       sellTxSig: z.string(),        // Sell transaction signature
+      amountSoldTokens: z.number(), // Token amount sold from this lot
     }))
     .mutation(async ({ ctx, input }) => {
+      // Audit Issue #5: Apply rate limiting to swap operations
+      await applyRateLimit('swapExecute', ctx.rateLimitContext);
+
       try {
         // 1. Get purchase with post creator info
         const purchase = await prisma.iBuyPurchase.findUnique({
@@ -1028,16 +1075,23 @@ export const socialRouter = router({
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Purchase not found' });
         }
 
-        if (purchase.userId !== ctx.user.id) {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Not your purchase' });
-        }
-
         if (purchase.status !== 'OPEN') {
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already sold' });
         }
 
-        // 2. Calculate profit
-        const profit = input.sellAmountUsdc - purchase.priceInUsdc;
+        const remaining = purchase.amountRemaining > 0 ? purchase.amountRemaining : purchase.amountBought
+        if (remaining <= 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'No remaining tokens to sell' });
+        }
+
+        const amountSoldTokens = Math.min(input.amountSoldTokens, remaining)
+        if (amountSoldTokens <= 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Sell amount too small' });
+        }
+
+        const soldRatio = purchase.amountBought > 0 ? amountSoldTokens / purchase.amountBought : 0
+        const costBasisSold = purchase.priceInUsdc * soldRatio
+        const profit = input.sellAmountUsdc - costBasisSold;
 
         // 3. Calculate 5% creator fee (only if profit > 0)
         let creatorFee = 0;
@@ -1060,17 +1114,26 @@ export const socialRouter = router({
           }
         }
 
+        const nextRemainingRaw = remaining - amountSoldTokens
+        const nextRemaining = nextRemainingRaw < 1e-9 ? 0 : nextRemainingRaw
+        const shouldClose = nextRemaining === 0
+
+        const nextSellAmountUsdc = (purchase.sellAmountUsdc ?? 0) + input.sellAmountUsdc
+        const nextProfitLoss = (purchase.profitLoss ?? 0) + profit
+        const nextCreatorFeeTotal = (purchase.creatorFee ?? 0) + (creatorFee > 0 ? creatorFee : 0)
+
         // 4. Update purchase record
         const updatedPurchase = await prisma.iBuyPurchase.update({
           where: { id: input.purchaseId },
           data: {
-            sellAmountUsdc: input.sellAmountUsdc,
+            amountRemaining: nextRemaining,
+            sellAmountUsdc: nextSellAmountUsdc,
             sellTxSig: input.sellTxSig,
-            soldAt: new Date(),
-            profitLoss: profit,
-            creatorFee: creatorFee > 0 ? creatorFee : null,
-            creatorFeeTxSig,
-            status: creatorFeeTxSig ? 'FEE_PENDING' : 'SOLD',
+            ...(shouldClose && { soldAt: new Date() }),
+            profitLoss: nextProfitLoss,
+            creatorFee: nextCreatorFeeTotal > 0 ? nextCreatorFeeTotal : null,
+            creatorFeeTxSig: creatorFeeTxSig ?? purchase.creatorFeeTxSig,
+            status: shouldClose ? (creatorFeeTxSig ? 'FEE_PENDING' : 'SOLD') : 'OPEN',
           },
         });
 

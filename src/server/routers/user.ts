@@ -5,6 +5,13 @@ import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
 import * as bcrypt from 'bcryptjs';
 import { PublicKey } from '@solana/web3.js';
+// Comment 4: Import JSON schemas for validation
+import { notificationsSchema, privacySchema, securitySchema, preferencesSchema } from '../../lib/schemas/user-settings';
+// Comment 1: Import centralized validation limits for consistent username validation
+import { VALIDATION_LIMITS } from '../../lib/validation';
+import { gdprService } from '../../lib/services/gdpr'
+import { kycService } from '../../lib/services/kyc'
+import { auditLogService } from '../../lib/services/auditLog'
 
 export const userRouter = router({
   /**
@@ -14,7 +21,7 @@ export const userRouter = router({
     .query(async ({ ctx }) => {
       try {
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           include: {
             _count: {
               select: {
@@ -49,10 +56,10 @@ export const userRouter = router({
         }
 
         const positions = await prisma.position.findMany({
-          where: { copyTrading: { userId: ctx.user.id }, status: 'CLOSED', exitValue: { not: null } },
+          where: { copyTrading: { userId: ctx.user!.id }, status: 'CLOSED', exitValue: { not: null } },
         })
-        const totalInvested = positions.reduce((s, p: any) => s + (p.entryValue || 0), 0)
-        const totalReturned = positions.reduce((s, p: any) => s + (p.exitValue || 0), 0)
+        const totalInvested = positions.reduce((sum: number, p: any) => sum + (p.entryValue || 0), 0)
+        const totalReturned = positions.reduce((sum: number, p: any) => sum + (p.exitValue || 0), 0)
         const roi = totalInvested > 0 ? Math.round((((totalReturned - totalInvested) / totalInvested) * 100) * 100) / 100 : 0
 
         return {
@@ -116,7 +123,7 @@ export const userRouter = router({
         const isFollowing = await prisma.follow.findUnique({
           where: {
             followerId_followingId: {
-              followerId: ctx.user.id,
+              followerId: ctx.user!.id,
               followingId: user.id,
             },
           },
@@ -157,7 +164,12 @@ export const userRouter = router({
   updateProfile: protectedProcedure
     .input(z.object({
       name: z.string().min(1).max(100).optional(),
-      username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_-]+$/).optional(),
+      // Comment 1: Use centralized VALIDATION_LIMITS for username (50 chars max)
+      username: z.string()
+        .min(VALIDATION_LIMITS.USERNAME_MIN)
+        .max(VALIDATION_LIMITS.USERNAME_MAX)
+        .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores')
+        .optional(),
       email: z.string().email().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -167,7 +179,7 @@ export const userRouter = router({
           const existingUser = await prisma.user.findFirst({
             where: {
               username: input.username,
-              id: { not: ctx.user.id },
+              id: { not: ctx.user!.id },
             },
           });
 
@@ -184,7 +196,7 @@ export const userRouter = router({
           const existingUser = await prisma.user.findFirst({
             where: {
               email: input.email,
-              id: { not: ctx.user.id },
+              id: { not: ctx.user!.id },
             },
           });
 
@@ -197,7 +209,7 @@ export const userRouter = router({
         }
 
         const updatedUser = await prisma.user.update({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           data: {
             ...(input.name && { name: input.name }),
             ...(input.username && { username: input.username }),
@@ -239,7 +251,7 @@ export const userRouter = router({
       try {
         // Get user with password
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
         });
 
         if (!user) {
@@ -263,14 +275,14 @@ export const userRouter = router({
 
         // Update password
         await prisma.user.update({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           data: { password: hashedPassword },
         });
 
         // Invalidate all sessions except current
         await prisma.session.deleteMany({
           where: {
-            userId: ctx.user.id,
+            userId: ctx.user!.id,
             id: { not: ctx.session?.id },
           },
         });
@@ -296,14 +308,14 @@ export const userRouter = router({
       try {
         // Get or create user settings
         let settings = await prisma.userSettings.findUnique({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
         });
 
         if (!settings) {
           // Create default settings
           settings = await prisma.userSettings.create({
             data: {
-              userId: ctx.user.id,
+              userId: ctx.user!.id,
               notifications: {
                 push: true,
                 email: true,
@@ -358,24 +370,58 @@ export const userRouter = router({
         twoFactorEnabled: z.boolean().optional(),
         biometricEnabled: z.boolean().optional(),
       }).optional(),
-      preferences: z.object({
-        currency: z.string().optional(),
-        language: z.string().optional(),
-        theme: z.enum(['light', 'dark', 'auto']).optional(),
-      }).optional(),
+      preferences: preferencesSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       try {
+        // Comment 4: Validate input against JSON schemas before persisting
+        if (input.notifications) {
+          const result = notificationsSchema.safeParse(input.notifications);
+          if (!result.success) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: `Invalid notifications format: ${result.error.message}`,
+            });
+          }
+        }
+        if (input.privacy) {
+          const result = privacySchema.safeParse(input.privacy);
+          if (!result.success) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: `Invalid privacy format: ${result.error.message}`,
+            });
+          }
+        }
+        if (input.security) {
+          const result = securitySchema.safeParse(input.security);
+          if (!result.success) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: `Invalid security format: ${result.error.message}`,
+            });
+          }
+        }
+        if (input.preferences) {
+          const result = preferencesSchema.safeParse(input.preferences);
+          if (!result.success) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: `Invalid preferences format: ${result.error.message}`,
+            });
+          }
+        }
+
         // Get existing settings
         const existing = await prisma.userSettings.findUnique({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
         });
 
         if (!existing) {
           // Create new settings with input
           const settings = await prisma.userSettings.create({
             data: {
-              userId: ctx.user.id,
+              userId: ctx.user!.id,
               notifications: input.notifications || {
                 push: true,
                 email: true,
@@ -403,7 +449,7 @@ export const userRouter = router({
 
         // Merge with existing settings
         const updatedSettings = await prisma.userSettings.update({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
           data: {
             notifications: {
               ...(existing.notifications as any),
@@ -448,7 +494,7 @@ export const userRouter = router({
         await prisma.pushToken.upsert({
           where: {
             userId_platform: {
-              userId: ctx.user.id,
+              userId: ctx.user!.id,
               platform: input.platform,
             },
           },
@@ -458,7 +504,7 @@ export const userRouter = router({
             updatedAt: new Date(),
           },
           create: {
-            userId: ctx.user.id,
+            userId: ctx.user!.id,
             token: input.token,
             platform: input.platform,
             active: true,
@@ -487,7 +533,7 @@ export const userRouter = router({
       try {
         // Get user with password
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
         });
 
         if (!user) {
@@ -508,7 +554,7 @@ export const userRouter = router({
 
         // Delete user and all related data (cascade)
         await prisma.user.delete({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
         });
 
         return { success: true, message: 'Account deleted successfully' };
@@ -529,35 +575,67 @@ export const userRouter = router({
    */
   getActivityLog: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
-      offset: z.number().default(0),
+      limit: z.number().int().min(1).max(200).default(50),
+      offset: z.number().int().min(0).default(0),
+      cursor: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
       try {
-        const activities = await prisma.sessionActivity.findMany({
-          where: { userId: ctx.user.id },
-          orderBy: { createdAt: 'desc' },
-          take: input.limit,
-          skip: input.offset,
-          select: {
-            id: true,
-            action: true,
-            ipAddress: true,
-            userAgent: true,
-            metadata: true,
-            suspicious: true,
-            createdAt: true,
-          },
-        });
+        const where = { userId: ctx.user!.id } as const
+        const orderBy = [{ createdAt: 'desc' }, { id: 'desc' }] as const
+
+        let activities: Awaited<ReturnType<typeof prisma.sessionActivity.findMany>> = []
+        let nextCursor: string | undefined
+
+        if (input.cursor) {
+          activities = await prisma.sessionActivity.findMany({
+            where,
+            orderBy,
+            take: input.limit + 1,
+            cursor: { id: input.cursor },
+            skip: 1,
+            select: {
+              id: true,
+              action: true,
+              ipAddress: true,
+              userAgent: true,
+              metadata: true,
+              suspicious: true,
+              createdAt: true,
+            },
+          });
+
+          if (activities.length > input.limit) {
+            const next = activities.pop()
+            nextCursor = next?.id
+          }
+        } else {
+          activities = await prisma.sessionActivity.findMany({
+            where,
+            orderBy,
+            take: input.limit,
+            skip: input.offset,
+            select: {
+              id: true,
+              action: true,
+              ipAddress: true,
+              userAgent: true,
+              metadata: true,
+              suspicious: true,
+              createdAt: true,
+            },
+          });
+        }
 
         const total = await prisma.sessionActivity.count({
-          where: { userId: ctx.user.id },
+          where,
         });
 
         return {
           activities,
           total,
-          hasMore: (input.offset + input.limit) < total,
+          hasMore: input.cursor ? Boolean(nextCursor) : (input.offset + input.limit) < total,
+          nextCursor,
         };
       } catch (error) {
         logger.error('Get activity log error:', error);
@@ -575,7 +653,7 @@ export const userRouter = router({
     .query(async ({ ctx }) => {
       try {
         const userData = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           include: {
             sessions: true,
             transactions: true,
@@ -620,6 +698,119 @@ export const userRouter = router({
       }
     }),
 
+  requestDataExport: protectedProcedure
+    .input(
+      z.object({
+        format: z.enum(['JSON', 'CSV']).default('JSON'),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const requestId = await gdprService.requestDataExport(ctx.user!.id, input.format)
+      return { success: true, requestId }
+    }),
+
+  listDataExportRequests: protectedProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(100).default(20),
+        offset: z.number().int().min(0).default(0),
+        cursor: z.string().optional(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const where = { userId: ctx.user!.id } as const
+      const orderBy = [{ createdAt: 'desc' }, { id: 'desc' }] as const
+
+      let requests: Awaited<ReturnType<typeof prisma.dataExportRequest.findMany>> = []
+      let nextCursor: string | undefined
+
+      if (input.cursor) {
+        requests = await prisma.dataExportRequest.findMany({
+          where,
+          orderBy,
+          take: input.limit + 1,
+          cursor: { id: input.cursor },
+          skip: 1,
+        })
+
+        if (requests.length > input.limit) {
+          const next = requests.pop()
+          nextCursor = next?.id
+        }
+      } else {
+        requests = await prisma.dataExportRequest.findMany({
+          where,
+          orderBy,
+          take: input.limit,
+          skip: input.offset,
+        })
+      }
+
+      const total = await prisma.dataExportRequest.count({ where })
+      return {
+        requests,
+        total,
+        hasMore: input.cursor ? Boolean(nextCursor) : input.offset + input.limit < total,
+        nextCursor,
+      }
+    }),
+
+  requestDataDeletion: protectedProcedure
+    .input(z.object({ reason: z.string().min(1).max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      const ipAddress = ctx.rateLimitContext.ip
+      const requestId = await gdprService.requestDataDeletion(
+        ctx.user!.id,
+        input.reason,
+        ipAddress,
+        ctx.fingerprint?.userAgent
+      )
+      return { success: true, requestId }
+    }),
+
+  getFinancialAuditLogs: protectedProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+        cursor: z.string().optional(),
+        operation: z.string().min(1).optional(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const { logs, total, nextCursor } = await auditLogService.getUserAuditLogs(ctx.user!.id, {
+        limit: input.limit,
+        offset: input.offset,
+        cursor: input.cursor,
+        ...(input.operation ? { operation: input.operation } : {}),
+      })
+
+      return {
+        success: true,
+        logs,
+        total,
+        hasMore: input.cursor ? Boolean(nextCursor) : input.offset + input.limit < total,
+        nextCursor,
+      }
+    }),
+
+  verifyFinancialAuditLogIntegrity: protectedProcedure.query(async ({ ctx }) => {
+    const result = await auditLogService.verifyAuditLogIntegrity(ctx.user!.id)
+    return { success: true, ...result }
+  }),
+
+  submitKYC: protectedProcedure
+    .input(z.object({ data: z.record(z.string(), z.unknown()) }))
+    .mutation(async ({ ctx, input }) => {
+      const verificationId = await kycService.submitKYCVerification(ctx.user!.id, input.data)
+      return { success: true, verificationId }
+    }),
+
+  getKYCStatus: protectedProcedure.query(async ({ ctx }) => {
+    const status = await kycService.getKYCStatus(ctx.user!.id)
+    return { success: true, status }
+  }),
+
   /**
    * Update user's wallet address (sync from client-side wallet)
    */
@@ -629,6 +820,11 @@ export const userRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       try {
+        const existingUser = await prisma.user.findUnique({
+          where: { id: ctx.user!.id },
+          select: { walletAddress: true },
+        })
+
         // Validate Solana address format
         try {
           new PublicKey(input.walletAddress);
@@ -643,7 +839,7 @@ export const userRouter = router({
         const existingWallet = await prisma.user.findFirst({
           where: {
             walletAddress: input.walletAddress,
-            id: { not: ctx.user.id },
+            id: { not: ctx.user!.id },
           },
         });
 
@@ -656,7 +852,7 @@ export const userRouter = router({
 
         // Update user's wallet address
         const updatedUser = await prisma.user.update({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           data: {
             walletAddress: input.walletAddress,
             // Don't set walletVerifiedAt yet - that requires signature verification
@@ -671,7 +867,16 @@ export const userRouter = router({
           },
         });
 
-        logger.info(`Wallet address updated for user ${ctx.user.id}: ${input.walletAddress}`);
+        logger.info(`Wallet address updated for user ${ctx.user!.id}: ${input.walletAddress}`);
+
+        const { AuthService } = await import('../../lib/services/auth')
+        await AuthService.invalidateUserCache(ctx.user!.id)
+
+        const { birdeyeData } = await import('../../lib/services/birdeyeData')
+        if (existingUser?.walletAddress) {
+          birdeyeData.clearCache(existingUser.walletAddress)
+        }
+        birdeyeData.clearCache(input.walletAddress)
 
         return {
           success: true,
@@ -733,7 +938,7 @@ export const userRouter = router({
 
         logger.info(`[searchUsers] Found ${users.length} users for query "${input.query}"`);
 
-        return users.map(user => ({
+        return users.map((user: any) => ({
           id: user.id,
           username: user.username,
           name: user.name,
@@ -752,19 +957,20 @@ export const userRouter = router({
     }),
 
   /**
-   * Get user's iBuy settings (buy amount, slippage)
+   * Get user's iBuy settings (buy amount, slippage, inputCurrency)
    */
   getIBuySettings: protectedProcedure
     .query(async ({ ctx }) => {
       try {
         const settings = await prisma.iBuySettings.findUnique({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
         });
 
         // Return defaults if no settings exist
         return {
           buyAmount: settings?.buyAmount ?? 10,
           slippage: settings?.slippage ?? 0.5,
+          inputCurrency: (settings?.inputCurrency as 'SOL' | 'USDC') ?? 'SOL',
         };
       } catch (error) {
         logger.error('Get iBuy settings error:', error);
@@ -781,26 +987,30 @@ export const userRouter = router({
   updateIBuySettings: protectedProcedure
     .input(z.object({
       buyAmount: z.number().positive().max(10000).optional(),
-      slippage: z.number().min(0.1).max(50).optional(),
+      slippage: z.number().min(0.1).max(5).optional(),
+      inputCurrency: z.enum(['SOL', 'USDC']).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       try {
         const settings = await prisma.iBuySettings.upsert({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
           create: {
-            userId: ctx.user.id,
+            userId: ctx.user!.id,
             buyAmount: input.buyAmount ?? 10,
-            slippage: input.slippage ?? 0.5,
+            slippage: Math.min(input.slippage ?? 0.5, 5),
+            inputCurrency: input.inputCurrency ?? 'SOL',
           },
           update: {
             ...(input.buyAmount !== undefined && { buyAmount: input.buyAmount }),
-            ...(input.slippage !== undefined && { slippage: input.slippage }),
+            ...(input.slippage !== undefined && { slippage: Math.min(input.slippage, 5) }),
+            ...(input.inputCurrency !== undefined && { inputCurrency: input.inputCurrency }),
           },
         });
 
         return {
           buyAmount: settings.buyAmount,
           slippage: settings.slippage,
+          inputCurrency: settings.inputCurrency as 'SOL' | 'USDC',
         };
       } catch (error) {
         logger.error('Update iBuy settings error:', error);

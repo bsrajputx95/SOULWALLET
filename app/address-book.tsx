@@ -62,7 +62,7 @@ export default function AddressBookScreen() {
 
   const createMutation = trpc.contact.create.useMutation({
     onSuccess: () => {
-      refetch();
+      void refetch();
       setShowAddModal(false);
       resetForm();
       Alert.alert('Success', 'Contact added successfully');
@@ -74,7 +74,7 @@ export default function AddressBookScreen() {
 
   const updateMutation = trpc.contact.update.useMutation({
     onSuccess: () => {
-      refetch();
+      void refetch();
       setShowEditModal(false);
       resetForm();
       Alert.alert('Success', 'Contact updated successfully');
@@ -86,7 +86,7 @@ export default function AddressBookScreen() {
 
   const deleteMutation = trpc.contact.delete.useMutation({
     onSuccess: () => {
-      refetch();
+      void refetch();
       Alert.alert('Success', 'Contact deleted successfully');
     },
     onError: (error) => {

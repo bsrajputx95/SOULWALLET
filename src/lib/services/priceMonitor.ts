@@ -1,9 +1,12 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
 import prisma from '../prisma';
 import { logger } from '../logger';
+import { birdeyeData } from './birdeyeData';
 import { jupiterSwap } from './jupiterSwap';
+import { marketData } from './marketData';
 import { executionQueue } from './executionQueue';
+import { rpcManager } from './rpcManager';
 
 interface PositionWithSettings {
   id: string;
@@ -30,16 +33,10 @@ const POSITION_LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 export class PriceMonitor {
   private interval: NodeJS.Timeout | null = null;
   private isRunning = false;
-  private checkIntervalMs = 5000; // Check every 5 seconds
+  private checkIntervalMs = 2000; // Check every 2 seconds (reduced from 5s for faster SL/TP)
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
-  private cacheExpiryMs = 4000; // Cache prices for 4 seconds
-  private connection: Connection;
-
-  constructor() {
-    const rpcUrl = process.env.HELIUS_RPC_URL ||
-      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
-    this.connection = new Connection(rpcUrl, 'confirmed');
-  }
+  private cacheExpiryMs = 1500; // Cache prices for 1.5 seconds (reduced proportionally)
+  constructor() { }
 
   /**
    * Start the price monitoring service
@@ -311,17 +308,70 @@ export class PriceMonitor {
       }
     }
 
-    // Fetch missing prices
-    if (mintsToFetch.length > 0) {
-      const fetchedPrices = await jupiterSwap.getPrices(mintsToFetch);
+    let remaining = [...mintsToFetch]
 
-      for (const mint of mintsToFetch) {
+    if (remaining.length > 0) {
+      const fetchedPrices = await jupiterSwap.getPrices(remaining);
+      for (const mint of remaining) {
         const price = fetchedPrices[mint] || 0;
-        prices[mint] = price;
-
-        // Update cache
         if (price > 0) {
+          prices[mint] = price;
           this.priceCache.set(mint, { price, timestamp: now });
+        }
+      }
+      remaining = remaining.filter((m) => !(prices[m] > 0))
+    }
+
+    if (remaining.length > 0) {
+      const birdeyePrices = await birdeyeData.getTokenPricesUSD(remaining)
+      for (const mint of remaining) {
+        const price = birdeyePrices[mint] || 0
+        if (price > 0) {
+          prices[mint] = price
+          this.priceCache.set(mint, { price, timestamp: now })
+        }
+      }
+      remaining = remaining.filter((m) => !(prices[m] > 0))
+    }
+
+    if (remaining.length > 0) {
+      const queue = [...remaining]
+      const concurrency = 5
+      await Promise.all(
+        Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+          while (queue.length > 0) {
+            const mint = queue.shift()
+            if (!mint) break
+            try {
+              const tokenData = await marketData.getToken(mint)
+              const priceStr = tokenData?.pairs?.[0]?.priceUsd
+              const price = priceStr ? parseFloat(priceStr) : 0
+              if (price > 0) {
+                prices[mint] = price
+                this.priceCache.set(mint, { price, timestamp: now })
+              }
+            } catch (_error) {
+              void 0
+            }
+          }
+        })
+      )
+      remaining = remaining.filter((m) => !(prices[m] > 0))
+    }
+
+    if (remaining.length > 0) {
+      const cachedPrices = await prisma.tokenPrice.findMany({
+        where: { tokenMint: { in: remaining } },
+      })
+      const cachedByMint = new Map<string, number>()
+      for (const p of cachedPrices) {
+        cachedByMint.set(p.tokenMint, p.priceUSD)
+      }
+      for (const mint of remaining) {
+        const cached = cachedByMint.get(mint) ?? 0
+        prices[mint] = cached
+        if (cached > 0) {
+          this.priceCache.set(mint, { price: cached, timestamp: now })
         }
       }
     }
@@ -493,11 +543,12 @@ export class PriceMonitor {
     tokenMint: string
   ): Promise<number> {
     try {
+      const connection = await rpcManager.getConnection();
       const walletPubkey = new PublicKey(walletAddress);
       const mintPubkey = new PublicKey(tokenMint);
 
       const ata = await getAssociatedTokenAddress(mintPubkey, walletPubkey);
-      const account = await getAccount(this.connection, ata);
+      const account = await getAccount(connection, ata);
 
       // Assume 9 decimals for most SPL tokens, adjust if needed
       const decimals = 9;

@@ -8,9 +8,105 @@ on:
   workflow_dispatch:
 
 jobs:
+  security-gates:
+    name: Security Gates
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: soulwallet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/soulwallet_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: test-jwt-secret-for-ci
+      JWT_REFRESH_SECRET: test-refresh-secret-for-ci
+      SOLANA_RPC_URL: https://api.devnet.solana.com
+      NODE_ENV: test
+      ENABLE_API_LOGGING: 'false'
+      LOG_API_REQUEST_ACTIVITY: 'false'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+      - name: Build server
+        run: npm run server:build
+      - name: Start server
+        run: node dist/server/fastify.js &
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:3001/health >/dev/null; then
+              exit 0
+            fi
+            echo "Waiting for server..."
+            sleep 2
+          done
+          echo "Server did not become healthy in time" >&2
+          exit 1
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        if: ${{ secrets.SNYK_TOKEN != '' }}
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --fail-on=all --sarif-file-output=snyk.sarif
+      - name: Upload Snyk results
+        uses: github/codeql-action/upload-sarif@v3
+        if: ${{ secrets.SNYK_TOKEN != '' }}
+        with:
+          sarif_file: snyk.sarif
+      - name: Run OWASP ZAP scan
+        uses: zaproxy/action-full-scan@v0.4.0
+        with:
+          target: 'http://localhost:3001'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      - name: SonarQube Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
   deploy-backend:
     name: Deploy Backend
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    needs: security-gates
     environment:
       name: production
       url: https://api.soulwallet.com
@@ -22,7 +118,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
       
       - name: Install dependencies
@@ -34,11 +130,23 @@ jobs:
       - name: Verify environment configuration
         run: npm run validate-env
         env:
+          NODE_ENV: production
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+          EXPO_PUBLIC_SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+          ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS }}
+          FEATURE_SIMULATION_MODE: 'false'
+          SESSION_FINGERPRINT_STRICT: 'true'
+          CSRF_ENABLED: 'true'
+          WALLET_ENCRYPTION_KEY: ${{ secrets.WALLET_ENCRYPTION_KEY }}
+          KMS_PROVIDER: ${{ secrets.KMS_PROVIDER }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
       
       - name: Check migration status
         run: |
@@ -65,18 +173,11 @@ jobs:
       
       - name: Build backend
         run: npm run server:build
-      
-      - name: Validate environment variables
+
+      - name: Deploy blue-green (zero-downtime)
         run: |
-          # Check required environment variables
-          required_vars=("DATABASE_URL" "REDIS_URL" "JWT_SECRET" "JWT_REFRESH_SECRET" "SOLANA_RPC_URL")
-          for var in "${required_vars[@]}"; do
-            if [ -z "${!var}" ]; then
-              echo "Error: $var is not set"
-              exit 1
-            fi
-          done
-          echo "Environment variables validation passed"
+          chmod +x ./scripts/deploy-bluegreen.sh ./scripts/backup-database.sh ./scripts/restore-database.sh
+          ./scripts/deploy-bluegreen.sh --environment production
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
@@ -84,152 +185,25 @@ jobs:
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
       
-      - name: Verify database connectivity
-        run: |
-          npx prisma migrate status
-          echo "Database connectivity verified"
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      
-      - name: Backup database
-        run: |
-          timestamp=$(date +%Y-%m-%d-%H-%M-%S)
-          backup_file="backup-$timestamp.sql"
-          pg_dump $DATABASE_URL > $backup_file
-          echo "Database backup created: $backup_file"
-          # Upload backup as artifact for potential rollback
-          echo "BACKUP_FILE=$backup_file" >> $GITHUB_ENV
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      
-      - name: Deploy to Railway (Blue-Green)
-        if: github.ref == 'refs/heads/main'
-        run: |
-          # Deploy to blue environment first
-          npm install -g railway
-          railway up --service soulwallet-blue
-          # Wait for deployment
-          sleep 30
-          # Run smoke tests on blue
-          curl -f http://soulwallet-blue.railway.app/health || exit 1
-          curl -f http://soulwallet-blue.railway.app/health/db || exit 1
-          curl -f http://soulwallet-blue.railway.app/health/redis || exit 1
-          # Switch to blue (promote to production)
-          railway domain --service soulwallet-blue
-          echo "Blue-green deployment to Railway completed"
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      
-      - name: Deploy to Heroku (Blue-Green)
-        if: contains(github.ref, 'refs/tags/v')
-        uses: akhileshns/heroku-deploy@v3.12.14
-        with:
-          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}-blue
-          heroku_email: ${{ secrets.HEROKU_EMAIL }}
-      
-      - name: Wait for deployment to stabilize
-        run: sleep 30
-      
-      - name: Verify health endpoints
-        run: |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            base_url="https://api.soulwallet.com"
-          else
-            base_url="https://${{ secrets.HEROKU_APP_NAME }}-blue.herokuapp.com"
-          fi
-          curl -f $base_url/health || exit 1
-          curl -f $base_url/health/db || exit 1
-          curl -f $base_url/health/redis || exit 1
-          curl -f $base_url/health/solana || exit 1
-          echo "Health checks passed"
-      
-      - name: Run smoke tests
-        run: |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            base_url="https://api.soulwallet.com"
-          else
-            base_url="https://${{ secrets.HEROKU_APP_NAME }}-blue.herokuapp.com"
-          fi
-          # Test auth.login
-          curl -f -X POST $base_url/auth/login -H "Content-Type: application/json" -d '{"email":"test@example.com","password":"testpass"}' || exit 1
-          # Test wallet.getBalance
-          curl -f $base_url/wallet/getBalance -H "Authorization: Bearer ${{ secrets.TEST_JWT_TOKEN }}" || exit 1
-          echo "Smoke tests passed"
-      
-      - name: Smoke tests
-        run: |
-          # Wait for deployment to be ready
-          sleep 60
-          # Check health endpoints
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            base_url="http://soulwallet-blue.railway.app"
-          else
-            base_url="https://${{ secrets.HEROKU_APP_NAME }}-blue.herokuapp.com"
-          fi
-          curl -f $base_url/health || exit 1
-          curl -f $base_url/health/db || exit 1
-          curl -f $base_url/health/redis || exit 1
-          echo "Smoke tests passed"
-      
       - name: Rollback on failure
         if: failure()
         run: |
           echo "Deployment failed, initiating rollback"
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            # Rollback Railway
-            npm install -g railway
-            railway up --service soulwallet-green  # Assuming green is previous
-          else
-            # Rollback Heroku
-            heroku rollback --app ${{ secrets.HEROKU_APP_NAME }}-blue
-          fi
-          # Restore database from backup if needed
-          if [ -f "$BACKUP_FILE" ]; then
-            psql $DATABASE_URL < $BACKUP_FILE
-            echo "Database restored from backup"
-          fi
+          chmod +x ./scripts/emergency-rollback.sh ./scripts/restore-database.sh
+          ./scripts/emergency-rollback.sh --auto
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-          HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
       
       - name: Deployment notification
         if: always()
         run: |
           status="${{ job.status }}"
           message="Deployment $status for ${{ github.ref }} at $(date)"
-          # Send to Slack (replace with your webhook)
           curl -X POST -H 'Content-type: application/json' --data "{\"text\":\"$message\"}" ${{ secrets.SLACK_WEBHOOK_URL }}
-          # Or send email
-          echo "$message" | mail -s "Deployment Status" ${{ secrets.NOTIFICATION_EMAIL }}
-      
-      - name: Tag successful deployment
-        if: success()
-        run: |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            version="v$(date +%Y.%m.%d.%H%M%S)"
-            git tag $version
-            git push origin $version
-            echo "Tagged deployment as $version"
-          fi
-      
-      - name: Update deployment documentation
-        if: success()
-        run: |
-          deployment_time=$(date)
-          version=$(git describe --tags --abbrev=0 2>/dev/null || echo "main")
-          sed -i "s/Last deployment:.*/Last deployment: $deployment_time (version: $version)/" DEPLOYMENT.md
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add DEPLOYMENT.md
-          git commit -m "Update deployment info: $version at $deployment_time" || echo "No changes to commit"
-          git push
 
   rollback:
     name: Rollback Deployment
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: deploy-backend
     if: failure()
     
@@ -237,25 +211,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Restore database from backup
+      - name: Emergency rollback
         run: |
-          ./scripts/restore-database.sh $BACKUP_FILE --force --no-backup
+          chmod +x ./scripts/emergency-rollback.sh ./scripts/restore-database.sh
+          ./scripts/emergency-rollback.sh --auto
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          BACKUP_FILE: ${{ env.BACKUP_FILE }}
-      
-      - name: Revert to previous deployment
-        run: |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            npm install -g railway
-            railway up --service soulwallet-green
-          else
-            heroku rollback --app ${{ secrets.HEROKU_APP_NAME }}-blue
-          fi
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-          HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
       
       - name: Notify team of rollback
         run: |
@@ -265,6 +226,8 @@ jobs:
   deploy-docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
+    needs: security-gates
+    if: ${{ needs.security-gates.result == 'success' }}
     
     steps:
       - name: Checkout code
@@ -316,6 +279,53 @@ jobs:
       
       - name: Verify signature
         run: cosign verify ${{ secrets.DOCKER_USERNAME }}/soulwallet:latest --keyless
+
+  deploy-canary:
+    name: Canary Deployment
+    runs-on: self-hosted
+    needs: [security-gates, deploy-backend]
+    if: ${{ needs.security-gates.result == 'success' && github.event_name == 'workflow_dispatch' }}
+    environment:
+      name: canary
+      url: https://canary.api.soulwallet.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy canary with 10% traffic
+        run: |
+          chmod +x ./scripts/deploy-canary.sh
+          ./scripts/deploy-canary.sh --percentage 10 --environment production
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+      
+      - name: Monitor canary metrics
+        run: |
+          echo "Monitoring canary for 10 minutes..."
+          sleep 600
+          # Check error rate from Prometheus
+          error_rate=$(curl -s "http://localhost:9090/api/v1/query?query=sum(rate(soulwallet_http_errors_total{service=\"canary\"}[5m]))" | jq -r '.data.result[0].value[1] // "0"')
+          if (( $(echo "$error_rate > 0.01" | bc -l) )); then
+            echo "Error rate too high: $error_rate"
+            exit 1
+          fi
+      
+      - name: Rollback canary on failure
+        if: failure()
+        run: |
+          chmod +x ./scripts/deploy-canary.sh
+          ./scripts/deploy-canary.sh --rollback
+      
+      - name: Promote canary (manual step)
+        if: success()
+        run: |
+          echo "Canary deployment successful!"
+          echo "To promote: ./scripts/deploy-canary.sh --promote"
+          echo "To rollback: ./scripts/deploy-canary.sh --rollback"
 
   deploy-expo:
     name: Build & Submit Expo App

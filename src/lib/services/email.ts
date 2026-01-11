@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { logger } from '../logger';
 
 export interface EmailConfig {
   provider: 'resend' | 'sendgrid' | 'smtp' | 'console';
@@ -231,6 +232,78 @@ This is an automated message, please do not reply to this email.
     `;
 
     return { subject, html, text };
+  }
+
+  private generateLoginNotificationTemplate(
+    email: string,
+    ipAddress: string,
+    userAgent: string,
+    timestamp: Date
+  ): EmailTemplate {
+    const subject = 'New Login to Your Soul Wallet Account'
+    const formattedTime = timestamp.toLocaleString()
+    const deviceInfo = this.parseUserAgent(userAgent)
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Login Notification</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .details { background: #fff; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #667eea; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Login Notification</h1>
+              <p>Soul Wallet Security</p>
+            </div>
+            <div class="content">
+              <p>A new login was detected on your account.</p>
+              <div class="details">
+                <ul>
+                  <li><strong>Email:</strong> ${email}</li>
+                  <li><strong>Time:</strong> ${formattedTime}</li>
+                  <li><strong>IP Address:</strong> ${ipAddress}</li>
+                  <li><strong>Device:</strong> ${deviceInfo.device}</li>
+                  <li><strong>Browser:</strong> ${deviceInfo.browser}</li>
+                  <li><strong>Operating System:</strong> ${deviceInfo.os}</li>
+                </ul>
+              </div>
+              <p>If this wasn't you, please change your password immediately and review your recent activity.</p>
+            </div>
+            <div class="footer">
+              <p>© 2024 Soul Wallet. All rights reserved.</p>
+              <p>This is an automated message, please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+
+    const text = `
+New Login to Your Soul Wallet Account
+
+Login Details:
+- Email: ${email}
+- Time: ${formattedTime}
+- IP Address: ${ipAddress}
+- Device: ${deviceInfo.device}
+- Browser: ${deviceInfo.browser}
+- Operating System: ${deviceInfo.os}
+
+If this wasn't you, please change your password immediately and review your recent activity.
+    `
+
+    return { subject, html, text }
   }
 
   /**
@@ -587,6 +660,16 @@ This is an automated notification. Please do not reply to this email.
     await this.sendEmail(email, template);
   }
 
+  async sendLoginNotification(
+    email: string,
+    ipAddress: string,
+    userAgent: string,
+    timestamp: Date
+  ): Promise<void> {
+    const template = this.generateLoginNotificationTemplate(email, ipAddress, userAgent, timestamp)
+    await this.sendEmail(email, template)
+  }
+
   /**
    * Send suspicious login alert email
    */
@@ -632,10 +715,15 @@ This is an automated notification. Please do not reply to this email.
     try {
       switch (this.config.provider) {
         case 'console':
-          console.log('📧 Email would be sent:');
-          console.log(`To: ${to}`);
-          console.log(`Subject: ${template.subject}`);
-          console.log(`Content: ${template.text}`);
+          // Audit Issue #3: Only log in development, mask sensitive data
+          if (process.env.NODE_ENV === 'development') {
+            const maskedEmail = to.length > 3 ? to.substring(0, 3) + '***@***' : '***@***';
+            logger.debug('Email sent (console mode)', {
+              to: maskedEmail,
+              subject: template.subject,
+              // Never log content - may contain OTP codes
+            });
+          }
           break;
 
         case 'resend':
@@ -661,7 +749,7 @@ This is an automated notification. Please do not reply to this email.
           throw new Error(`Unsupported email provider: ${this.config.provider}`);
       }
     } catch (error) {
-      console.error('Failed to send email:', error);
+      logger.error('Failed to send email:', error);
       throw new Error('Failed to send email');
     }
   }
@@ -712,23 +800,23 @@ This is an automated notification. Please do not reply to this email.
           await this.transporter.verify();
           return true;
 
-        case 'resend':
+        case 'resend': {
           if (!this.config.apiKey) {
             return false;
           }
-          // Test Resend API connection
           const response = await fetch('https://api.resend.com/domains', {
             headers: {
               'Authorization': `Bearer ${this.config.apiKey}`,
             },
           });
           return response.ok;
+        }
 
         default:
           return false;
       }
     } catch (error) {
-      console.error('Email configuration verification failed:', error);
+      logger.error('Email configuration verification failed:', error);
       return false;
     }
   }

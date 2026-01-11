@@ -9,15 +9,14 @@ import { TRPCError } from '@trpc/server';
 import { birdeyeData } from '../../lib/services/birdeyeData';
 import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
-import NodeCache from 'node-cache';
-
-const cache = new NodeCache({ stdTTL: 86400 }); // 24 hours cache for featured traders
+import { redisCache } from '../../lib/redis'
 
 
 
 export const tradersRouter = router({
   /**
    * Get top 10 traders with real performance data from Birdeye
+   * Falls back to seeded traders if no featured traders exist
    */
   getTopTraders: protectedProcedure
     .input(z.object({
@@ -26,15 +25,80 @@ export const tradersRouter = router({
     }).optional())
     .query(async ({ input }) => {
       const limit = input?.limit || 10;
-      const cacheKey = `top:${limit}:${input?.period || '7d'}`;
-      const cached = cache.get(cacheKey);
-      if (cached) return { success: true, data: cached as any, count: (cached as any).length };
+      const cacheKey: `traders:top:${string}` = `traders:top:${limit}:${input?.period || '7d'}`
+      const cached = await redisCache.get<any[]>(cacheKey)
+      if (cached) return { success: true, data: cached as any, count: cached.length }
       try {
-        const traders = await prisma.traderProfile.findMany({
+        // First try to get featured traders
+        let traders = await prisma.traderProfile.findMany({
           where: { isFeatured: true },
           orderBy: { featuredOrder: 'asc' },
           take: limit,
         });
+
+        // If no featured traders, get all traders ordered by creation date
+        if (traders.length === 0) {
+          traders = await prisma.traderProfile.findMany({
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+          });
+        }
+
+        // If still no traders in DB, use hardcoded known high-performing wallets
+        if (traders.length === 0) {
+          const knownTraders = [
+            { id: 'trader-1', walletAddress: '7Vbmv1jt4vyuqBZcpYPpnVhrqVe5e6ZPb6JxDcffXHsM', username: 'SolanaWhale1' },
+            { id: 'trader-2', walletAddress: 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK', username: 'DeFiMaster' },
+            { id: 'trader-3', walletAddress: '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', username: 'MemeTrader' },
+            { id: 'trader-4', walletAddress: 'HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH', username: 'AlphaHunter' },
+            { id: 'trader-5', walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM', username: 'TokenSniper' },
+          ];
+
+          const tradersWithData = await Promise.all(
+            knownTraders.slice(0, limit).map(async (trader) => {
+              try {
+                const pnlData = await birdeyeData.getWalletPnL(trader.walletAddress);
+                const totalPnL = (pnlData as any)?.data?.total_pnl_usd || 0;
+                const realizedProfit = (pnlData as any)?.data?.total_realized_profit_usd || 0;
+                const unrealizedProfit = (pnlData as any)?.data?.total_unrealized_profit_usd || 0;
+                const roi = (pnlData as any)?.data?.roi_percentage || 0;
+                const totalTrades = (pnlData as any)?.data?.total_trades || 0;
+                return {
+                  id: trader.id,
+                  name: trader.username,
+                  walletAddress: trader.walletAddress,
+                  verified: false,
+                  roi,
+                  totalPnL,
+                  realizedProfit,
+                  unrealizedProfit,
+                  totalTrades,
+                  period: input?.period || '7d',
+                  lastActive: new Date().toISOString(),
+                };
+              } catch (error) {
+                logger.error(`Error fetching data for ${trader.username}:`, error);
+                return {
+                  id: trader.id,
+                  name: trader.username,
+                  walletAddress: trader.walletAddress,
+                  verified: false,
+                  roi: 0,
+                  totalPnL: 0,
+                  realizedProfit: 0,
+                  unrealizedProfit: 0,
+                  totalTrades: 0,
+                  period: input?.period || '7d',
+                  lastActive: new Date().toISOString(),
+                };
+              }
+            })
+          );
+
+          const sortedTraders = tradersWithData.sort((a, b) => (b.roi || 0) - (a.roi || 0));
+          await redisCache.set(cacheKey, sortedTraders, 86400)
+          return { success: true, data: sortedTraders, count: sortedTraders.length };
+        }
 
         const tradersWithData = await Promise.all(
           traders.map(async (trader) => {
@@ -78,7 +142,7 @@ export const tradersRouter = router({
         );
 
         const sortedTraders = tradersWithData.sort((a, b) => (b.roi || 0) - (a.roi || 0));
-        cache.set(cacheKey, sortedTraders);
+        await redisCache.set(cacheKey, sortedTraders, 86400)
         return { success: true, data: sortedTraders, count: sortedTraders.length };
       } catch (error) {
         logger.error('Error fetching top traders:', error);

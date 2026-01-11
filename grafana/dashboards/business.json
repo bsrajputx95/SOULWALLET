@@ -1,0 +1,222 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "description": "Business metrics - authentication, user activity, and API usage",
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "id": null,
+    "panels": [
+        {
+            "title": "Authentication Requests",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*auth.*\"}[5m]))",
+                    "legendFormat": "Auth Requests/s",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Login Success Rate",
+            "type": "gauge",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "value": 0,
+                                "color": "red"
+                            },
+                            {
+                                "value": 0.7,
+                                "color": "yellow"
+                            },
+                            {
+                                "value": 0.9,
+                                "color": "green"
+                            }
+                        ]
+                    }
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*auth.login.*\", status_code=\"200\"}[5m])) / sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*auth.login.*\"}[5m]))",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Failed Logins (24h)",
+            "type": "stat",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "value": 0,
+                                "color": "green"
+                            },
+                            {
+                                "value": 100,
+                                "color": "yellow"
+                            },
+                            {
+                                "value": 500,
+                                "color": "red"
+                            }
+                        ]
+                    }
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(increase(soulwallet_http_request_duration_seconds_count{route=~\".*auth.login.*\", status_code=~\"4..\"}[24h]))",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "API Requests by Route",
+            "type": "piechart",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum by (route) (rate(soulwallet_http_request_duration_seconds_count[5m]))",
+                    "legendFormat": "{{route}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "User Activity (Last 24h)",
+            "type": "stat",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 12,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum(increase(soulwallet_http_request_duration_seconds_count{route=~\".*user.*|.*wallet.*|.*portfolio.*\"}[24h]))",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Market Data Requests",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 18,
+                "y": 8
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*market.*\"}[5m]))",
+                    "legendFormat": "Market Data/s",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Social Activity",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 16
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*social.*\"}[5m]))",
+                    "legendFormat": "Social Requests/s",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Portfolio Requests",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 16
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*portfolio.*\"}[5m]))",
+                    "legendFormat": "Portfolio/s",
+                    "refId": "A"
+                }
+            ]
+        }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": [
+        "soulwallet",
+        "business"
+    ],
+    "time": {
+        "from": "now-1h",
+        "to": "now"
+    },
+    "title": "Business Metrics",
+    "uid": "soulwallet-business",
+    "version": 1
+}

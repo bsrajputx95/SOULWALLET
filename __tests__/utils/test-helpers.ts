@@ -2,7 +2,6 @@
  * Test Helpers - Comprehensive utilities for integration testing
  */
 
-import fetch from 'node-fetch';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 
@@ -243,14 +242,17 @@ export async function httpRequest(
 ): Promise<{ status: number; data: any }> {
   const url = `${BASE_URL}${path}`;
   
-  const response = await fetch(url, {
+  const init: RequestInit = {
     method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
       ...options.headers,
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  };
+  if (options.body !== undefined) {
+    init.body = JSON.stringify(options.body);
+  }
+  const response = await fetch(url, init);
   
   let data;
   try {
@@ -278,7 +280,8 @@ export async function isServerRunning(): Promise<boolean> {
  * Wait for server to be ready
  */
 export async function waitForServer(timeout: number = 30000): Promise<boolean> {
-  return waitForCondition(isServerRunning, timeout, 1000);
+  const effectiveTimeout = Math.max(0, timeout - 1000);
+  return waitForCondition(isServerRunning, effectiveTimeout, 500);
 }
 
 /**

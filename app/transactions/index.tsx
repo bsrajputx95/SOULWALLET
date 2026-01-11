@@ -44,7 +44,7 @@ export default function TransactionsScreen() {
 
   const syncMutation = trpc.transaction.sync.useMutation({
     onSuccess: () => {
-      refetch();
+      void refetch();
       Alert.alert('Success', 'Transactions synced successfully');
     },
     onError: (error) => {

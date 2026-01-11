@@ -4,6 +4,8 @@ import { logger } from '../logger';
 import { paymentVerificationService } from './payment-verification';
 import type { PostVisibility, Prisma } from '@prisma/client';
 import DOMPurify from 'isomorphic-dompurify';
+// Comment 3: Import encodeHtmlEntities for safe display encoding
+import { VALIDATION_LIMITS, encodeHtmlEntities } from '../validation';
 
 export interface CreatePostInput {
   content: string;
@@ -29,28 +31,46 @@ export interface CreateCommentInput {
 export interface FeedOptions {
   userId: string;
   viewerId: string;
-  feedType: 'all' | 'following' | 'vip' | 'user';
+  feedType: 'all' | 'following' | 'vip' | 'user' | 'forYou';
   targetUserId?: string;
   limit?: number;
   cursor?: string;
   tokenFilter?: string;
 }
 
+// Global posters whose posts appear in all feeds
+const GLOBAL_POSTER_USERNAMES = (process.env.GLOBAL_POSTER_USERNAMES || 'bhavanisingh,soulwallet').split(',').map(u => u.trim()).filter(Boolean);
+
 export class SocialService {
   /**
    * Sanitize user-generated content
+   * Plan2 Step 3: Enhanced DOMPurify config
    */
   private static sanitizeContent(content: string): string {
-    // Remove any potential XSS
+    // Remove any potential XSS with stricter config
     return DOMPurify.sanitize(content, {
       ALLOWED_TAGS: [],
       ALLOWED_ATTR: [],
-      KEEP_CONTENT: true
+      KEEP_CONTENT: true,
+      FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
+      RETURN_DOM: false,
+      RETURN_DOM_FRAGMENT: false,
     });
   }
 
   /**
+   * Comment 3: Encode content for safe display in HTML context
+   * Applies HTML entity encoding to prevent XSS when content is rendered
+   * Only use on already-sanitized strings to avoid double-encoding
+   */
+  private static encodeForDisplay(content: string | null | undefined): string {
+    if (!content) return '';
+    return encodeHtmlEntities(content);
+  }
+
+  /**
    * Validate Solana address format
+   * SAFE REGEX: Character class only - ReDoS safe
    */
   private static isValidSolanaAddress(address: string): boolean {
     const solanaAddressRegex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -70,10 +90,11 @@ export class SocialService {
         });
       }
 
-      if (input.content.length > 2000) {
+      // Use centralized limit
+      if (input.content.length > VALIDATION_LIMITS.POST_CONTENT_MAX) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Post content exceeds maximum length of 2000 characters',
+          message: `Post content exceeds maximum length of ${VALIDATION_LIMITS.POST_CONTENT_MAX} characters`,
         });
       }
 
@@ -175,27 +196,45 @@ export class SocialService {
     try {
       const { userId, viewerId, feedType, targetUserId, limit = 20, cursor, tokenFilter } = options;
 
+      // Get global poster IDs (cached for performance)
+      let globalPosterIds: string[] = [];
+      if (GLOBAL_POSTER_USERNAMES.length > 0) {
+        const globalPosters = await prisma.user.findMany({
+          where: { username: { in: GLOBAL_POSTER_USERNAMES } },
+          select: { id: true },
+        });
+        globalPosterIds = globalPosters.map(u => u.id);
+      }
+
       // Build where clause based on feed type
       let where: Prisma.PostWhereInput = {};
 
       switch (feedType) {
         case 'all':
-          // Public posts only
-          where.visibility = 'PUBLIC';
+          // Public posts + global posters
+          where = {
+            OR: [
+              { visibility: 'PUBLIC' },
+              ...(globalPosterIds.length > 0 ? [{ userId: { in: globalPosterIds } }] : []),
+            ],
+          };
           break;
 
-        case 'following':
-          // Posts from users the viewer follows
+        case 'following': {
           const following = await prisma.follow.findMany({
             where: { followerId: viewerId },
             select: { followingId: true },
           });
 
+          const followingIds = following.map(f => f.followingId);
+          // Include global posters in following feed
+          const allIds = [...new Set([...followingIds, ...globalPosterIds])];
+
           where = {
             OR: [
               { userId: viewerId }, // Own posts
               {
-                userId: { in: following.map(f => f.followingId) },
+                userId: { in: allIds },
                 OR: [
                   { visibility: 'PUBLIC' },
                   { visibility: 'FOLLOWERS' },
@@ -204,9 +243,27 @@ export class SocialService {
             ],
           };
           break;
+        }
 
-        case 'vip':
-          // VIP posts from subscribed creators
+        case 'forYou': {
+          // "For You" feed: Popular posts based on engagement + global posters
+          // Simple algorithm: Posts with high engagement from last 7 days
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+          where = {
+            OR: [
+              {
+                visibility: 'PUBLIC',
+                createdAt: { gte: sevenDaysAgo },
+              },
+              ...(globalPosterIds.length > 0 ? [{ userId: { in: globalPosterIds } }] : []),
+            ],
+          };
+          break;
+        }
+
+        case 'vip': {
           const vipSubs = await prisma.vIPSubscription.findMany({
             where: {
               subscriberId: viewerId,
@@ -220,8 +277,9 @@ export class SocialService {
             visibility: 'VIP',
           };
           break;
+        }
 
-        case 'user':
+        case 'user': {
           // Posts from a specific user
           if (!targetUserId) {
             throw new TRPCError({
@@ -255,6 +313,7 @@ export class SocialService {
             ],
           };
           break;
+        }
       }
 
       // Add token filter if provided
@@ -267,11 +326,16 @@ export class SocialService {
         where.createdAt = { lt: new Date(cursor) };
       }
 
+      // Determine ordering - For You uses engagement score, others use chronological
+      const orderBy: Prisma.PostOrderByWithRelationInput[] = feedType === 'forYou'
+        ? [{ likesCount: 'desc' }, { commentsCount: 'desc' }, { createdAt: 'desc' }]
+        : [{ createdAt: 'desc' }];
+
       // Fetch posts
       const posts = await prisma.post.findMany({
         where,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: {
           user: {
             select: {

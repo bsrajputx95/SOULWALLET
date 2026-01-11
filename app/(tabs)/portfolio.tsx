@@ -27,6 +27,8 @@ import { useSolanaWallet } from '../../hooks/solana-wallet-store';
 import type { Token, CopiedWallet } from '../../hooks/wallet-store';
 import { useWallet } from '../../hooks/wallet-store';
 import { trpc } from '../../lib/trpc';
+import { QueueStatusBanner } from '../../components/QueueStatusBanner';
+import { PortfolioSkeleton } from '../../components/SkeletonLoader';
 
 type PortfolioTab = 'tokens' | 'copied' | 'watchlist';
 type ChartPeriod = '24h' | '7d' | '30d' | 'all';
@@ -36,8 +38,21 @@ export default function PortfolioScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { publicKey: solanaPublicKey } = useSolanaWallet();
-  const { tokens, copiedWallets, totalBalance, dailyPnl, refetch, updateCopiedWallet } = useWallet();
+  const { tokens, copiedWallets, totalBalance, dailyPnl, refetch, updateCopiedWallet, isUpdatingCopyTrade } = useWallet();
   const openPositionsQuery = trpc.copyTrading.getOpenPositions.useQuery({}, { refetchInterval: 30000 });
+
+  // Loading state for skeleton
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  // Set initial load to false once data is loaded
+  useEffect(() => {
+    if (tokens.length > 0) {
+      setIsInitialLoad(false);
+    }
+    // Safety timeout
+    const timer = setTimeout(() => setIsInitialLoad(false), 3000);
+    return () => clearTimeout(timer);
+  }, [tokens.length]);
 
   // Fetch trending tokens for watchlist price data
   const { data: trendingData } = trpc.market.trending.useQuery(undefined, {
@@ -66,6 +81,7 @@ export default function PortfolioScreen() {
   const [editSL, setEditSL] = useState('');
   const [editTP, setEditTP] = useState('');
   const [editSlippage, setEditSlippage] = useState('');
+  const [editTotpCode, setEditTotpCode] = useState(''); // ✅ 2FA code for edit
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1d' | '7d' | '30d' | '1y'>('1d');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
 
@@ -97,7 +113,7 @@ export default function PortfolioScreen() {
   }, [refetch, loadWatchlist]);
 
   useEffect(() => {
-    loadWatchlist();
+    void loadWatchlist();
   }, [loadWatchlist]);
 
   // Removed auto-hide header behavior on scroll
@@ -158,385 +174,392 @@ export default function PortfolioScreen() {
         }
       >
         {/* Settings now open in a dedicated screen; inline panel removed */}
-        <NeonCard style={styles.portfolioCard}>
-          <View style={styles.portfolioHeader}>
-            <View style={styles.portfolioTitleRow}>
-              <Text style={styles.portfolioTitle}>Portfolio Value</Text>
-              <Pressable
-                style={styles.periodButton}
-                onPress={() => {
-                  const periods: ('1d' | '7d' | '30d' | '1y')[] = ['1d', '7d', '30d', '1y'];
-                  const currentIndex = periods.indexOf(portfolioPeriod);
-                  const nextIndex = (currentIndex + 1) % periods.length;
-                  setPortfolioPeriod(periods[nextIndex]!);
-                }}
-              >
-                <Text style={styles.periodButtonText}>{portfolioPeriod.toUpperCase()}</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.portfolioValue}>${totalBalance.toLocaleString()}</Text>
-            <View style={styles.pnlContainer}>
-              <Text style={[
-                styles.pnlValue,
-                { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
-              ]}>
-                {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString()}
-              </Text>
-              <Text style={[
-                styles.pnlPercentage,
-                { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
-              ]}>
-                ({dailyPnl >= 0 ? '+' : ''}{totalBalance > dailyPnl ? ((dailyPnl / (totalBalance - dailyPnl) * 100) || 0).toFixed(2) : '0.00'}%)
-              </Text>
-            </View>
-          </View>
-        </NeonCard>
+        <QueueStatusBanner testID="queue-banner-portfolio" onRetry={() => refetch()} />
 
-        <View style={styles.earningsContainer}>
-          <View style={styles.earningCard}>
-            <Text style={styles.earningLabel}>Copy Trade</Text>
-            <Text style={styles.earningValue}>${((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)).toLocaleString()}</Text>
-          </View>
-
-          <View style={styles.earningCard}>
-            <Text style={styles.earningLabel}>Self</Text>
-            <Text style={styles.earningValue}>${(Math.max(0, totalBalance - ((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)))).toLocaleString()}</Text>
-          </View>
-        </View>
-
-        <View style={styles.tabsContainer}>
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'tokens' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('tokens')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'tokens' && styles.activeTabText,
-            ]}>
-              Holdings
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'copied' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('copied')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'copied' && styles.activeTabText,
-            ]}>
-              Copied
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'watchlist' && styles.activeTab,
-            ]}
-            onPress={() => setActiveTab('watchlist')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'watchlist' && styles.activeTabText,
-            ]}>
-              Watch List
-            </Text>
-          </Pressable>
-
-
-        </View>
-
-        {activeTab === 'tokens' && (
-          <View style={styles.tokensContainer}>
-            {tokens.map(token => (
-              <Pressable
-                key={token.id}
-                style={styles.tokenItem}
-                onPress={() => {
-                  setSelectedToken(token);
-                  setTradeMode(null);
-                  setTradeAmount('');
-                  setTradeError(undefined);
-                }}
-              >
-                <View style={styles.tokenRow}>
-                  <View style={styles.tokenLogoContainer}>
-                    {token.logo ? (
-                      <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
-                    ) : (
-                      <View style={styles.tokenLogoPlaceholder}>
-                        <Text style={styles.tokenLogoText}>{token.symbol.charAt(0)}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.tokenInfo}>
-                    <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                    <Text style={styles.tokenPrice}>
-                      ${token.price < 0.01 ? token.price.toFixed(6) : token.price.toFixed(2)}
-                    </Text>
-                    <Text style={[
-                      styles.tokenChange,
-                      { color: token.change24h >= 0 ? COLORS.success : COLORS.error }
-                    ]}>
-                      {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.tokenValue}>
-                  <Text style={styles.tokenValueText}>${token.value.toLocaleString()}</Text>
-                  <Text style={styles.tokenPercentage}>
-                    ({getTokenPercentage(token.value).toFixed(0)}%)
-                  </Text>
-                </View>
-              </Pressable>
-            ))}
-          </View>
-        )}
-
-        {activeTab === 'copied' && (
-          <View style={styles.walletsContainer}>
-            {copiedWallets.map(wallet => (
-              <NeonCard key={wallet.id} style={styles.walletCard}>
-                <View style={styles.walletHeader}>
-                  <View style={styles.walletInfo}>
-                    <Text style={styles.walletUsername}>@{wallet.username}</Text>
-                    <Text style={styles.copiedWalletAddress}>{wallet.walletAddress}</Text>
-                  </View>
-
+        {isInitialLoad && tokens.length === 0 ? <PortfolioSkeleton /> : (
+          <>
+            <NeonCard style={styles.portfolioCard}>
+              <View style={styles.portfolioHeader}>
+                <View style={styles.portfolioTitleRow}>
+                  <Text style={styles.portfolioTitle}>Portfolio Value</Text>
                   <Pressable
-                    style={styles.editButton}
+                    style={styles.periodButton}
                     onPress={() => {
-                      setSelectedWallet(wallet);
-                      setEditAmount('1000');
-                      setEditAmountPerTrade('100');
-                      setEditSL('10');
-                      setEditTP('30');
-                      setEditSlippage('1');
+                      const periods: ('1d' | '7d' | '30d' | '1y')[] = ['1d', '7d', '30d', '1y'];
+                      const currentIndex = periods.indexOf(portfolioPeriod);
+                      const nextIndex = (currentIndex + 1) % periods.length;
+                      setPortfolioPeriod(periods[nextIndex]!);
                     }}
                   >
-                    <Text style={styles.editButtonText}>Edit</Text>
+                    <Text style={styles.periodButtonText}>{portfolioPeriod.toUpperCase()}</Text>
                   </Pressable>
                 </View>
-
-                <View style={styles.walletStats}>
-                  <View style={styles.walletStat}>
-                    <Text style={styles.walletStatLabel}>ROI</Text>
-                    <Text style={[
-                      styles.walletStatValue,
-                      { color: wallet.roi >= 0 ? COLORS.success : COLORS.error }
-                    ]}>
-                      {wallet.roi >= 0 ? '+' : ''}{wallet.roi.toFixed(1)}%
-                    </Text>
-                  </View>
-
-                  <View style={styles.walletStat}>
-                    <Text style={styles.walletStatLabel}>PnL</Text>
-                    <Text style={[
-                      styles.walletStatValue,
-                      { color: wallet.pnl >= 0 ? COLORS.success : COLORS.error }
-                    ]}>
-                      ${wallet.pnl.toLocaleString()}
-                    </Text>
-                  </View>
+                <Text style={styles.portfolioValue}>${totalBalance.toLocaleString()}</Text>
+                <View style={styles.pnlContainer}>
+                  <Text style={[
+                    styles.pnlValue,
+                    { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
+                  ]}>
+                    {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString()}
+                  </Text>
+                  <Text style={[
+                    styles.pnlPercentage,
+                    { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
+                  ]}>
+                    ({dailyPnl >= 0 ? '+' : ''}{totalBalance > dailyPnl ? ((dailyPnl / (totalBalance - dailyPnl) * 100) || 0).toFixed(2) : '0.00'}%)
+                  </Text>
                 </View>
-              </NeonCard>
-            ))}
-          </View>
-        )}
-
-        {activeTab === 'watchlist' && (
-          <View style={styles.tokensContainer}>
-            {watchlistSymbols.length === 0 ? (
-              <View style={{ padding: SPACING.m }}>
-                <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14 }}>
-                  No watchlisted tokens yet. Tap the star on any coin.
-                </Text>
               </View>
-            ) : (
-              watchlistSymbols.map((symbol) => {
-                // First check user's wallet tokens
-                let token = tokens.find(t => t.symbol.toUpperCase() === symbol);
+            </NeonCard>
 
-                // If not in wallet, check trending market data
-                let marketToken: { symbol: string; name: string; price: number; change24h: number; logo?: string; volume24h?: number; } | null = null;
-                if (!token && trendingData?.pairs) {
-                  const pair = trendingData.pairs.find(
-                    (p: any) => p.baseToken?.symbol?.toUpperCase() === symbol
-                  );
-                  if (pair) {
-                    marketToken = {
-                      symbol: pair.baseToken?.symbol || symbol,
-                      name: pair.baseToken?.name || symbol,
-                      price: parseFloat(pair.priceUsd || '0'),
-                      change24h: parseFloat(pair.priceChange?.h24 || '0'),
-                      logo: pair.info?.imageUrl,
-                      volume24h: parseFloat(pair.volume?.h24 || '0'),
-                    };
-                  }
-                }
+            <View style={styles.earningsContainer}>
+              <View style={styles.earningCard}>
+                <Text style={styles.earningLabel}>Copy Trade</Text>
+                <Text style={styles.earningValue}>${((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)).toLocaleString()}</Text>
+              </View>
 
-                // If neither wallet nor market data available, show placeholder
-                if (!token && !marketToken) {
-                  return (
-                    <Pressable
-                      key={symbol}
-                      style={styles.tokenItem}
-                      onPress={() => router.push(`/coin/${symbol.toLowerCase()}`)}
-                    >
-                      <View style={styles.tokenRow}>
-                        <View style={styles.tokenLogoContainer}>
-                          <View style={styles.tokenLogoPlaceholder}>
-                            <Text style={styles.tokenLogoText}>{symbol.charAt(0)}</Text>
-                          </View>
-                        </View>
-                        <View style={styles.tokenInfo}>
-                          <Text style={styles.tokenSymbol}>{symbol}</Text>
-                          <Text style={styles.tokenPrice}>Loading...</Text>
-                          <Text style={[styles.tokenChange, { color: COLORS.textSecondary }]}>—</Text>
-                        </View>
-                      </View>
-                      <View style={styles.tokenValue}>
-                        <Text style={styles.tokenValueText}>—</Text>
-                        <Text style={styles.tokenPercentage}>(—)</Text>
-                      </View>
-                    </Pressable>
-                  );
-                }
+              <View style={styles.earningCard}>
+                <Text style={styles.earningLabel}>Self</Text>
+                <Text style={styles.earningValue}>${(Math.max(0, totalBalance - ((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)))).toLocaleString()}</Text>
+              </View>
+            </View>
 
-                // Use wallet token or market token data
-                const displayToken = token || marketToken;
-                return (
+            <View style={styles.tabsContainer}>
+              <Pressable
+                style={[
+                  styles.tab,
+                  activeTab === 'tokens' && styles.activeTab,
+                ]}
+                onPress={() => setActiveTab('tokens')}
+              >
+                <Text style={[
+                  styles.tabText,
+                  activeTab === 'tokens' && styles.activeTabText,
+                ]}>
+                  Holdings
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.tab,
+                  activeTab === 'copied' && styles.activeTab,
+                ]}
+                onPress={() => setActiveTab('copied')}
+              >
+                <Text style={[
+                  styles.tabText,
+                  activeTab === 'copied' && styles.activeTabText,
+                ]}>
+                  Copied
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.tab,
+                  activeTab === 'watchlist' && styles.activeTab,
+                ]}
+                onPress={() => setActiveTab('watchlist')}
+              >
+                <Text style={[
+                  styles.tabText,
+                  activeTab === 'watchlist' && styles.activeTabText,
+                ]}>
+                  Watch List
+                </Text>
+              </Pressable>
+
+
+            </View>
+
+            {activeTab === 'tokens' && (
+              <View style={styles.tokensContainer}>
+                {tokens.map(token => (
                   <Pressable
-                    key={displayToken.symbol}
+                    key={token.id}
                     style={styles.tokenItem}
-                    onPress={() => router.push(`/coin/${displayToken.symbol.toLowerCase()}`)}
+                    onPress={() => {
+                      setSelectedToken(token);
+                      setTradeMode(null);
+                      setTradeAmount('');
+                      setTradeError(undefined);
+                    }}
                   >
                     <View style={styles.tokenRow}>
                       <View style={styles.tokenLogoContainer}>
-                        {displayToken.logo ? (
-                          <Image source={{ uri: displayToken.logo }} style={styles.tokenLogo} />
+                        {token.logo ? (
+                          <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
                         ) : (
                           <View style={styles.tokenLogoPlaceholder}>
-                            <Text style={styles.tokenLogoText}>{displayToken.symbol.charAt(0)}</Text>
+                            <Text style={styles.tokenLogoText}>{token.symbol.charAt(0)}</Text>
                           </View>
                         )}
                       </View>
                       <View style={styles.tokenInfo}>
-                        <Text style={styles.tokenSymbol}>{displayToken.symbol}</Text>
+                        <Text style={styles.tokenSymbol}>{token.symbol}</Text>
                         <Text style={styles.tokenPrice}>
-                          ${displayToken.price < 0.01 ? displayToken.price.toFixed(6) : displayToken.price.toFixed(2)}
+                          ${token.price < 0.01 ? token.price.toFixed(6) : token.price.toFixed(2)}
                         </Text>
                         <Text style={[
                           styles.tokenChange,
-                          { color: displayToken.change24h >= 0 ? COLORS.success : COLORS.error }
+                          { color: token.change24h >= 0 ? COLORS.success : COLORS.error }
                         ]}>
-                          {displayToken.change24h >= 0 ? '+' : ''}{displayToken.change24h.toFixed(1)}%
+                          {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
                         </Text>
                       </View>
                     </View>
+
                     <View style={styles.tokenValue}>
-                      <Text style={styles.tokenValueText}>
-                        {token && 'value' in token
-                          ? `$${token.value.toLocaleString()}`
-                          : marketToken?.volume24h
-                            ? `Vol: $${(marketToken.volume24h >= 1000000 ? (marketToken.volume24h / 1000000).toFixed(1) + 'M' : marketToken.volume24h >= 1000 ? (marketToken.volume24h / 1000).toFixed(1) + 'K' : marketToken.volume24h.toFixed(0))}`
-                            : '—'}
-                      </Text>
+                      <Text style={styles.tokenValueText}>${token.value.toLocaleString()}</Text>
                       <Text style={styles.tokenPercentage}>
-                        {token && 'value' in token ? `(${getTokenPercentage(token.value).toFixed(0)}%)` : '24h'}
+                        ({getTokenPercentage(token.value).toFixed(0)}%)
                       </Text>
                     </View>
                   </Pressable>
-                );
-              })
-            )}
-          </View>
-        )}
-
-        <View style={styles.chartContainer}>
-          <View style={styles.chartHeader}>
-            <Text style={styles.chartTitle}>PnL Chart</Text>
-
-            <View style={styles.chartControls}>
-              <View style={styles.periodSelector}>
-                {(['24h', '7d', '30d', 'all'] as ChartPeriod[]).map(period => (
-                  <Pressable
-                    key={period}
-                    style={[
-                      styles.periodOption,
-                      chartPeriod === period && styles.activePeriodOption,
-                    ]}
-                    onPress={() => setChartPeriod(period)}
-                  >
-                    <Text style={[
-                      styles.periodOptionText,
-                      chartPeriod === period && styles.activePeriodOptionText,
-                    ]}>
-                      {period}
-                    </Text>
-                  </Pressable>
                 ))}
               </View>
+            )}
 
-              <View style={styles.typeSelector}>
-                {(['line', 'candle'] as ChartType[]).map(type => (
-                  <Pressable
-                    key={type}
-                    style={[
-                      styles.typeOption,
-                      chartType === type && styles.activeTypeOption,
-                    ]}
-                    onPress={() => setChartType(type)}
-                  >
-                    <Text style={[
-                      styles.typeOptionText,
-                      chartType === type && styles.activeTypeOptionText,
-                    ]}>
-                      {type === 'line' ? 'Line' : 'Candle'}
-                    </Text>
-                  </Pressable>
+            {activeTab === 'copied' && (
+              <View style={styles.walletsContainer}>
+                {copiedWallets.map(wallet => (
+                  <NeonCard key={wallet.id} style={styles.walletCard}>
+                    <View style={styles.walletHeader}>
+                      <View style={styles.walletInfo}>
+                        <Text style={styles.walletUsername}>@{wallet.username}</Text>
+                        <Text style={styles.copiedWalletAddress}>{wallet.walletAddress}</Text>
+                      </View>
+
+                      <Pressable
+                        style={styles.editButton}
+                        onPress={() => {
+                          setSelectedWallet(wallet);
+                          setEditAmount(wallet.totalAmount?.toString() || '1000');
+                          setEditAmountPerTrade(wallet.amountPerTrade?.toString() || '100');
+                          setEditSL(wallet.stopLoss ? Math.abs(wallet.stopLoss).toString() : '10');
+                          setEditTP(wallet.takeProfit?.toString() || '30');
+                          setEditSlippage(wallet.slippage?.toString() || '1');
+                          setEditTotpCode('');
+                        }}
+                      >
+                        <Text style={styles.editButtonText}>Edit</Text>
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.walletStats}>
+                      <View style={styles.walletStat}>
+                        <Text style={styles.walletStatLabel}>ROI</Text>
+                        <Text style={[
+                          styles.walletStatValue,
+                          { color: wallet.roi >= 0 ? COLORS.success : COLORS.error }
+                        ]}>
+                          {wallet.roi >= 0 ? '+' : ''}{wallet.roi.toFixed(1)}%
+                        </Text>
+                      </View>
+
+                      <View style={styles.walletStat}>
+                        <Text style={styles.walletStatLabel}>PnL</Text>
+                        <Text style={[
+                          styles.walletStatValue,
+                          { color: wallet.pnl >= 0 ? COLORS.success : COLORS.error }
+                        ]}>
+                          ${wallet.pnl.toLocaleString()}
+                        </Text>
+                      </View>
+                    </View>
+                  </NeonCard>
                 ))}
+              </View>
+            )}
+
+            {activeTab === 'watchlist' && (
+              <View style={styles.tokensContainer}>
+                {watchlistSymbols.length === 0 ? (
+                  <View style={{ padding: SPACING.m }}>
+                    <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14 }}>
+                      No watchlisted tokens yet. Tap the star on any coin.
+                    </Text>
+                  </View>
+                ) : (
+                  watchlistSymbols.map((symbol) => {
+                    // First check user's wallet tokens
+                    let token = tokens.find(t => t.symbol.toUpperCase() === symbol);
+
+                    // If not in wallet, check trending market data
+                    let marketToken: { symbol: string; name: string; price: number; change24h: number; logo?: string; volume24h?: number; } | null = null;
+                    if (!token && trendingData?.pairs) {
+                      const pair = trendingData.pairs.find(
+                        (p: any) => p.baseToken?.symbol?.toUpperCase() === symbol
+                      );
+                      if (pair) {
+                        marketToken = {
+                          symbol: pair.baseToken?.symbol || symbol,
+                          name: pair.baseToken?.name || symbol,
+                          price: parseFloat(pair.priceUsd || '0'),
+                          change24h: parseFloat(pair.priceChange?.h24 || '0'),
+                          logo: pair.info?.imageUrl,
+                          volume24h: parseFloat(pair.volume?.h24 || '0'),
+                        };
+                      }
+                    }
+
+                    // If neither wallet nor market data available, show placeholder
+                    if (!token && !marketToken) {
+                      return (
+                        <Pressable
+                          key={symbol}
+                          style={styles.tokenItem}
+                          onPress={() => router.push(`/coin/${symbol.toLowerCase()}`)}
+                        >
+                          <View style={styles.tokenRow}>
+                            <View style={styles.tokenLogoContainer}>
+                              <View style={styles.tokenLogoPlaceholder}>
+                                <Text style={styles.tokenLogoText}>{symbol.charAt(0)}</Text>
+                              </View>
+                            </View>
+                            <View style={styles.tokenInfo}>
+                              <Text style={styles.tokenSymbol}>{symbol}</Text>
+                              <Text style={styles.tokenPrice}>Loading...</Text>
+                              <Text style={[styles.tokenChange, { color: COLORS.textSecondary }]}>—</Text>
+                            </View>
+                          </View>
+                          <View style={styles.tokenValue}>
+                            <Text style={styles.tokenValueText}>—</Text>
+                            <Text style={styles.tokenPercentage}>(—)</Text>
+                          </View>
+                        </Pressable>
+                      );
+                    }
+
+                    // Use wallet token or market token data
+                    const displayToken = token || marketToken;
+                    return (
+                      <Pressable
+                        key={displayToken.symbol}
+                        style={styles.tokenItem}
+                        onPress={() => router.push(`/coin/${displayToken.symbol.toLowerCase()}`)}
+                      >
+                        <View style={styles.tokenRow}>
+                          <View style={styles.tokenLogoContainer}>
+                            {displayToken.logo ? (
+                              <Image source={{ uri: displayToken.logo }} style={styles.tokenLogo} />
+                            ) : (
+                              <View style={styles.tokenLogoPlaceholder}>
+                                <Text style={styles.tokenLogoText}>{displayToken.symbol.charAt(0)}</Text>
+                              </View>
+                            )}
+                          </View>
+                          <View style={styles.tokenInfo}>
+                            <Text style={styles.tokenSymbol}>{displayToken.symbol}</Text>
+                            <Text style={styles.tokenPrice}>
+                              ${displayToken.price < 0.01 ? displayToken.price.toFixed(6) : displayToken.price.toFixed(2)}
+                            </Text>
+                            <Text style={[
+                              styles.tokenChange,
+                              { color: displayToken.change24h >= 0 ? COLORS.success : COLORS.error }
+                            ]}>
+                              {displayToken.change24h >= 0 ? '+' : ''}{displayToken.change24h.toFixed(1)}%
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.tokenValue}>
+                          <Text style={styles.tokenValueText}>
+                            {token && 'value' in token
+                              ? `$${token.value.toLocaleString()}`
+                              : marketToken?.volume24h
+                                ? `Vol: $${(marketToken.volume24h >= 1000000 ? (marketToken.volume24h / 1000000).toFixed(1) + 'M' : marketToken.volume24h >= 1000 ? (marketToken.volume24h / 1000).toFixed(1) + 'K' : marketToken.volume24h.toFixed(0))}`
+                                : '—'}
+                          </Text>
+                          <Text style={styles.tokenPercentage}>
+                            {token && 'value' in token ? `(${getTokenPercentage(token.value).toFixed(0)}%)` : '24h'}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })
+                )}
+              </View>
+            )}
+
+            <View style={styles.chartContainer}>
+              <View style={styles.chartHeader}>
+                <Text style={styles.chartTitle}>PnL Chart</Text>
+
+                <View style={styles.chartControls}>
+                  <View style={styles.periodSelector}>
+                    {(['24h', '7d', '30d', 'all'] as ChartPeriod[]).map(period => (
+                      <Pressable
+                        key={period}
+                        style={[
+                          styles.periodOption,
+                          chartPeriod === period && styles.activePeriodOption,
+                        ]}
+                        onPress={() => setChartPeriod(period)}
+                      >
+                        <Text style={[
+                          styles.periodOptionText,
+                          chartPeriod === period && styles.activePeriodOptionText,
+                        ]}>
+                          {period}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <View style={styles.typeSelector}>
+                    {(['line', 'candle'] as ChartType[]).map(type => (
+                      <Pressable
+                        key={type}
+                        style={[
+                          styles.typeOption,
+                          chartType === type && styles.activeTypeOption,
+                        ]}
+                        onPress={() => setChartType(type)}
+                      >
+                        <Text style={[
+                          styles.typeOptionText,
+                          chartType === type && styles.activeTypeOptionText,
+                        ]}>
+                          {type === 'line' ? 'Line' : 'Candle'}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.chartPlaceholder}>
+                <TrendingUp size={32} color={COLORS.textSecondary} />
+                <Text style={styles.chartPlaceholderText}>
+                  Portfolio: ${totalBalance.toLocaleString()}
+                </Text>
+                <Text style={[
+                  styles.chartPlaceholderSubtext,
+                  { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
+                ]}>
+                  {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString()} ({chartPeriod})
+                </Text>
               </View>
             </View>
-          </View>
 
-          <View style={styles.chartPlaceholder}>
-            <TrendingUp size={32} color={COLORS.textSecondary} />
-            <Text style={styles.chartPlaceholderText}>
-              Portfolio: ${totalBalance.toLocaleString()}
-            </Text>
-            <Text style={[
-              styles.chartPlaceholderSubtext,
-              { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
-            ]}>
-              {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString()} ({chartPeriod})
-            </Text>
-          </View>
-        </View>
-
-        <Pressable
-          style={styles.activityButton}
-          onPress={() => {
-            // Open Solscan for wallet activity
-            if (user?.walletAddress) {
-              const url = `https://solscan.io/account/${user.walletAddress}#txs`;
-              import('react-native').then(({ Linking }) => Linking.openURL(url));
-            } else {
-              Alert.alert('No Wallet', 'Connect a wallet to view activity');
-            }
-          }}
-        >
-          <Text style={styles.activityButtonText}>Wallet Activity</Text>
-          <ChevronRight size={20} color={COLORS.textPrimary} />
-        </Pressable>
+            <Pressable
+              style={styles.activityButton}
+              onPress={() => {
+                // Open Solscan for wallet activity
+                if (user?.walletAddress) {
+                  const url = `https://solscan.io/account/${user.walletAddress}#txs`;
+                  void import('react-native').then(({ Linking }) => Linking.openURL(url));
+                } else {
+                  Alert.alert('No Wallet', 'Connect a wallet to view activity');
+                }
+              }}
+            >
+              <Text style={styles.activityButtonText}>Wallet Activity</Text>
+              <ChevronRight size={20} color={COLORS.textPrimary} />
+            </Pressable>
+          </>
+        )}
       </ScrollView>
 
       {/* Token Details Modal */}
@@ -741,20 +764,31 @@ export default function PortfolioScreen() {
                 keyboardType="numeric"
               />
 
+              <NeonInput
+                label="2FA Code (Required)"
+                placeholder="Enter 6-digit code"
+                value={editTotpCode}
+                onChangeText={setEditTotpCode}
+                keyboardType="numeric"
+                maxLength={6}
+              />
+
               <View style={styles.editActions}>
                 <NeonButton
                   title="Stop Copying"
                   onPress={() => {
                     if (__DEV__) console.log('Stop copying:', selectedWallet?.username);
                     setSelectedWallet(null);
+                    setEditTotpCode('');
                   }}
                   style={[styles.editActionButton, { backgroundColor: COLORS.error + '20' }]}
                 />
 
                 <NeonButton
-                  title="Save Changes"
-                  onPress={() => {
-                    if (selectedWallet) {
+                  title={isUpdatingCopyTrade ? "Saving..." : "Save Changes"}
+                  disabled={isUpdatingCopyTrade || editTotpCode.length !== 6}
+                  onPress={async () => {
+                    if (selectedWallet && editTotpCode.length === 6) {
                       const updates: Partial<CopiedWallet> = {};
                       const totalAmountVal = parseFloat(editAmount);
                       const amountPerTradeVal = parseFloat(editAmountPerTrade);
@@ -768,11 +802,15 @@ export default function PortfolioScreen() {
                       if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
                       if (!isNaN(slippageVal)) updates.slippage = slippageVal;
 
-                      updateCopiedWallet(selectedWallet.id, updates);
+                      const success = await updateCopiedWallet(selectedWallet.id, updates, editTotpCode);
+                      if (success) {
+                        Alert.alert('Success', 'Copy trade settings updated');
+                        setSelectedWallet(null);
+                        setEditTotpCode('');
+                      }
                     }
-                    setSelectedWallet(null);
                   }}
-                  style={styles.editActionButton}
+                  style={[styles.editActionButton, (isUpdatingCopyTrade || editTotpCode.length !== 6) && { opacity: 0.6 }]}
                 />
               </View>
             </ScrollView>

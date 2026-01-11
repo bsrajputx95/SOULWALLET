@@ -3,7 +3,7 @@
  * Defines filter structures for the market tab
  */
 
-export type QuickFilterType = 'volume' | 'liquidity' | 'change' | 'age' | 'verified';
+export type QuickFilterType = 'volume' | 'liquidity' | 'change' | 'age' | 'verified' | 'buysRatio' | 'txns' | 'priceChange';
 
 export interface MarketFilters {
   // Quick filters
@@ -28,6 +28,10 @@ export interface MarketFilters {
   min24hBuys: number | undefined;
   min24hSells: number | undefined;
   
+  // Beast filter additions (Comment 2)
+  buyRatioMin: number | undefined;      // Minimum buy ratio (0-1), e.g., 0.6 = 60%
+  minPriceChange24h: number | undefined; // Minimum absolute price change %
+  
   // Pair filter
   pairToken: string | undefined;
   
@@ -51,6 +55,8 @@ export const DEFAULT_FILTERS: MarketFilters = {
   min24hTxns: undefined,
   min24hBuys: undefined,
   min24hSells: undefined,
+  buyRatioMin: undefined,
+  minPriceChange24h: undefined,
   pairToken: undefined,
   sortBy: 'liquidity',
   sortOrder: 'desc',
@@ -93,6 +99,8 @@ export function countActiveFilters(filters: MarketFilters): number {
   if (filters.min24hTxns !== undefined) count++;
   if (filters.min24hBuys !== undefined) count++;
   if (filters.min24hSells !== undefined) count++;
+  if (filters.buyRatioMin !== undefined) count++;
+  if (filters.minPriceChange24h !== undefined) count++;
   if (filters.pairToken) count++;
   
   return count;

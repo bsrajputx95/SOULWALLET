@@ -3,8 +3,20 @@ import type { CreateNextContextOptions } from '@trpc/server/adapters/next';
 import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify';
 import type { IncomingHttpHeaders } from 'http';
 import { AuthService, type SessionActivityData } from '../services/auth';
+import { ApiKeyScope } from '@prisma/client'
 import prisma from '../prisma';
 import { logger } from '../logger';
+import { verifyCaptcha } from '../services/captcha'
+import { TwoFactorService } from '../services/twoFactor'
+import { ApiKeyService } from '../services/apiKey'
+
+function shouldLogApiRequestActivity(): boolean {
+  if (process.env.LOG_API_REQUEST_ACTIVITY !== 'true') return false
+  const sampleRate = parseFloat(process.env.API_REQUEST_ACTIVITY_SAMPLE_RATE || '0.01')
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) return false
+  if (sampleRate >= 1) return true
+  return Math.random() < sampleRate
+}
 
 // Types for fingerprinting
 export interface Fingerprint {
@@ -16,7 +28,7 @@ export interface AuthContext {
   user?: {
     id: string;
     email: string;
-    role?: 'USER' | 'ADMIN';
+    role?: 'USER' | 'PREMIUM' | 'ADMIN';
     walletAddress?: string | null;
     walletVerifiedAt?: Date | null;
     emailVerifiedAt?: Date | null;
@@ -25,6 +37,11 @@ export interface AuthContext {
   session?: {
     id: string;
     userId: string;
+  } | undefined;
+  apiKey?: {
+    id: string
+    userId: string
+    scope: ApiKeyScope
   } | undefined;
   fingerprint?: Fingerprint | undefined;
   isAuthenticated: boolean;
@@ -84,7 +101,7 @@ async function validateSessionFingerprint(
 ): Promise<boolean> {
   try {
     const strictMode = process.env.SESSION_FINGERPRINT_STRICT === 'true';
-    
+
     if (!strictMode) {
       return true; // Skip validation if not in strict mode
     }
@@ -117,13 +134,20 @@ async function validateSessionFingerprint(
  */
 function extractTokenFromHeader(authorization?: string): string | null {
   if (!authorization) return null;
-  
+
   const parts = authorization.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
     return null;
   }
-  
+
   return parts[1] ?? null;
+}
+
+function extractApiKeyFromHeader(authorization?: string): string | null {
+  if (!authorization) return null
+  const parts = authorization.split(' ')
+  if (parts.length !== 2 || parts[0] !== 'ApiKey') return null
+  return parts[1] ?? null
 }
 
 /**
@@ -134,7 +158,7 @@ export async function createAuthContext(
 ): Promise<AuthContext> {
   // Extract fingerprint from request
   const fingerprint = extractFingerprint(opts);
-  
+
   const defaultContext: AuthContext = {
     fingerprint,
     isAuthenticated: false,
@@ -146,12 +170,40 @@ export async function createAuthContext(
     const token = extractTokenFromHeader(authorization);
 
     if (!token) {
-      return defaultContext;
+      const apiKey = extractApiKeyFromHeader(authorization)
+      if (!apiKey) return defaultContext
+
+      const ipAddress = fingerprint.ipAddress || 'unknown'
+      const verified = await ApiKeyService.verifyApiKey(apiKey, ipAddress)
+      if (!verified.ok || !verified.userId || !verified.apiKeyId || !verified.scope) return defaultContext
+
+      const user = await prisma.user.findUnique({
+        where: { id: verified.userId },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          walletAddress: true,
+          walletVerifiedAt: true,
+          emailVerifiedAt: true,
+          createdAt: true,
+        },
+      })
+
+      if (!user) return defaultContext
+
+      // Comment 1 fix: Set isAuthenticated: true for valid API key auth
+      return {
+        user,
+        apiKey: { id: verified.apiKeyId, userId: verified.userId, scope: verified.scope },
+        fingerprint,
+        isAuthenticated: true,
+      }
     }
 
     // Verify token and get user/session info
     const { userId, sessionId } = AuthService.verifyToken(token);
-    
+
     // Validate session fingerprint if enabled
     const fingerprintValid = await validateSessionFingerprint(sessionId, fingerprint);
     if (!fingerprintValid) {
@@ -160,19 +212,21 @@ export async function createAuthContext(
         message: 'Session fingerprint mismatch',
       });
     }
-    
+
     // Get current user (this also validates the session)
     const user = await AuthService.getCurrentUser(userId, sessionId);
 
     // Log session activity for authenticated requests
-    const activity: SessionActivityData = {
-      sessionId,
-      userId,
-      action: 'API_REQUEST',
-      ipAddress: fingerprint.ipAddress || 'unknown',
-      ...(fingerprint.userAgent ? { userAgent: fingerprint.userAgent } : {}),
-    };
-    await AuthService.logSessionActivity(activity);
+    if (shouldLogApiRequestActivity()) {
+      const activity: SessionActivityData = {
+        sessionId,
+        userId,
+        action: 'API_REQUEST',
+        ipAddress: fingerprint.ipAddress || 'unknown',
+        ...(fingerprint.userAgent ? { userAgent: fingerprint.userAgent } : {}),
+      };
+      await AuthService.logSessionActivity(activity);
+    }
 
     return {
       user,
@@ -191,9 +245,13 @@ export async function createAuthContext(
 
 /**
  * Middleware to require authentication
+ * Comment 1 fix: Accept API-key-authenticated contexts (session is optional)
  */
 export function requireAuth(ctx: AuthContext) {
-  if (!ctx.isAuthenticated || !ctx.user || !ctx.session) {
+  // API key auth has user + apiKey but no session; JWT auth has user + session
+  const hasValidAuth = ctx.isAuthenticated && ctx.user && (ctx.session || ctx.apiKey);
+
+  if (!hasValidAuth) {
     throw new TRPCError({
       code: 'UNAUTHORIZED',
       message: 'Authentication required',
@@ -202,7 +260,8 @@ export function requireAuth(ctx: AuthContext) {
 
   return {
     user: ctx.user,
-    session: ctx.session,
+    session: ctx.session, // May be undefined for API key auth
+    apiKey: ctx.apiKey,   // May be undefined for JWT auth
     fingerprint: ctx.fingerprint,
   };
 }
@@ -244,6 +303,42 @@ export function createRateLimitContext(
   };
 }
 
+export async function verifyCaptchaMiddleware(captchaToken: string, ipAddress: string): Promise<void> {
+  const enabled = process.env.CAPTCHA_ENABLED === 'true'
+  if (!enabled) return
+  const ok = await verifyCaptcha(captchaToken, ipAddress)
+  if (!ok) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'CAPTCHA verification failed',
+    })
+  }
+}
+
+export async function verifyTotpForUser(userId: string, totpCode: string): Promise<void> {
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { security: true },
+  })
+  const security = settings?.security as any
+  const secretEnc = security?.totpSecret as string | undefined
+  const enabled = security?.totpEnabled || security?.twoFactorEnabled
+  if (!enabled || !secretEnc) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: '2FA is required for this operation. Please enable 2FA in your account settings.',
+    })
+  }
+  const secret = TwoFactorService.decryptSecret(secretEnc)
+  const ok = TwoFactorService.verifyToken(secret, totpCode)
+  if (!ok) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Invalid 2FA code',
+    })
+  }
+}
+
 /**
  * Fastify-specific authentication plugin with fingerprinting
  */
@@ -261,21 +356,53 @@ export async function fastifyAuthPlugin(fastify: any) {
       const token = extractTokenFromHeader(authorization);
 
       if (!token) {
-        (request as any).auth = { 
+        const apiKey = extractApiKeyFromHeader(authorization)
+        if (!apiKey) {
+          (request as any).auth = { fingerprint, isAuthenticated: false }
+          return
+        }
+
+        const ipAddress = fingerprint.ipAddress || request.ip || 'unknown'
+        const verified = await ApiKeyService.verifyApiKey(apiKey, ipAddress)
+        if (!verified.ok || !verified.userId || !verified.apiKeyId || !verified.scope) {
+          (request as any).auth = { fingerprint, isAuthenticated: false }
+          return
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { id: verified.userId },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            walletAddress: true,
+            walletVerifiedAt: true,
+            emailVerifiedAt: true,
+            createdAt: true,
+          },
+        })
+        if (!user) {
+          (request as any).auth = { fingerprint, isAuthenticated: false }
+          return
+        }
+
+        (request as any).auth = {
+          user,
+          apiKey: { id: verified.apiKeyId, userId: verified.userId, scope: verified.scope },
           fingerprint,
-          isAuthenticated: false 
-        };
-        return;
+          isAuthenticated: false,
+        }
+        return
       }
 
       const { userId, sessionId } = AuthService.verifyToken(token);
-      
+
       // Validate session fingerprint
       const fingerprintValid = await validateSessionFingerprint(sessionId, fingerprint);
       if (!fingerprintValid) {
-        (request as any).auth = { 
+        (request as any).auth = {
           fingerprint,
-          isAuthenticated: false 
+          isAuthenticated: false
         };
         return;
       }
@@ -283,14 +410,16 @@ export async function fastifyAuthPlugin(fastify: any) {
       const user = await AuthService.getCurrentUser(userId, sessionId);
 
       // Log session activity
-      const activity: SessionActivityData = {
-        sessionId,
-        userId,
-        action: 'API_REQUEST',
-        ipAddress: fingerprint.ipAddress || 'unknown',
-        ...(fingerprint.userAgent ? { userAgent: fingerprint.userAgent } : {}),
-      };
-      await AuthService.logSessionActivity(activity);
+      if (shouldLogApiRequestActivity()) {
+        const activity: SessionActivityData = {
+          sessionId,
+          userId,
+          action: 'API_REQUEST',
+          ipAddress: fingerprint.ipAddress || 'unknown',
+          ...(fingerprint.userAgent ? { userAgent: fingerprint.userAgent } : {}),
+        };
+        await AuthService.logSessionActivity(activity);
+      }
 
       (request as any).auth = {
         user,
@@ -300,9 +429,9 @@ export async function fastifyAuthPlugin(fastify: any) {
       };
     } catch (error) {
       const fingerprint = extractFingerprint({ req: request });
-      (request as any).auth = { 
+      (request as any).auth = {
         fingerprint,
-        isAuthenticated: false 
+        isAuthenticated: false
       };
     }
   });
@@ -312,9 +441,9 @@ export async function fastifyAuthPlugin(fastify: any) {
  * Helper to get user from request (for Fastify routes)
  */
 export function getUserFromRequest(request: any): AuthContext {
-  return request.auth || { 
+  return request.auth || {
     fingerprint: request.fingerprint,
-    isAuthenticated: false 
+    isAuthenticated: false
   };
 }
 
@@ -356,7 +485,7 @@ export const authMiddleware = {
     }
     return auth;
   },
-  
+
   /**
    * Verified wallet only - requires authentication and verified wallet
    */
@@ -377,7 +506,7 @@ export const authMiddleware = {
  * Token refresh helper with fingerprint validation
  */
 export async function refreshToken(
-  currentToken: string, 
+  currentToken: string,
   _fingerprint?: Fingerprint
 ): Promise<{ accessToken: string; refreshToken: string }> {
   try {
@@ -414,9 +543,9 @@ export async function securityHeadersPlugin(fastify: any) {
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
     reply.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-    
+
     // Content Security Policy
-    reply.header('Content-Security-Policy', 
+    reply.header('Content-Security-Policy',
       "default-src 'self'; " +
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
       "style-src 'self' 'unsafe-inline'; " +
@@ -425,7 +554,7 @@ export async function securityHeadersPlugin(fastify: any) {
       "connect-src 'self' ws: wss:; " +
       "frame-ancestors 'none';"
     );
-    
+
     // Only add HSTS in production
     if (process.env.NODE_ENV === 'production') {
       reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');

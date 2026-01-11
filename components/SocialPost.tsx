@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { StyleSheet, Text, View, Image, Pressable, Alert } from 'react-native';
-import { MessageSquare, Repeat, Heart, Zap } from 'lucide-react-native';
+import { MessageSquare, Repeat, Heart, Zap, Copy } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
@@ -20,9 +20,11 @@ interface SocialPostProps {
   timestamp: string;
   mentionedToken?: string;
   mentionedTokenMint?: string;
+  walletAddress?: string;
   isVerified?: boolean;
   onPress?: () => void;
   onBuyPress?: () => void;
+  onCopyPress?: () => void;
   onUpdate?: () => void;
 }
 
@@ -37,9 +39,11 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   likes,
   timestamp,
   mentionedToken,
+  walletAddress,
   isVerified = false,
   onPress,
   onBuyPress,
+  onCopyPress,
   onUpdate,
 }) => {
   const router = useRouter();
@@ -345,6 +349,19 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
               <Text style={styles.buyText}>Ibuy</Text>
             </Pressable>
           )}
+
+          {walletAddress && onCopyPress && (
+            <Pressable
+              style={styles.copyButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                onCopyPress();
+              }}
+            >
+              <Copy size={16} color={COLORS.solana} />
+              <Text style={styles.copyText}>Copy</Text>
+            </Pressable>
+          )}
         </View>
       </NeonCard>
     </Pressable>
@@ -494,5 +511,23 @@ const styles = StyleSheet.create({
     height: 200,
     marginBottom: SPACING.xs,
     borderRadius: BORDER_RADIUS.medium,
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.solana + '20',
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.s,
+    borderRadius: BORDER_RADIUS.small,
+    marginLeft: SPACING.xs,
+  },
+  copyText: {
+    ...FONTS.phantomSemiBold,
+    color: COLORS.solana,
+    fontSize: 12,
+    marginLeft: SPACING.xs,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });

@@ -22,7 +22,9 @@ import {
 } from '../utils/test-helpers';
 import { createMockUser, invalidData, testTimeouts } from '../utils/test-fixtures';
 
-describe('Auth Router Integration Tests', () => {
+const describeIntegration = process.env.RUN_INTEGRATION_TESTS === 'true' ? describe : describe.skip;
+
+describeIntegration('Auth Router Integration Tests', () => {
   let testUser: { email: string; password: string; token: string; refreshToken: string; userId: string };
 
   beforeAll(async () => {

@@ -1,3 +1,7 @@
+// Initialize OpenTelemetry FIRST - before any other imports for proper instrumentation
+import { initializeOpenTelemetry, shutdownOpenTelemetry } from '../lib/otel';
+initializeOpenTelemetry();
+
 import { router } from './trpc';
 import { authRouter } from './routers/auth';
 import { walletRouter } from './routers/wallet';
@@ -12,6 +16,11 @@ import { userRouter } from './routers/user';
 import { socialRouter } from './routers/social';
 import { tradersRouter } from './routers/traders';
 import { accountRouter } from './routers/account';
+import { adminRouter } from './routers/admin'
+import { apiKeyRouter } from './routers/apiKey'
+import { complianceRouter } from './routers/compliance'
+import { webhookRouter } from './routers/webhooks'
+import { queueRouter } from './routers/queue'
 import { logger } from '../lib/logger';
 import { disconnectDatabase, connectDatabase } from '../lib/prisma';
 import { createCleanupService } from '../lib/services/cleanup';
@@ -21,17 +30,17 @@ import prisma from '../lib/prisma';
 import { startTransactionMonitor } from '../services/transactionMonitor';
 import Redis from 'ioredis';
 import { Connection } from '@solana/web3.js';
-import { custodialWalletService } from '../lib/services/custodialWallet';
 import { transactionMonitor } from '../lib/services/transactionMonitor';
 import { priceMonitor } from '../lib/services/priceMonitor';
 import { executionQueue } from '../lib/services/executionQueue';
+import { messageQueue } from '../lib/services/messageQueue'
 
 // Global cleanup service instance
 let cleanupService: ReturnType<typeof createCleanupService> | null = null;
 
 // API Version to verify deployment
 const API_VERSION = '2.0.1-searchUsers';
-console.log(`[API] Starting SoulWallet API v${API_VERSION}`);
+logger.info(`Starting SoulWallet API v${API_VERSION}`);
 
 /**
  * Main application router
@@ -51,6 +60,11 @@ export const appRouter = router({
   social: socialRouter,
   traders: tradersRouter,
   account: accountRouter,
+  admin: adminRouter,
+  apiKey: apiKeyRouter,
+  compliance: complianceRouter,
+  webhook: webhookRouter,
+  queue: queueRouter,
 });
 
 /**
@@ -82,17 +96,17 @@ export const apiMetadata = {
   version: '1.0.0',
   endpoints: {
     auth: {
-      signup: 'POST /api/trpc/auth.signup',
-      login: 'POST /api/trpc/auth.login',
-      logout: 'POST /api/trpc/auth.logout',
-      requestPasswordReset: 'POST /api/trpc/auth.requestPasswordReset',
-      resetPassword: 'POST /api/trpc/auth.resetPassword',
-      verifyOTP: 'POST /api/trpc/auth.verifyOTP',
-      getCurrentUser: 'GET /api/trpc/auth.getCurrentUser',
-      refreshToken: 'POST /api/trpc/auth.refreshToken',
-      getSessions: 'GET /api/trpc/auth.getSessions',
-      revokeSession: 'POST /api/trpc/auth.revokeSession',
-      health: 'GET /api/trpc/auth.health',
+      signup: 'POST /api/v1/trpc/auth.signup',
+      login: 'POST /api/v1/trpc/auth.login',
+      logout: 'POST /api/v1/trpc/auth.logout',
+      requestPasswordReset: 'POST /api/v1/trpc/auth.requestPasswordReset',
+      resetPassword: 'POST /api/v1/trpc/auth.resetPassword',
+      verifyOTP: 'POST /api/v1/trpc/auth.verifyOTP',
+      getCurrentUser: 'GET /api/v1/trpc/auth.getCurrentUser',
+      refreshToken: 'POST /api/v1/trpc/auth.refreshToken',
+      getSessions: 'GET /api/v1/trpc/auth.getSessions',
+      revokeSession: 'POST /api/v1/trpc/auth.revokeSession',
+      health: 'GET /api/v1/trpc/auth.health',
     },
   },
   documentation: {
@@ -252,11 +266,17 @@ const validateCommon = async () => {
 
   // Validate JWT secrets are strong enough
   if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
-    throw new Error('JWT_SECRET must be at least 32 characters long\nGenerate strong secret: openssl rand -base64 32');
+    if (nodeEnv === 'production' || nodeEnv === 'staging') {
+      throw new Error('JWT_SECRET must be at least 32 characters long\nGenerate strong secret: openssl rand -base64 32');
+    }
+    logger.warn('⚠️  JWT_SECRET should be at least 32 characters for security');
   }
 
   if (process.env.JWT_REFRESH_SECRET && process.env.JWT_REFRESH_SECRET.length < 32) {
-    throw new Error('JWT_REFRESH_SECRET must be at least 32 characters long\nGenerate strong secret: openssl rand -base64 32');
+    if (nodeEnv === 'production' || nodeEnv === 'staging') {
+      throw new Error('JWT_REFRESH_SECRET must be at least 32 characters long\nGenerate strong secret: openssl rand -base64 32');
+    }
+    logger.warn('⚠️  JWT_REFRESH_SECRET should be at least 32 characters for security');
   }
 
   // Enhanced secret strength validation
@@ -454,6 +474,45 @@ const validateProduction = async () => {
   logger.info('🚀 Running production-specific validations');
   let solanaAvailable = false;
 
+  // 0. KMS Provider Validation (Comment 2 fix - CRITICAL for production security)
+  const kmsProvider = (process.env.KMS_PROVIDER || 'env').toLowerCase();
+  if (kmsProvider === 'env') {
+    throw new Error(
+      '🚨 SECURITY ERROR: KMS_PROVIDER=env is NOT allowed in production!\n\n' +
+      'Environment-based encryption keys are insecure for production use.\n' +
+      'Configure one of the following:\n' +
+      '  - KMS_PROVIDER=aws with AWS_REGION and AWS_KMS_KEY_ID\n' +
+      '  - KMS_PROVIDER=vault with VAULT_ADDR and VAULT_TOKEN\n\n' +
+      'See docs/KEY_MANAGEMENT.md for configuration details.'
+    );
+  }
+
+  // Validate KMS-specific configuration
+  if (kmsProvider === 'aws') {
+    if (!process.env.AWS_REGION) {
+      throw new Error('AWS_REGION is required when KMS_PROVIDER=aws');
+    }
+    if (!process.env.AWS_KMS_KEY_ID) {
+      throw new Error('AWS_KMS_KEY_ID is required when KMS_PROVIDER=aws');
+    }
+    logger.info('✅ AWS KMS provider configured', {
+      region: process.env.AWS_REGION,
+      keyId: process.env.AWS_KMS_KEY_ID?.substring(0, 20) + '...'
+    });
+  } else if (kmsProvider === 'vault') {
+    if (!process.env.VAULT_ADDR) {
+      throw new Error('VAULT_ADDR is required when KMS_PROVIDER=vault');
+    }
+    if (!process.env.VAULT_TOKEN) {
+      throw new Error('VAULT_TOKEN is required when KMS_PROVIDER=vault');
+    }
+    logger.info('✅ HashiCorp Vault provider configured', {
+      addr: process.env.VAULT_ADDR,
+    });
+  } else {
+    throw new Error(`Unknown KMS_PROVIDER: ${kmsProvider}. Use 'aws' or 'vault'.`);
+  }
+
   // 1. Redis Validation
   if (process.env.REDIS_URL) {
     try {
@@ -598,7 +657,12 @@ export const initializeApp = async () => {
     await validateEnvironment();
 
     // Initialize database connection
-    await connectDatabase();
+    const skipDatabaseConnection = process.env.SKIP_DATABASE_CONNECTION === 'true';
+    if (skipDatabaseConnection) {
+      logger.warn('⚠️  SKIP_DATABASE_CONNECTION=true - skipping database connection');
+    } else {
+      await connectDatabase();
+    }
 
     // Initialize rate limiting
     const { initializeRateLimiting } = await import('../lib/middleware/rateLimit');
@@ -612,6 +676,17 @@ export const initializeApp = async () => {
 
     logger.info('✅ Application initialized successfully');
     logger.info('🧹 Session cleanup service started');
+
+    // Warm market cache for fast initial loads (Comment 3)
+    const { warmMarketCache } = await import('../lib/services/marketData');
+    warmMarketCache().catch(err => {
+      logger.warn('Market cache warming failed (non-fatal):', err);
+    });
+
+    // Initialize webhook delivery queue (Plan: Phase 5)
+    const { initializeWebhookQueue } = await import('../lib/services/webhookDelivery');
+    initializeWebhookQueue();
+    logger.info('🔔 Webhook delivery queue initialized');
 
     // Start transaction monitor (if enabled)
     if (process.env.FEATURE_TRANSACTION_MONITORING !== 'false') {
@@ -633,16 +708,19 @@ export const initializeApp = async () => {
 
       // Start cron jobs for background tasks (trader performance snapshots, etc.)
       const { initializeCronJobs } = await import('./cronJobs');
-      initializeCronJobs();
+      void initializeCronJobs();
     }
 
     // Initialize copy trading services (if enabled)
     const copyTradingEnabled = process.env.COPY_TRADING_ENABLED === 'true';
     if (copyTradingEnabled) {
       try {
-        // Initialize custodial wallet encryption service
-        custodialWalletService.initialize();
-        logger.info('✅ Custodial wallet service initialized');
+        logger.info('✅ Custodial wallet service ready');
+
+        await messageQueue.startConsumers()
+        if (messageQueue.isEnabled()) {
+          logger.info('✅ RabbitMQ consumers started')
+        }
 
         // Start transaction monitor (Helius WebSocket for trader detection)
         await transactionMonitor.start();
@@ -689,6 +767,10 @@ export const shutdownApp = async () => {
       logger.info('🧹 Session cleanup service stopped');
     }
 
+    // Shutdown OpenTelemetry
+    await shutdownOpenTelemetry();
+    logger.info('📊 OpenTelemetry shutdown completed');
+
     // Disconnect database
     await disconnectDatabase();
 
@@ -721,11 +803,25 @@ export const gracefulShutdown = async (signal: string) => {
         priceMonitor.stop();
         logger.info('✅ Price monitor stopped');
 
+        await messageQueue.shutdown()
+        if (messageQueue.isEnabled()) {
+          logger.info('✅ RabbitMQ consumers stopped')
+        }
+
         await executionQueue.close();
         logger.info('✅ Execution queue closed');
       } catch (error) {
         logger.error('Error stopping copy trading services:', error);
       }
+    }
+
+    // Close webhook delivery queue (Plan: Phase 5)
+    try {
+      const { closeWebhookQueue } = await import('../lib/services/webhookDelivery');
+      await closeWebhookQueue();
+      logger.info('✅ Webhook queue closed');
+    } catch (error) {
+      logger.error('Error closing webhook queue:', error);
     }
 
     // Close database connections using singleton

@@ -32,7 +32,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadUser();
+    void loadUser();
   }, []);
 
   const loadUser = async () => {

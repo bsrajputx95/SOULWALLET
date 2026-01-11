@@ -119,7 +119,15 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
   ]);
 
   const updateProfile = async (data: Partial<UserProfile>) => {
+    const previousProfile = profile;
     try {
+      if (previousProfile) {
+        setProfile({
+          ...previousProfile,
+          ...data,
+          updatedAt: new Date(),
+        });
+      }
       const result = await updateProfileMutation.mutateAsync(data);
       if (result.success && result.profile) {
         setProfile({
@@ -128,10 +136,13 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
           updatedAt: new Date(result.profile.updatedAt),
         });
         // Refetch to ensure consistency
-        profileQuery.refetch();
+        void profileQuery.refetch();
       }
       return result;
     } catch (error) {
+      if (previousProfile) {
+        setProfile(previousProfile);
+      }
       logger.error('Failed to update profile:', error);
       throw error;
     }
@@ -154,7 +165,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
             updatedAt: new Date(),
           });
         }
-        securityQuery.refetch();
+        void securityQuery.refetch();
       }
       return result;
     } catch (error) {
@@ -169,7 +180,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
         currentPassword,
         newPassword,
       });
-      securityQuery.refetch();
+      void securityQuery.refetch();
       return result;
     } catch (error) {
       logger.error('Failed to reset password:', error);
@@ -200,7 +211,7 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
   const generateBackupCodes = async () => {
     try {
       const result = await generateBackupCodesMutation.mutateAsync();
-      securityQuery.refetch();
+      void securityQuery.refetch();
       return result;
     } catch (error) {
       logger.error('Failed to generate backup codes:', error);
@@ -209,21 +220,32 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
   };
 
   const uploadProfileImage = async (imageBase64: string, mimeType: string) => {
+    const previousProfile = profile;
     try {
+      if (previousProfile) {
+        setProfile({
+          ...previousProfile,
+          profileImage: `data:${mimeType};base64,${imageBase64}`,
+          updatedAt: new Date(),
+        });
+      }
       const result = await uploadImageMutation.mutateAsync({
         imageBase64,
         mimeType,
       });
-      if (result.success && profile) {
+      if (result.success && previousProfile) {
         setProfile({
-          ...profile,
+          ...previousProfile,
           profileImage: result.imageUrl,
           updatedAt: new Date(),
         });
-        profileQuery.refetch();
+        void profileQuery.refetch();
       }
       return result;
     } catch (error) {
+      if (previousProfile) {
+        setProfile(previousProfile);
+      }
       logger.error('Failed to upload profile image:', error);
       throw error;
     }
@@ -249,9 +271,9 @@ export const [AccountProvider, useAccount] = createContextHook(() => {
   };
 
   const refreshData = () => {
-    profileQuery.refetch();
-    securityQuery.refetch();
-    walletQuery.refetch();
+    void profileQuery.refetch();
+    void securityQuery.refetch();
+    void walletQuery.refetch();
   };
 
   return {

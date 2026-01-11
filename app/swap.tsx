@@ -10,11 +10,11 @@ import {
   ActivityIndicator,
   Modal,
   FlatList,
-  Image,
   Platform,
   SafeAreaView,
   RefreshControl
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowUpDown, Settings, ChevronDown } from 'lucide-react-native';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
@@ -24,9 +24,12 @@ import { NeonCard } from '../components/NeonCard';
 import { GlowingText } from '../components/GlowingText';
 import { trpc } from '../lib/trpc';
 import { logger } from '../lib/client-logger';
+import { QueueStatusBanner } from '../components/QueueStatusBanner';
+import { SwapSkeleton } from '../components/SkeletonLoader';
+import { useWallet } from '../hooks/wallet-store';
 
-// Use the SwapRoute type from jupiter-swap service
-import type { SwapRoute } from '../services/jupiter-swap';
+// Use the QuoteResponse type from jupiter-swap service
+import type { QuoteResponse as SwapRoute } from '../services/jupiter-swap';
 
 interface Token {
   symbol: string;
@@ -56,6 +59,7 @@ export default function SwapScreen() {
     toSymbol?: string;
     amount?: string;
     slippage?: string;
+    token?: string; // Token mint address from WebView/Market navigation
   }>();
 
   const [fromToken, setFromToken] = useState<Token | null>(null);
@@ -77,7 +81,19 @@ export default function SwapScreen() {
   const [quoteTimer, setQuoteTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
+  // Loading state for skeleton
+  const [isInitialLoad, setIsInitialLoad] = useState<boolean>(true);
+
   const availableTokens = useMemo(() => getAvailableTokens(), [getAvailableTokens]);
+
+  // Initial load effect
+  useEffect(() => {
+    if (availableTokens.length > 0) {
+      setIsInitialLoad(false);
+    }
+    const timer = setTimeout(() => setIsInitialLoad(false), 2000);
+    return () => clearTimeout(timer);
+  }, [availableTokens.length]);
 
   // Pre-fill form from route params (from home swap modal)
   useEffect(() => {
@@ -101,8 +117,31 @@ export default function SwapScreen() {
         const to = availableTokens.find(t => t.symbol === routeParams.toSymbol);
         if (to) setToToken(to);
       }
+      // Handle token mint address from WebView/Market navigation
+      if (routeParams.token) {
+        const tokenByMint = availableTokens.find(t => t.mint === routeParams.token);
+        if (tokenByMint) {
+          // Found token in available tokens, set as toToken (buying this token)
+          setToToken(tokenByMint);
+        } else {
+          // Token not in wallet, create a minimal token entry for swap
+          // The swap will still work via Jupiter even if we don't have full metadata
+          setToToken({
+            symbol: routeParams.token.slice(0, 6).toUpperCase(),
+            name: `Token ${routeParams.token.slice(0, 8)}...`,
+            mint: routeParams.token,
+            decimals: 9, // Default to 9 decimals (most Solana tokens)
+            balance: 0,
+          });
+        }
+        // Set SOL as fromToken if not already set (default swap: SOL → token)
+        if (!fromToken) {
+          const solToken = availableTokens.find(t => t.symbol === 'SOL');
+          if (solToken) setFromToken(solToken);
+        }
+      }
     }
-  }, [availableTokens, routeParams.fromSymbol, routeParams.toSymbol]);
+  }, [availableTokens, routeParams.fromSymbol, routeParams.toSymbol, routeParams.token]);
 
   // tRPC queries
   const { data: supportedTokens } = trpc.swap.getSupportedTokens.useQuery();
@@ -132,7 +171,7 @@ export default function SwapScreen() {
 
     if (fromToken && toToken && fromAmount && parseFloat(fromAmount) > 0) {
       const timer = setTimeout(() => {
-        fetchQuote();
+        void fetchQuote();
       }, 500); // Debounce for 500ms
 
       setQuoteTimer(timer);
@@ -153,45 +192,37 @@ export default function SwapScreen() {
 
     try {
       setIsLoading(true);
-      const amountInSmallestUnit = parseFloat(fromAmount) * Math.pow(10, fromToken.decimals);
+      const amountInSmallestUnit = Math.floor(parseFloat(fromAmount) * Math.pow(10, fromToken.decimals));
       const slippageBps = Math.floor(slippage * 100); // Convert percentage to basis points
 
-      // Get quote from Jupiter
-      const quoteResponse = await jupiterSwap.getQuote(
-        fromToken.mint,
-        toToken.mint,
-        amountInSmallestUnit.toString(),
+      // Comment 1: Get quote from Jupiter using correct params object signature
+      const quoteResponse = await jupiterSwap.getQuote({
+        inputMint: fromToken.mint,
+        outputMint: toToken.mint,
+        amount: amountInSmallestUnit,
         slippageBps
-      );
+      });
 
       setQuote(quoteResponse);
 
-      // Calculate output amount from the last market info
-      const lastMarketInfo = quoteResponse.marketInfos[quoteResponse.marketInfos.length - 1];
-      const outputAmount = parseFloat(lastMarketInfo.outAmount) / Math.pow(10, toToken.decimals);
+      // Comment 1: Calculate output amount from quoteResponse.outAmount (not marketInfos)
+      const outputAmount = parseFloat(quoteResponse.outAmount) / Math.pow(10, toToken.decimals);
       setToAmount(outputAmount.toFixed(6));
 
-      // Create route options (simulating multiple routes for better UX)
+      // Comment 1: Calculate minimum received from otherAmountThreshold
+      const minReceived = parseFloat(quoteResponse.otherAmountThreshold) / Math.pow(10, toToken.decimals);
+
+      // Create route options using routePlan (not marketInfos)
+      const routeLabels = quoteResponse.routePlan?.map(step => step.swapInfo.label).join(' → ') || 'Jupiter';
       const routes: RouteOption[] = [
         {
           route: quoteResponse,
           outputAmount,
           priceImpact: parseFloat(quoteResponse.priceImpactPct),
-          fees: 0.0025, // 0.25% estimated fee
-          provider: 'Jupiter Best Route'
+          fees: quoteResponse.platformFee ? parseFloat(quoteResponse.platformFee.amount) / Math.pow(10, toToken.decimals) : 0.0025,
+          provider: `Jupiter: ${routeLabels}`
         }
       ];
-
-      // Add some simulated alternative routes for demonstration
-      if (outputAmount > 0) {
-        routes.push({
-          route: quoteResponse,
-          outputAmount: outputAmount * 0.998, // Slightly less output
-          priceImpact: parseFloat(quoteResponse.priceImpactPct) + 0.1,
-          fees: 0.003, // 0.3% fee
-          provider: 'Alternative Route'
-        });
-      }
 
       setRouteOptions(routes);
       setSelectedRouteIndex(0);
@@ -226,23 +257,29 @@ export default function SwapScreen() {
       return;
     }
 
+    // Comment 1: Verify slippage is consistent with quote
+    const expectedSlippageBps = Math.floor(slippage * 100);
+    if (quote.slippageBps !== expectedSlippageBps) {
+      // Re-fetch quote with current slippage if mismatch
+      await fetchQuote();
+      return;
+    }
+
     try {
       setIsSwapping(true);
 
       const selectedRoute = routeOptions[selectedRouteIndex];
 
-      // Get swap transaction from Jupiter
-      const swapTx = await jupiterSwap.getSwapTransaction(
-        selectedRoute.route,
-        publicKey,
-        true
-      );
-
-      // Execute swap with real transaction signing
+      // Comment 1: Use executeSwap with correct params instead of getSwapTransaction
       let signature: string;
       try {
-        // Use wallet's executeSwap to sign and send transaction
-        signature = await (wallet as any).executeSwap?.(swapTx.swapTransaction);
+        signature = await jupiterSwap.executeSwap({
+          wallet,
+          quoteResponse: selectedRoute.route,
+          wrapAndUnwrapSol: true,
+          prioritizationFeeLamports: 10000000, // 0.01 SOL max priority fee
+          asLegacyTransaction: false
+        });
 
         if (!signature) {
           throw new Error('Swap execution returned no signature');
@@ -294,7 +331,7 @@ export default function SwapScreen() {
 
       // Refresh balances and history
       await refreshBalances();
-      refetchHistory();
+      void refetchHistory();
 
     } catch (error) {
       if (__DEV__) logger.error('Swap error:', error);
@@ -431,7 +468,7 @@ export default function SwapScreen() {
               onChangeText={(text) => {
                 setTokenSearchQuery(text);
                 if (text.length >= 32) {
-                  searchTokenByAddress(text);
+                  void searchTokenByAddress(text);
                 } else {
                   setSearchedToken(null);
                 }
@@ -484,7 +521,12 @@ export default function SwapScreen() {
               >
                 <View style={styles.tokenInfo}>
                   {item.logo ? (
-                    <Image source={{ uri: item.logo }} style={styles.tokenLogo} />
+                    <ExpoImage
+                      source={{ uri: item.logo }}
+                      style={styles.tokenLogo}
+                      cachePolicy="memory-disk"
+                      contentFit="cover"
+                    />
                   ) : (
                     <View style={styles.tokenLogoPlaceholder}>
                       <Text style={styles.tokenLogoPlaceholderText}>{item.symbol.charAt(0)}</Text>
@@ -786,241 +828,246 @@ export default function SwapScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-        {/* From Token Section */}
-        <View style={styles.tokenSection}>
-          <Text style={styles.sectionLabel}>From</Text>
-          <TouchableOpacity
-            style={styles.tokenSelector}
-            onPress={() => {
-              setSelectingFor('from');
-              setShowTokenSelector(true);
-            }}
-          >
-            <View style={styles.tokenInfo}>
-              {fromToken ? (
-                <>
-                  <Text style={styles.tokenSymbol}>{fromToken.symbol}</Text>
-                  <Text style={styles.tokenName}>{fromToken.name}</Text>
-                </>
-              ) : (
-                <Text style={styles.selectTokenText}>Select Token</Text>
-              )}
-            </View>
-            <Text style={styles.chevron}>▼</Text>
-          </TouchableOpacity>
+      {/* Queue Status Banner for transaction monitoring */}
+      <QueueStatusBanner testID="queue-banner-swap" onRetry={() => refreshBalances()} />
 
-          <TextInput
-            style={styles.amountInput}
-            value={fromAmount}
-            onChangeText={setFromAmount}
-            placeholder="0.00"
-            placeholderTextColor="#666"
-            keyboardType="numeric"
-          />
+      {isInitialLoad ? <SwapSkeleton /> : (
+        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+          {/* From Token Section */}
+          <View style={styles.tokenSection}>
+            <Text style={styles.sectionLabel}>From</Text>
+            <TouchableOpacity
+              style={styles.tokenSelector}
+              onPress={() => {
+                setSelectingFor('from');
+                setShowTokenSelector(true);
+              }}
+            >
+              <View style={styles.tokenInfo}>
+                {fromToken ? (
+                  <>
+                    <Text style={styles.tokenSymbol}>{fromToken.symbol}</Text>
+                    <Text style={styles.tokenName}>{fromToken.name}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.selectTokenText}>Select Token</Text>
+                )}
+              </View>
+              <Text style={styles.chevron}>▼</Text>
+            </TouchableOpacity>
 
-          {fromToken && (
-            <View style={styles.balanceContainer}>
-              <Text style={styles.balanceText}>
-                Balance: {fromToken.balance?.toFixed(6) || '0.000000'}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setFromAmount(fromToken.balance?.toString() || '0')}
-                style={styles.maxButton}
-              >
-                <Text style={styles.maxButtonText}>MAX</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
+            <TextInput
+              style={styles.amountInput}
+              value={fromAmount}
+              onChangeText={setFromAmount}
+              placeholder="0.00"
+              placeholderTextColor="#666"
+              keyboardType="numeric"
+            />
 
-        {/* Swap Direction Button */}
-        <View style={styles.swapDirectionContainer}>
-          <TouchableOpacity
-            style={styles.swapDirectionButton}
-            onPress={() => {
-              const tempToken = fromToken;
-              const tempAmount = fromAmount;
-              setFromToken(toToken);
-              setToToken(tempToken);
-              setFromAmount(toAmount);
-              setToAmount(tempAmount);
-            }}
-          >
-            <Text style={styles.swapDirectionText}>⇅</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* To Token Section */}
-        <View style={styles.tokenSection}>
-          <Text style={styles.sectionLabel}>To</Text>
-          <TouchableOpacity
-            style={styles.tokenSelector}
-            onPress={() => {
-              setSelectingFor('to');
-              setShowTokenSelector(true);
-            }}
-          >
-            <View style={styles.tokenInfo}>
-              {toToken ? (
-                <>
-                  <Text style={styles.tokenSymbol}>{toToken.symbol}</Text>
-                  <Text style={styles.tokenName}>{toToken.name}</Text>
-                </>
-              ) : (
-                <Text style={styles.selectTokenText}>Select Token</Text>
-              )}
-            </View>
-            <Text style={styles.chevron}>▼</Text>
-          </TouchableOpacity>
-
-          <View style={styles.outputContainer}>
-            <Text style={styles.outputAmount}>
-              {isLoading ? 'Calculating...' : toAmount || '0.00'}
-            </Text>
-            {quote && (
-              <Text style={styles.outputUsd}>
-                ≈ ${(parseFloat(toAmount) * (toToken?.price || 0)).toFixed(2)}
-              </Text>
+            {fromToken && (
+              <View style={styles.balanceContainer}>
+                <Text style={styles.balanceText}>
+                  Balance: {fromToken.balance?.toFixed(6) || '0.000000'}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setFromAmount(fromToken.balance?.toString() || '0')}
+                  style={styles.maxButton}
+                >
+                  <Text style={styles.maxButtonText}>MAX</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
-        </View>
 
-        {/* Route Information */}
-        {routeOptions.length > 0 && (
-          <View style={styles.routeInfoContainer}>
+          {/* Swap Direction Button */}
+          <View style={styles.swapDirectionContainer}>
             <TouchableOpacity
-              style={styles.routeInfoHeader}
-              onPress={() => setShowRoutes(true)}
+              style={styles.swapDirectionButton}
+              onPress={() => {
+                const tempToken = fromToken;
+                const tempAmount = fromAmount;
+                setFromToken(toToken);
+                setToToken(tempToken);
+                setFromAmount(toAmount);
+                setToAmount(tempAmount);
+              }}
             >
-              <Text style={styles.routeInfoTitle}>
-                Route via {routeOptions[selectedRouteIndex]?.provider || 'Jupiter'}
-              </Text>
-              <Text style={styles.routeInfoAction}>
-                {routeOptions.length} routes ▼
-              </Text>
+              <Text style={styles.swapDirectionText}>⇅</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* To Token Section */}
+          <View style={styles.tokenSection}>
+            <Text style={styles.sectionLabel}>To</Text>
+            <TouchableOpacity
+              style={styles.tokenSelector}
+              onPress={() => {
+                setSelectingFor('to');
+                setShowTokenSelector(true);
+              }}
+            >
+              <View style={styles.tokenInfo}>
+                {toToken ? (
+                  <>
+                    <Text style={styles.tokenSymbol}>{toToken.symbol}</Text>
+                    <Text style={styles.tokenName}>{toToken.name}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.selectTokenText}>Select Token</Text>
+                )}
+              </View>
+              <Text style={styles.chevron}>▼</Text>
             </TouchableOpacity>
 
-            <View style={styles.routeDetails}>
-              <View style={styles.routeDetailRow}>
-                <Text style={styles.routeDetailLabel}>Price Impact</Text>
-                <Text style={[styles.routeDetailValue, { color: priceImpactColor }]}>
-                  {priceImpact.toFixed(2)}%
+            <View style={styles.outputContainer}>
+              <Text style={styles.outputAmount}>
+                {isLoading ? 'Calculating...' : toAmount || '0.00'}
+              </Text>
+              {quote && (
+                <Text style={styles.outputUsd}>
+                  ≈ ${(parseFloat(toAmount) * (toToken?.price || 0)).toFixed(2)}
                 </Text>
-              </View>
-
-              <View style={styles.routeDetailRow}>
-                <Text style={styles.routeDetailLabel}>Minimum Received</Text>
-                <Text style={styles.routeDetailValue}>
-                  {(parseFloat(toAmount) * (1 - slippage / 100)).toFixed(6)} {toToken?.symbol}
-                </Text>
-              </View>
-
-              <View style={styles.routeDetailRow}>
-                <Text style={styles.routeDetailLabel}>Network Fee</Text>
-                <Text style={styles.routeDetailValue}>
-                  ~0.000005 SOL
-                </Text>
-              </View>
+              )}
             </View>
           </View>
-        )}
 
-        {/* Inline Slippage Controls */}
-        <View style={styles.inlineSettingsContainer}>
-          <Text style={styles.settingLabel}>Slippage Tolerance</Text>
-          <View style={styles.slippageOptions}>
-            {[0.1, 0.5, 1.0, 3.0].map((value) => (
+          {/* Route Information */}
+          {routeOptions.length > 0 && (
+            <View style={styles.routeInfoContainer}>
               <TouchableOpacity
-                key={value}
-                style={[
-                  styles.slippageOption,
-                  slippage === value && styles.slippageOptionActive
-                ]}
-                onPress={() => setSlippage(value)}
+                style={styles.routeInfoHeader}
+                onPress={() => setShowRoutes(true)}
               >
-                <Text style={[
-                  styles.slippageOptionText,
-                  slippage === value && styles.slippageOptionTextActive
-                ]}>
-                  {value}%
+                <Text style={styles.routeInfoTitle}>
+                  Route via {routeOptions[selectedRouteIndex]?.provider || 'Jupiter'}
+                </Text>
+                <Text style={styles.routeInfoAction}>
+                  {routeOptions.length} routes ▼
                 </Text>
               </TouchableOpacity>
-            ))}
-          </View>
-          <View style={styles.customSlippageContainer}>
-            <Text style={styles.settingLabel}>Custom Slippage (%)</Text>
-            <TextInput
-              style={styles.customSlippageInput}
-              value={slippage.toString()}
-              onChangeText={(text) => {
-                const value = parseFloat(text);
-                if (!isNaN(value) && value >= 0 && value <= 50) {
-                  setSlippage(value);
-                }
-              }}
-              keyboardType="numeric"
-              placeholder="0.5"
-              placeholderTextColor="#666"
-            />
-          </View>
-        </View>
 
-        {/* Price Impact Warning */}
-        {priceImpact > 1 && (
-          <View style={styles.warningContainer}>
-            <Text style={styles.warningText}>
-              ⚠️ High price impact ({priceImpact.toFixed(2)}%). {priceImpact > 5 ? 'You may lose a significant portion of your funds.' : 'Consider reducing your swap amount.'}
-            </Text>
-          </View>
-        )}
-
-        {/* Swap Button */}
-        <TouchableOpacity
-          style={[
-            styles.swapButton,
-            (!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled) && styles.swapButtonDisabled
-          ]}
-          onPress={handleSwap}
-          disabled={!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled}
-        >
-          <Text style={styles.swapButtonText}>
-            {isSwapping ? 'Swapping...' : isLoading ? 'Getting Quote...' : !flags?.swapEnabled ? 'Disabled' : !fromAmount ? 'Enter Amount' : 'Swap'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Recent Swaps Preview */}
-        {swapHistory?.swaps && swapHistory.swaps.length > 0 && (
-          <View style={styles.recentSwapsContainer}>
-            <TouchableOpacity
-              style={styles.recentSwapsHeader}
-              onPress={() => setShowHistory(true)}
-            >
-              <Text style={styles.recentSwapsTitle}>Recent Swaps</Text>
-              <Text style={styles.recentSwapsAction}>View All</Text>
-            </TouchableOpacity>
-
-            {swapHistory.swaps.slice(0, 3).map((transaction) => (
-              <View key={transaction.id} style={styles.recentSwapItem}>
-                <View style={styles.recentSwapInfo}>
-                  <Text style={styles.recentSwapTokens}>
-                    {transaction.amount} {transaction.tokenSymbol || 'Unknown'}
-                  </Text>
-                  <Text style={styles.recentSwapDate}>
-                    {new Date(transaction.createdAt).toLocaleDateString()}
+              <View style={styles.routeDetails}>
+                <View style={styles.routeDetailRow}>
+                  <Text style={styles.routeDetailLabel}>Price Impact</Text>
+                  <Text style={[styles.routeDetailValue, { color: priceImpactColor }]}>
+                    {priceImpact.toFixed(2)}%
                   </Text>
                 </View>
-                <Text style={[
-                  styles.recentSwapStatus,
-                  { color: transaction.status === 'CONFIRMED' ? '#00ff88' : transaction.status === 'FAILED' ? '#ff4444' : '#ffaa00' }
-                ]}>
-                  {transaction.status}
-                </Text>
+
+                <View style={styles.routeDetailRow}>
+                  <Text style={styles.routeDetailLabel}>Minimum Received</Text>
+                  <Text style={styles.routeDetailValue}>
+                    {(parseFloat(toAmount) * (1 - slippage / 100)).toFixed(6)} {toToken?.symbol}
+                  </Text>
+                </View>
+
+                <View style={styles.routeDetailRow}>
+                  <Text style={styles.routeDetailLabel}>Network Fee</Text>
+                  <Text style={styles.routeDetailValue}>
+                    ~0.000005 SOL
+                  </Text>
+                </View>
               </View>
-            ))}
+            </View>
+          )}
+
+          {/* Inline Slippage Controls */}
+          <View style={styles.inlineSettingsContainer}>
+            <Text style={styles.settingLabel}>Slippage Tolerance</Text>
+            <View style={styles.slippageOptions}>
+              {[0.1, 0.5, 1.0, 3.0].map((value) => (
+                <TouchableOpacity
+                  key={value}
+                  style={[
+                    styles.slippageOption,
+                    slippage === value && styles.slippageOptionActive
+                  ]}
+                  onPress={() => setSlippage(value)}
+                >
+                  <Text style={[
+                    styles.slippageOptionText,
+                    slippage === value && styles.slippageOptionTextActive
+                  ]}>
+                    {value}%
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.customSlippageContainer}>
+              <Text style={styles.settingLabel}>Custom Slippage (%)</Text>
+              <TextInput
+                style={styles.customSlippageInput}
+                value={slippage.toString()}
+                onChangeText={(text) => {
+                  const value = parseFloat(text);
+                  if (!isNaN(value) && value >= 0 && value <= 50) {
+                    setSlippage(value);
+                  }
+                }}
+                keyboardType="numeric"
+                placeholder="0.5"
+                placeholderTextColor="#666"
+              />
+            </View>
           </View>
-        )}
-      </ScrollView>
+
+          {/* Price Impact Warning */}
+          {priceImpact > 1 && (
+            <View style={styles.warningContainer}>
+              <Text style={styles.warningText}>
+                ⚠️ High price impact ({priceImpact.toFixed(2)}%). {priceImpact > 5 ? 'You may lose a significant portion of your funds.' : 'Consider reducing your swap amount.'}
+              </Text>
+            </View>
+          )}
+
+          {/* Swap Button */}
+          <TouchableOpacity
+            style={[
+              styles.swapButton,
+              (!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled) && styles.swapButtonDisabled
+            ]}
+            onPress={handleSwap}
+            disabled={!fromToken || !toToken || !fromAmount || isLoading || isSwapping || !flags?.swapEnabled}
+          >
+            <Text style={styles.swapButtonText}>
+              {isSwapping ? 'Swapping...' : isLoading ? 'Getting Quote...' : !flags?.swapEnabled ? 'Disabled' : !fromAmount ? 'Enter Amount' : 'Swap'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Recent Swaps Preview */}
+          {swapHistory?.swaps && swapHistory.swaps.length > 0 && (
+            <View style={styles.recentSwapsContainer}>
+              <TouchableOpacity
+                style={styles.recentSwapsHeader}
+                onPress={() => setShowHistory(true)}
+              >
+                <Text style={styles.recentSwapsTitle}>Recent Swaps</Text>
+                <Text style={styles.recentSwapsAction}>View All</Text>
+              </TouchableOpacity>
+
+              {swapHistory.swaps.slice(0, 3).map((transaction) => (
+                <View key={transaction.id} style={styles.recentSwapItem}>
+                  <View style={styles.recentSwapInfo}>
+                    <Text style={styles.recentSwapTokens}>
+                      {transaction.amount} {transaction.tokenSymbol || 'Unknown'}
+                    </Text>
+                    <Text style={styles.recentSwapDate}>
+                      {new Date(transaction.createdAt).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <Text style={[
+                    styles.recentSwapStatus,
+                    { color: transaction.status === 'CONFIRMED' ? '#00ff88' : transaction.status === 'FAILED' ? '#ff4444' : '#ffaa00' }
+                  ]}>
+                    {transaction.status}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      )}
 
       {/* Modals */}
       {renderTokenSelector()}

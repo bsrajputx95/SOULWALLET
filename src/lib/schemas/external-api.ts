@@ -24,6 +24,18 @@ export const JupiterPriceSchema = z
   })
   .strict()
 
+export const BirdeyePriceSchema = z
+  .object({
+    success: z.boolean().optional(),
+    data: z
+      .object({
+        value: z.number().finite().nonnegative().optional(),
+        price: z.number().finite().nonnegative().optional(),
+      })
+      .optional(),
+  })
+  .passthrough()
+
 export const BirdeyeTokenSchema = z
   .object({
     address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),

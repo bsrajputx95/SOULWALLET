@@ -1,4 +1,4 @@
-import { profitSharing } from '../../src/lib/services/profitSharing';
+import { ProfitSharing } from '../../src/lib/services/profitSharing';
 import prisma from '../../src/lib/prisma';
 
 describe('Profit Sharing Service', () => {
@@ -15,6 +15,8 @@ describe('Profit Sharing Service', () => {
     });
 
     test('should not charge fee on losses', async () => {
+      const profitSharing = new ProfitSharing({} as any, {} as any, {} as any);
+
       // Mock a position with loss
       const mockPosition = {
         id: 'test-position-1',
@@ -40,6 +42,8 @@ describe('Profit Sharing Service', () => {
     });
 
     test('should charge 5% fee on profits', async () => {
+      const profitSharing = new ProfitSharing({} as any, {} as any, {} as any);
+
       const mockPosition = {
         id: 'test-position-2',
         status: 'CLOSED',
@@ -60,12 +64,12 @@ describe('Profit Sharing Service', () => {
       jest.spyOn(prisma.position, 'update').mockResolvedValue({} as any);
       jest.spyOn(prisma.copyTrading, 'update').mockResolvedValue({} as any);
       jest.spyOn(prisma.traderProfile, 'update').mockResolvedValue({} as any);
+      jest.spyOn(prisma, '$transaction').mockImplementation(async (fn: any) => fn(prisma as any));
 
       // Mock the wallet and transaction methods
-      jest.spyOn(profitSharing as any, 'sendFeeToTrader')
-        .mockResolvedValue('mock-tx-hash');
-      jest.spyOn(profitSharing as any, 'convertUSDCtoSOL')
-        .mockResolvedValue(0.033); // Assuming SOL at $150
+      jest.spyOn(profitSharing as any, 'sendFeeToTrader').mockImplementation(async () => 'mock-tx-hash');
+      jest.spyOn(profitSharing as any, 'convertUSDCtoSOL').mockImplementation(async () => 0.033); // Assuming SOL at $150
+      jest.spyOn(profitSharing as any, 'verifyTransaction').mockImplementation(async () => true);
 
       const result = await profitSharing.processProfitSharing('test-position-2');
 
@@ -93,11 +97,12 @@ describe('Profit Sharing Service', () => {
 
   describe('Fee Statistics', () => {
     test('should calculate total fees correctly', async () => {
-      const mockAggregate = {
-        _sum: { feeAmount: 250.50 },
-      };
+      const profitSharing = new ProfitSharing({} as any, {} as any, {} as any);
 
-      jest.spyOn(prisma.position, 'aggregate').mockResolvedValue(mockAggregate as any);
+      jest
+        .spyOn(prisma.position, 'aggregate')
+        .mockResolvedValueOnce({ _sum: { feeAmount: 250.50 } } as any)
+        .mockResolvedValueOnce({ _avg: { feeAmount: 5.01 } } as any);
       jest.spyOn(prisma.position, 'count').mockResolvedValue(50);
 
       const stats = await profitSharing.getFeeStats();

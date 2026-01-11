@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { COLORS } from '../../constants/colors';
 
@@ -11,7 +11,7 @@ interface PortfolioChartsProps {
 
 const { width } = Dimensions.get('window');
 
-const PortfolioCharts: React.FC<PortfolioChartsProps> = ({
+const PortfolioCharts = memo<PortfolioChartsProps>(({
   selectedPeriod,
   portfolioData,
   totalValue,
@@ -20,7 +20,7 @@ const PortfolioCharts: React.FC<PortfolioChartsProps> = ({
   // Mock chart data - in real app this would be actual chart implementation
   const chartData = portfolioData.map((_, index) => ({
     x: index,
-    y: Math.random() * 100 + 50,
+    y: 50 + ((index * 37 + selectedPeriod.length * 17) % 100),
   }));
 
   return (
@@ -85,7 +85,7 @@ const PortfolioCharts: React.FC<PortfolioChartsProps> = ({
       </View>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -160,5 +160,8 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
 });
+
+// ✅ React.memo for performance optimization
+PortfolioCharts.displayName = 'PortfolioCharts';
 
 export default PortfolioCharts;

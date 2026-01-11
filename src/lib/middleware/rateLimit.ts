@@ -3,6 +3,17 @@ import Redis from 'ioredis';
 import { TRPCError } from '@trpc/server';
 import type { RateLimitContext } from './auth';
 import { logger } from '../logger';
+// Comment 3: Import trusted IPs service for bypass
+import { trustedIpsService } from '../services/trustedIps';
+
+let adaptiveRateLimiterSingleton: (typeof import('./adaptiveRateLimiter'))['adaptiveRateLimiter'] | null = null;
+
+async function getAdaptiveRateLimiter() {
+  if (adaptiveRateLimiterSingleton) return adaptiveRateLimiterSingleton;
+  const mod = await import('./adaptiveRateLimiter');
+  adaptiveRateLimiterSingleton = mod.adaptiveRateLimiter;
+  return adaptiveRateLimiterSingleton;
+}
 
 export interface RateLimitConfig {
   points: number; // Number of requests
@@ -24,19 +35,19 @@ export interface RateLimitOptions {
 export const RATE_LIMIT_CONFIGS = {
   // Authentication endpoints - stricter limits
   login: {
-    points: 5, // 5 attempts
-    duration: 900, // per 15 minutes
+    points: 3, // 3 attempts
+    duration: 3600, // per hour
     blockDuration: 1800, // block for 30 minutes (escalated)
     keyPrefix: 'login',
   },
   signup: {
-    points: 3, // 3 attempts
+    points: 2, // Comment 4: 2 attempts per hour (stricter)
     duration: 3600, // per hour
     blockDuration: 7200, // block for 2 hours (escalated)
     keyPrefix: 'signup',
   },
   passwordReset: {
-    points: 3, // 3 attempts
+    points: 2, // Comment 4: 2 attempts per hour (stricter)
     duration: 3600, // per hour
     blockDuration: 7200, // block for 2 hours (escalated)
     keyPrefix: 'password_reset',
@@ -48,7 +59,7 @@ export const RATE_LIMIT_CONFIGS = {
     keyPrefix: 'verify_otp',
   },
   resetPassword: {
-    points: 3, // 3 attempts
+    points: 2, // Comment 4: 2 attempts per hour (stricter, alias for passwordReset)
     duration: 3600, // per hour
     blockDuration: 7200, // block for 2 hours (escalated)
     keyPrefix: 'reset_password',
@@ -206,45 +217,97 @@ export class RateLimitService {
 
   /**
    * Check rate limit for a specific endpoint
+   * Comment 3 fix: Enforce both IP-based and per-user rate limits independently
+   * Comment 2: Integrate adaptive rate limiting
+   * Comment 3: Integrate trusted IP bypass
    */
   async checkRateLimit(
     endpoint: keyof typeof RATE_LIMIT_CONFIGS,
     context: RateLimitContext
-  ): Promise<void> {
+  ): Promise<{ bypassed?: boolean }> {
+    // Comment 3: Check if IP is trusted and should bypass rate limiting
+    if (context.ip) {
+      const isTrusted = await trustedIpsService.isTrustedIp(context.ip);
+      if (isTrusted) {
+        // Log the bypass for audit trail
+        trustedIpsService.logBypass(context.ip, endpoint, context.userId);
+        return { bypassed: true };
+      }
+    }
+
     const limiter = this.limiters.get(endpoint);
     if (!limiter) {
       throw new Error(`Rate limiter not found for endpoint: ${endpoint}`);
     }
 
-    // Create a unique key based on IP and optionally user ID
-    const key = context.userId 
-      ? `${context.ip}:${context.userId}`
-      : context.ip;
+    const config = RATE_LIMIT_CONFIGS[endpoint];
 
+    const adaptiveRateLimiter = await getAdaptiveRateLimiter();
+
+    // Comment 2: Track request for adaptive rate limiting
+    adaptiveRateLimiter.trackRequest(endpoint);
+
+    // Comment 2: Get adapted points (may be reduced during attack)
+    const adaptedPoints = adaptiveRateLimiter.getAdaptedPoints(endpoint);
+    const effectiveLimit = Math.min(config.points, adaptedPoints);
+
+    // Consume IP-based rate limit first
+    const ipKey = `ip:${context.ip}`;
     try {
-      await limiter.consume(key);
+      await limiter.consume(ipKey);
     } catch (rateLimiterRes: any) {
+      // Comment 2: Track violation for adaptive rate limiting
+      adaptiveRateLimiter.trackViolation(endpoint, { ip: context.ip, userId: context.userId });
+
       if (rateLimiterRes && typeof rateLimiterRes.msBeforeNext === 'number') {
-        // Rate limit exceeded
-        const config = RATE_LIMIT_CONFIGS[endpoint];
         const resetTime = new Date(Date.now() + rateLimiterRes.msBeforeNext);
-        
         throw new TRPCError({
           code: 'TOO_MANY_REQUESTS',
-          message: `Too many ${endpoint} attempts. Try again after ${resetTime.toISOString()}`,
+          message: `Too many ${endpoint} attempts from this IP. Try again after ${resetTime.toISOString()}`,
           cause: {
             retryAfter: Math.round(rateLimiterRes.msBeforeNext / 1000),
-            limit: config.points,
+            limit: effectiveLimit,
             remaining: 0,
             resetTime: resetTime.toISOString(),
+            limitType: 'IP',
+            adapted: adaptedPoints < config.points,
           },
         });
-      } else {
-        // Other error, likely Redis connection issue
-        logger.error('Error in rate limiting (possibly Redis)', rateLimiterRes);
+      }
+      logger.error('Error in IP rate limiting (possibly Redis)', rateLimiterRes);
+      throw rateLimiterRes;
+    }
+
+    // Comment 3: Also enforce per-user rate limit when userId is present
+    if (context.userId) {
+      const userKey = `user:${context.userId}`;
+      try {
+        await limiter.consume(userKey);
+      } catch (rateLimiterRes: any) {
+        // Comment 2: Track violation for adaptive rate limiting
+        adaptiveRateLimiter.trackViolation(endpoint, { ip: context.ip, userId: context.userId });
+
+        if (rateLimiterRes && typeof rateLimiterRes.msBeforeNext === 'number') {
+          const resetTime = new Date(Date.now() + rateLimiterRes.msBeforeNext);
+          throw new TRPCError({
+            code: 'TOO_MANY_REQUESTS',
+            message: `Too many ${endpoint} attempts for this user. Try again after ${resetTime.toISOString()}`,
+            cause: {
+              retryAfter: Math.round(rateLimiterRes.msBeforeNext / 1000),
+              limit: effectiveLimit,
+              remaining: 0,
+              resetTime: resetTime.toISOString(),
+              limitType: 'USER',
+              adapted: adaptedPoints < config.points,
+            },
+          });
+        }
+        logger.error('Error in user rate limiting (possibly Redis)', rateLimiterRes);
         throw rateLimiterRes;
       }
     }
+
+    return { bypassed: false };
   }
 
   /**
@@ -263,15 +326,15 @@ export class RateLimitService {
       throw new Error(`Rate limiter not found for endpoint: ${endpoint}`);
     }
 
-    const key = context.userId 
+    const key = context.userId
       ? `${context.ip}:${context.userId}`
       : context.ip;
 
     const config = RATE_LIMIT_CONFIGS[endpoint];
-    
+
     try {
       const rateLimiterRes = await limiter.get(key);
-      
+
       if (rateLimiterRes) {
         return {
           limit: config.points,
@@ -307,7 +370,7 @@ export class RateLimitService {
       throw new Error(`Rate limiter not found for endpoint: ${endpoint}`);
     }
 
-    const key = context.userId 
+    const key = context.userId
       ? `${context.ip}:${context.userId}`
       : context.ip;
 
@@ -327,12 +390,12 @@ export class RateLimitService {
       throw new Error(`Rate limiter not found for endpoint: ${endpoint}`);
     }
 
-    const key = context.userId 
+    const key = context.userId
       ? `${context.ip}:${context.userId}`
       : context.ip;
 
     const config = RATE_LIMIT_CONFIGS[endpoint];
-    
+
     // Consume all points to trigger block
     try {
       await limiter.penalty(key, config.points, {
@@ -354,7 +417,7 @@ export class RateLimitService {
     };
   }> {
     const statuses: { [endpoint: string]: any } = {};
-    
+
     for (const endpoint of Object.keys(RATE_LIMIT_CONFIGS) as (keyof typeof RATE_LIMIT_CONFIGS)[]) {
       try {
         statuses[endpoint] = await this.getRateLimitStatus(endpoint, context);
@@ -368,7 +431,7 @@ export class RateLimitService {
         };
       }
     }
-    
+
     return statuses;
   }
 
@@ -471,7 +534,9 @@ export async function initializeRateLimiting(options: RateLimitOptions = {}): Pr
               logger.warn('Redis connection failed after retries, falling back to memory-based rate limiting');
               try {
                 redisClient.disconnect();
-              } catch {}
+              } catch {
+                void 0;
+              }
               redisClient = null;
             }
           }
@@ -550,21 +615,60 @@ export async function fastifyRateLimitPlugin(fastify: any, options: RateLimitOpt
       try {
         // Determine endpoint based on request path
         let endpoint: keyof typeof RATE_LIMIT_CONFIGS = 'general';
-        
+
         // tRPC route mappings
-        if (request.url?.includes('/api/trpc/auth.login')) endpoint = 'login';
-        else if (request.url?.includes('/api/trpc/auth.signup')) endpoint = 'signup';
-        else if (request.url?.includes('/api/trpc/auth.verifyOtp')) endpoint = 'verifyOtp';
-        else if (request.url?.includes('/api/trpc/auth.resetPassword')) endpoint = 'resetPassword';
-        else if (request.url?.includes('/api/trpc/auth.changePassword')) endpoint = 'changePassword';
-        else if (request.url?.includes('/api/trpc/wallet.send')) endpoint = 'transactionSend';
-        else if (request.url?.includes('/api/trpc/transaction.list')) endpoint = 'transactionHistory';
-        else if (request.url?.includes('/api/trpc/swap.getQuote')) endpoint = 'swapQuote';
-        else if (request.url?.includes('/api/trpc/swap.execute')) endpoint = 'swapExecute';
-        else if (request.url?.includes('/api/trpc/portfolio.snapshot')) endpoint = 'portfolioSnapshot';
-        else if (request.url?.includes('/api/trpc/portfolio.history')) endpoint = 'portfolioHistory';
-        else if (request.url?.includes('/api/trpc/contact.create')) endpoint = 'contactCreate';
-        else if (request.url?.includes('/api/trpc/contact.update')) endpoint = 'contactUpdate';
+        if (
+          request.url?.includes('/api/trpc/auth.login') ||
+          request.url?.includes('/api/v1/trpc/auth.login')
+        ) endpoint = 'login';
+        else if (
+          request.url?.includes('/api/trpc/auth.signup') ||
+          request.url?.includes('/api/v1/trpc/auth.signup')
+        ) endpoint = 'signup';
+        else if (
+          request.url?.includes('/api/trpc/auth.verifyOtp') ||
+          request.url?.includes('/api/v1/trpc/auth.verifyOtp')
+        ) endpoint = 'verifyOtp';
+        else if (
+          request.url?.includes('/api/trpc/auth.resetPassword') ||
+          request.url?.includes('/api/v1/trpc/auth.resetPassword')
+        ) endpoint = 'resetPassword';
+        else if (
+          request.url?.includes('/api/trpc/auth.changePassword') ||
+          request.url?.includes('/api/v1/trpc/auth.changePassword')
+        ) endpoint = 'changePassword';
+        else if (
+          request.url?.includes('/api/trpc/wallet.send') ||
+          request.url?.includes('/api/v1/trpc/wallet.send')
+        ) endpoint = 'transactionSend';
+        else if (
+          request.url?.includes('/api/trpc/transaction.list') ||
+          request.url?.includes('/api/v1/trpc/transaction.list')
+        ) endpoint = 'transactionHistory';
+        else if (
+          request.url?.includes('/api/trpc/swap.getQuote') ||
+          request.url?.includes('/api/v1/trpc/swap.getQuote')
+        ) endpoint = 'swapQuote';
+        else if (
+          request.url?.includes('/api/trpc/swap.execute') ||
+          request.url?.includes('/api/v1/trpc/swap.execute')
+        ) endpoint = 'swapExecute';
+        else if (
+          request.url?.includes('/api/trpc/portfolio.snapshot') ||
+          request.url?.includes('/api/v1/trpc/portfolio.snapshot')
+        ) endpoint = 'portfolioSnapshot';
+        else if (
+          request.url?.includes('/api/trpc/portfolio.history') ||
+          request.url?.includes('/api/v1/trpc/portfolio.history')
+        ) endpoint = 'portfolioHistory';
+        else if (
+          request.url?.includes('/api/trpc/contact.create') ||
+          request.url?.includes('/api/v1/trpc/contact.create')
+        ) endpoint = 'contactCreate';
+        else if (
+          request.url?.includes('/api/trpc/contact.update') ||
+          request.url?.includes('/api/v1/trpc/contact.update')
+        ) endpoint = 'contactUpdate';
         // Legacy REST-like path fallbacks
         else if (request.url?.includes('/auth/login')) endpoint = 'login';
         else if (request.url?.includes('/auth/signup')) endpoint = 'signup';
@@ -585,16 +689,16 @@ export async function fastifyRateLimitPlugin(fastify: any, options: RateLimitOpt
         else if (request.url?.includes('/admin/')) endpoint = 'admin';
 
         const status = await rateLimiter.getRateLimitStatus(endpoint, request.rateLimitContext);
-        
+
         // Add standard rate limit headers
         reply.header('X-RateLimit-Limit', status.limit);
         reply.header('X-RateLimit-Remaining', status.remaining);
         reply.header('X-RateLimit-Reset', Math.ceil(status.resetTime.getTime() / 1000));
-        
+
         // Add custom headers for enhanced monitoring
         reply.header('X-RateLimit-Endpoint', endpoint);
         reply.header('X-RateLimit-Policy', `${RATE_LIMIT_CONFIGS[endpoint].points}/${RATE_LIMIT_CONFIGS[endpoint].duration}s`);
-        
+
         // Add warning header if approaching limit
         if (status.remaining <= Math.ceil(status.limit * 0.1)) {
           reply.header('X-RateLimit-Warning', 'Approaching rate limit');
@@ -615,10 +719,10 @@ export async function fastifyRateLimitPlugin(fastify: any, options: RateLimitOpt
     try {
       // Apply admin rate limiting
       await rateLimiter.checkRateLimit('admin', request.rateLimitContext);
-      
+
       const metrics = await rateLimiter.getMetrics();
       const statuses = await rateLimiter.getAllRateLimitStatuses(request.rateLimitContext);
-      
+
       return {
         metrics,
         statuses,

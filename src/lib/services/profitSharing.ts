@@ -1,15 +1,18 @@
+import 'reflect-metadata';
 import {
-  Connection,
   PublicKey,
   Transaction,
   SystemProgram,
   LAMPORTS_PER_SOL,
   sendAndConfirmTransaction
 } from '@solana/web3.js';
+import { injectable, inject } from 'tsyringe';
 import prisma from '../prisma';
+import type { Prisma } from '@prisma/client';
 import { logger } from '../logger';
-import { jupiterSwap } from './jupiterSwap';
-import { custodialWalletService } from './custodialWallet';
+import type { JupiterSwap } from './jupiterSwap';
+import type { CustodialWalletService } from './custodialWallet';
+import type { RpcManager } from './rpcManager';
 
 // Minimum fee threshold in SOL - below this, skip transfer to avoid tx fees exceeding fee amount
 const MIN_FEE_SOL = 0.001;
@@ -19,18 +22,23 @@ interface ProfitSharingResult {
   feeAmount?: number;
   feeTxHash?: string;
   skipped?: boolean;
+  reason?: string; // Why fee was skipped (e.g., 'below_threshold', 'min_fee')
   error?: string;
 }
 
-class ProfitSharing {
-  private connection: Connection;
+/**
+ * Profit Sharing Service
+ * Handles fee distribution to traders for profitable copy trades
+ */
+@injectable()
+export class ProfitSharing {
   private feePercentage = 0.05; // 5% fee
 
-  constructor() {
-    const rpcUrl = process.env.HELIUS_RPC_URL ||
-      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
-    this.connection = new Connection(rpcUrl, 'confirmed');
-  }
+  constructor(
+    @inject('RpcManager') private readonly rpcManager: RpcManager,
+    @inject('JupiterSwap') private readonly jupiterSwap: JupiterSwap,
+    @inject('CustodialWallet') private readonly custodialWalletService: CustodialWalletService,
+  ) { }
 
   /**
    * Process profit sharing for a closed position
@@ -63,6 +71,13 @@ class ProfitSharing {
       if (!position.profitLoss || position.profitLoss <= 0) {
         logger.info(`No profit for position ${positionId}, no fee charged`);
         return { success: true, feeAmount: 0 };
+      }
+
+      // Check if profit meets user's minimum threshold for sharing
+      const minProfit = position.copyTrading.minProfitForSharing || 0;
+      if (position.profitLoss < minProfit) {
+        logger.info(`Profit ${position.profitLoss.toFixed(2)} below user threshold ${minProfit}, no fee charged`);
+        return { success: true, feeAmount: 0, skipped: true, reason: 'below_threshold' };
       }
 
 
@@ -110,7 +125,7 @@ class ProfitSharing {
       }
 
       // Only update database after successful, verified transfer
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         await tx.position.update({
           where: { id: positionId },
           data: { feeAmount, feeTxHash },
@@ -150,7 +165,8 @@ class ProfitSharing {
    */
   private async verifyTransaction(signature: string): Promise<boolean> {
     try {
-      const txInfo = await this.connection.getTransaction(signature, {
+      const connection = await this.rpcManager.getConnection();
+      const txInfo = await connection.getTransaction(signature, {
         commitment: 'confirmed',
         maxSupportedTransactionVersion: 0,
       });
@@ -182,9 +198,10 @@ class ProfitSharing {
   }): Promise<string | null> {
     try {
       const { fromUserId, toWallet, amountSOL } = params;
+      const connection = await this.rpcManager.getConnection();
 
       // Get user's custodial wallet - REAL WALLET, NOT STUB
-      const userWallet = await custodialWalletService.getKeypair(fromUserId);
+      const userWallet = await this.custodialWalletService.getKeypair(fromUserId);
       if (!userWallet) {
         logger.error(`Custodial wallet not found for user ${fromUserId}`);
         return null;
@@ -194,7 +211,7 @@ class ProfitSharing {
       const lamports = Math.floor(amountSOL * LAMPORTS_PER_SOL);
 
       // Check user's SOL balance
-      const balance = await this.connection.getBalance(userWallet.publicKey);
+      const balance = await connection.getBalance(userWallet.publicKey);
       const requiredBalance = lamports + 5000; // Amount + tx fee
 
       if (balance < requiredBalance) {
@@ -214,12 +231,12 @@ class ProfitSharing {
         })
       );
 
-      const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
+      const { blockhash } = await connection.getLatestBlockhash('confirmed');
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = userWallet.publicKey;
 
       const signature = await sendAndConfirmTransaction(
-        this.connection,
+        connection,
         transaction,
         [userWallet],
         { commitment: 'confirmed', preflightCommitment: 'confirmed' }
@@ -239,7 +256,7 @@ class ProfitSharing {
   private async convertUSDCtoSOL(usdcAmount: number): Promise<number> {
     try {
       const solMint = 'So11111111111111111111111111111111111111112';
-      const solPrice = await jupiterSwap.getPrice(solMint);
+      const solPrice = await this.jupiterSwap.getPrice(solMint);
 
       if (!solPrice || solPrice <= 0) {
         logger.warn('Failed to get SOL price, using fallback price of $150');
@@ -370,7 +387,53 @@ class ProfitSharing {
   getFeePercentage(): number {
     return this.feePercentage;
   }
+
+  /**
+   * Comment 3: Enqueue profit sharing for async processing via Bull queue
+   * Use this instead of direct processProfitSharing for better scalability
+   */
+  async enqueueProcessing(params: {
+    positionId: string;
+    userId: string;
+    profitLoss: number;
+    traderId: string;
+  }): Promise<string> {
+    // Dynamically import to avoid circular dependency
+    const { executionQueue } = await import('./executionQueue');
+    return executionQueue.addProfitSharing(params);
+  }
 }
 
-export const profitSharing = new ProfitSharing();
-export { ProfitSharing, MIN_FEE_SOL };
+// Import container for resolving
+import { container } from '../di/container';
+
+/** 
+ * @deprecated Use dependency injection instead. 
+ * Import via container.resolve<ProfitSharing>('ProfitSharing') 
+ * 
+ * Note: Lazy initialization to prevent container.resolve failures
+ */
+let _profitSharingInstance: ProfitSharing | null = null;
+
+function getProfitSharingInstance(): ProfitSharing {
+  if (!_profitSharingInstance) {
+    try {
+      _profitSharingInstance = container.resolve<ProfitSharing>('ProfitSharing');
+    } catch {
+      // In tests or when container not set up, we can't easily create ProfitSharing 
+      // as it has constructor dependencies. Throw a more helpful error.
+      throw new Error(
+        'ProfitSharing requires DI container. Call setupContainer() first or use container.resolve().'
+      );
+    }
+  }
+  return _profitSharingInstance;
+}
+
+export const profitSharing = new Proxy({} as ProfitSharing, {
+  get(_target, prop) {
+    return (getProfitSharingInstance() as any)[prop];
+  }
+});
+
+export { MIN_FEE_SOL };

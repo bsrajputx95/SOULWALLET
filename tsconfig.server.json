@@ -2,10 +2,14 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "CommonJS",
-    "lib": ["ES2020"],
+    "lib": [
+      "ES2020"
+    ],
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "strict": false,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -20,13 +24,16 @@
     "noEmit": false,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ]
     }
   },
   "include": [
     "src/server/**/*",
     "src/lib/**/*",
-    "src/services/**/*"
+    "src/services/**/*",
+    "constants/**/*"
   ],
   "exclude": [
     "node_modules",

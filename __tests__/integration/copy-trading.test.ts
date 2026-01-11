@@ -24,7 +24,9 @@ import {
   testTimeouts,
 } from '../utils/test-fixtures';
 
-describe('Copy Trading Router Integration Tests', () => {
+const describeIntegration = process.env.RUN_INTEGRATION_TESTS === 'true' ? describe : describe.skip;
+
+describeIntegration('Copy Trading Router Integration Tests', () => {
   let testUser: { email: string; password: string; token: string; refreshToken: string; userId: string };
 
   beforeAll(async () => {

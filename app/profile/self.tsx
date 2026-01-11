@@ -83,7 +83,7 @@ export default function SelfProfileScreen() {
   // Delete post mutation
   const deletePostMutation = trpc.social.deletePost.useMutation({
     onSuccess: () => {
-      userPostsQuery.refetch();
+      void userPostsQuery.refetch();
     },
     onError: (error: any) => {
       Alert.alert('Error', error.message || 'Failed to delete post');

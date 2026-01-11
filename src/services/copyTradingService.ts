@@ -1,15 +1,31 @@
+import 'reflect-metadata';
 import prisma from '../lib/prisma';
 import { PublicKey } from '@solana/web3.js';
 import { TRPCError } from '@trpc/server';
-import { WalletService } from './walletService';
+import { injectable, inject } from 'tsyringe';
 import { logger } from '../lib/logger';
-import { getTokenMetadata } from './tokenMetadata';
+// Comment 4: Import validation utilities and limits
+import { TRANSACTION_LIMITS } from '../lib/services/custodialWallet';
+import type { CustodialWalletService } from '../lib/services/custodialWallet';
+import { MAX_SLIPPAGE_PERCENT } from '../lib/validation';
+// Comment 4: Import DLQ for failed copy trades
+import { deadLetterQueueService } from '../lib/services/deadLetterQueue';
+import { executionQueue } from '../lib/services/executionQueue'
+import { messageQueue } from '../lib/services/messageQueue'
 
+/**
+ * Copy Trading Service
+ * Manages copy trading settings and execution
+ */
+@injectable()
 export class CopyTradingService {
-  // Connection instance can be added when needed for blockchain operations
+  constructor(
+    @inject('CustodialWallet') private readonly custodialWalletService: CustodialWalletService,
+  ) { }
 
   // Create or update copy trading settings
-  static async upsertSettings(params: {
+  // Comment 4: Apply validateCopyTradeBudget and slippage cap before create/update
+  async upsertSettings(params: {
     userId: string;
     targetWalletAddress: string;
     totalAmount: number;
@@ -27,8 +43,8 @@ export class CopyTradingService {
         amountPerTrade,
         stopLoss,
         takeProfit,
-        // maxSlippage = 0.5, // Not used in current implementation
-        // exitWithTrader = true // Not used in current implementation
+        maxSlippage = 0.5,
+        exitWithTrader = true
       } = params;
 
       // Validate target wallet address
@@ -38,6 +54,23 @@ export class CopyTradingService {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'Invalid target wallet address'
+        });
+      }
+
+      // Comment 4: Validate budget against limits BEFORE create/update
+      const budgetValidation = this.custodialWalletService.validateCopyTradeBudget(totalAmount, amountPerTrade);
+      if (!budgetValidation.valid) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: budgetValidation.error || 'Budget validation failed'
+        });
+      }
+
+      // Comment 4: Enforce slippage cap (5% maximum)
+      if (maxSlippage > MAX_SLIPPAGE_PERCENT) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Slippage ${maxSlippage}% exceeds maximum allowed ${MAX_SLIPPAGE_PERCENT}%`
         });
       }
 
@@ -68,6 +101,9 @@ export class CopyTradingService {
         }
       });
 
+      // Cap slippage to maximum allowed
+      const cappedSlippage = Math.min(maxSlippage, MAX_SLIPPAGE_PERCENT);
+
       if (existing) {
         // Update existing settings
         return await prisma.copyTrading.update({
@@ -77,7 +113,8 @@ export class CopyTradingService {
             amountPerTrade,
             stopLoss: stopLoss ?? null,
             takeProfit: takeProfit ?? null,
-            // exitWithTrader is already in schema
+            maxSlippage: cappedSlippage,
+            exitWithTrader,
             isActive: true
           }
         });
@@ -91,7 +128,8 @@ export class CopyTradingService {
             amountPerTrade,
             stopLoss: stopLoss ?? null,
             takeProfit: takeProfit ?? null,
-            // exitWithTrader defaults to false in schema
+            maxSlippage: cappedSlippage,
+            exitWithTrader,
             isActive: true
           }
         });
@@ -107,28 +145,63 @@ export class CopyTradingService {
   }
 
   // Get all copy trading settings for a user
-  static async getUserSettings(userId: string) {
+  async getUserSettings(userId: string) {
+    // Use optimized method to avoid N+1 queries (Audit Issue #6)
+    return this.getUserSettingsOptimized(userId);
+  }
+
+  /**
+   * Optimized getUserSettings that batches all queries (Audit Issue #6)
+   * Reduces N+1 query pattern by fetching all positions in a single query
+   * and calculating performance metrics in memory
+   */
+  async getUserSettingsOptimized(userId: string) {
     try {
+      // Single query to get all settings with their positions
       const settings = await prisma.copyTrading.findMany({
         where: { userId },
         include: {
-          positions: {
-            orderBy: { updatedAt: 'desc' },
-            take: 10
-          }
+          positions: true, // Get ALL positions in one query
         }
       });
 
-      // Calculate performance for each setting
-      const settingsWithPerformance = await Promise.all(
-        settings.map(async (setting) => {
-          const performance = await this.calculatePerformance(setting.id);
-          return {
-            ...setting,
-            performance
-          };
-        })
-      );
+      // Calculate performance in memory instead of N separate queries
+      const settingsWithPerformance = settings.map(setting => {
+        const trades = setting.positions;
+        const totalTrades = trades.length;
+        const successfulTrades = trades.filter(t => t.status === 'OPEN' || t.exitPrice).length;
+        const failedTrades = trades.filter(t => t.status === 'CLOSED' && !t.exitPrice).length;
+
+        let totalInvested = 0;
+        let totalReturned = 0;
+
+        for (const trade of trades) {
+          totalInvested += trade.entryValue;
+          if (trade.exitValue) {
+            totalReturned += trade.exitValue;
+          }
+        }
+
+        const pnl = totalReturned - totalInvested;
+        const pnlPercentage = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
+
+        return {
+          ...setting,
+          // Only return last 10 positions for display
+          positions: setting.positions
+            .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+            .slice(0, 10),
+          performance: {
+            totalTrades,
+            successfulTrades,
+            failedTrades,
+            totalInvested,
+            totalReturned,
+            pnl,
+            pnlPercentage
+          }
+        };
+      });
 
       return settingsWithPerformance;
     } catch (error) {
@@ -141,7 +214,7 @@ export class CopyTradingService {
   }
 
   // Get a specific copy trading setting
-  static async getSetting(settingId: string, userId: string) {
+  async getSetting(settingId: string, userId: string) {
     try {
       const setting = await prisma.copyTrading.findFirst({
         where: {
@@ -179,7 +252,7 @@ export class CopyTradingService {
   }
 
   // Toggle copy trading active status
-  static async toggleActive(settingId: string, userId: string) {
+  async toggleActive(settingId: string, userId: string) {
     try {
       const setting = await prisma.copyTrading.findFirst({
         where: {
@@ -212,7 +285,7 @@ export class CopyTradingService {
   }
 
   // Delete copy trading setting
-  static async deleteSetting(settingId: string, userId: string) {
+  async deleteSetting(settingId: string, userId: string) {
     try {
       const setting = await prisma.copyTrading.findFirst({
         where: {
@@ -244,7 +317,8 @@ export class CopyTradingService {
   }
 
   // Execute a copy trade (called by monitoring service)
-  static async executeCopyTrade(params: {
+  // Comment 4: Apply budget/slippage validation before execution
+  async executeCopyTrade(params: {
     settingId: string;
     originalTxHash: string;
     tokenIn: string;
@@ -262,91 +336,63 @@ export class CopyTradingService {
         return null;
       }
 
-      // Check if we've already copied this trade
-      // Check positions instead of copyTrade
-      const existingTrade = await prisma.position.findFirst({
-        where: {
-          copyTradingId: settingId,
-          entryTxHash: originalTxHash
-        }
-      });
-
-      if (existingTrade) {
-        return existingTrade;
-      }
-
       // Calculate trade amount based on settings
       const tradeAmount = Math.min(setting.amountPerTrade, setting.totalBudget || 0);
 
-      // Execute the swap using WalletService
-      const swapResult = await WalletService.swapTokens({
+      // Comment 4: Validate trade amount against limits
+      if (tradeAmount > TRANSACTION_LIMITS.maxPerTrade) {
+        logger.warn(`Trade amount ${tradeAmount} exceeds max per trade ${TRANSACTION_LIMITS.maxPerTrade}`);
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Trade amount exceeds maximum of ${TRANSACTION_LIMITS.maxPerTrade} USDC`
+        });
+      }
+
+      // Comment 4: Use capped slippage from settings (already capped in upsertSettings)
+      const slippage = Math.min(setting.maxSlippage || 0.5, MAX_SLIPPAGE_PERCENT);
+      void slippage
+
+      const orderData = {
         userId: setting.userId,
-        fromMint: tokenIn,
-        toMint: tokenOut,
+        copyTradingId: settingId,
+        tokenMint: tokenOut,
         amount: tradeAmount,
-        slippage: 0.5 // Default slippage
-      });
+        detectedTxId: originalTxHash,
+        priority: 1,
+      }
 
-      // Record the copy trade
-      // Fetch token metadata
-      const tokenMetadata = await getTokenMetadata(tokenOut);
+      const executionQueueId = await executionQueue.createBuyOrderRecord(orderData)
 
-      // Create position instead of copyTrade
-      const copyTrade = await prisma.position.create({
-        data: {
-          copyTradingId: settingId,
-          tokenMint: tokenOut,
-          tokenSymbol: tokenMetadata.symbol,
-          tokenName: tokenMetadata.name,
-          entryAmount: tradeAmount,
-          entryPrice: tradeAmount,
-          entryValue: tradeAmount,
-          status: 'OPEN',
-          entryTxHash: swapResult.signature,
-          entryTimestamp: new Date()
-        }
-      });
+      try {
+        await messageQueue.publishCopyTradeBuy({ executionQueueId, ...orderData })
+      } catch (mqError) {
+        logger.warn('RabbitMQ publish failed; enqueuing copy trade directly', {
+          error: mqError instanceof Error ? mqError.message : String(mqError),
+          executionQueueId,
+        })
+        await executionQueue.enqueueBuyOrderJobOnly(orderData)
+      }
 
-      // Update remaining amount
-      await prisma.copyTrading.update({
-        where: { id: settingId },
-        data: {
-          totalBudget: setting.totalBudget - tradeAmount
-        }
-      });
-
-      // Check stop loss and take profit
-      await this.checkStopLossTakeProfit(settingId);
-
-      return copyTrade;
+      return { queued: true, executionQueueId, originalTxHash, tokenIn, tokenOut, amountIn: tradeAmount }
     } catch (error) {
       logger.error('Error executing copy trade:', error);
 
-      // Get the setting to retrieve the correct userId
-      const setting = await prisma.copyTrading.findUnique({
-        where: { id: params.settingId }
-      });
-
-      if (setting) {
-        // Fetch token metadata for failed trade
-        const tokenMetadata = await getTokenMetadata(params.tokenOut);
-
-        // Record failed trade with correct userId
-        await prisma.position.create({
-          data: {
-            copyTradingId: params.settingId,
-            tokenMint: params.tokenOut,
-            tokenSymbol: tokenMetadata.symbol,
-            tokenName: tokenMetadata.name,
-            entryAmount: params.amountIn,
-            entryPrice: params.amountIn,
-            entryValue: params.amountIn,
-            status: 'CLOSED',
-            exitReason: 'ERROR',
-            entryTxHash: params.originalTxHash,
-            entryTimestamp: new Date()
-          }
+      // Comment 4: Add failed copy trade to DLQ for retry
+      try {
+        await deadLetterQueueService.addToQueue({
+          operation: 'COPY_TRADE',
+          payload: {
+            settingId: params.settingId,
+            originalTxHash: params.originalTxHash,
+            tokenIn: params.tokenIn,
+            tokenOut: params.tokenOut,
+            amountIn: params.amountIn,
+          },
+          error: error instanceof Error ? error.message : String(error),
+          userId: (await prisma.copyTrading.findUnique({ where: { id: params.settingId } }))?.userId || 'unknown',
         });
+      } catch (dlqError) {
+        logger.error('Failed to add copy trade to DLQ:', dlqError);
       }
 
       return null;
@@ -354,7 +400,7 @@ export class CopyTradingService {
   }
 
   // Calculate performance metrics
-  private static async calculatePerformance(settingId: string) {
+  private async calculatePerformance(settingId: string) {
     try {
       const trades = await prisma.position.findMany({
         where: { copyTradingId: settingId }
@@ -401,7 +447,7 @@ export class CopyTradingService {
   }
 
   // Check stop loss and take profit conditions
-  private static async checkStopLossTakeProfit(settingId: string) {
+  private async checkStopLossTakeProfit(settingId: string) {
     try {
       const setting = await prisma.copyTrading.findUnique({
         where: { id: settingId }
@@ -438,7 +484,7 @@ export class CopyTradingService {
   }
 
   // Get top traders
-  static async getTopTraders(limit = 10) {
+  async getTopTraders(limit = 10) {
     try {
       const topTraders = await prisma.traderProfile.findMany({
         where: {

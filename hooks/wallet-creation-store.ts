@@ -10,7 +10,7 @@ import * as bip39 from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
 import { SecureStorage } from '@/lib/secure-storage';
 import { trpc } from '@/lib/trpc';
-import * as bs58 from 'bs58';
+import bs58 from 'bs58';
 
 /**
  * React hook for wallet management

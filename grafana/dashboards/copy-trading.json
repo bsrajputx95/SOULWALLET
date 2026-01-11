@@ -1,0 +1,192 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "description": "Copy trading performance metrics - positions, P&L, and trader stats",
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "id": null,
+    "panels": [
+        {
+            "title": "Copy Trading Requests",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*copyTrading.*\"}[5m]))",
+                    "legendFormat": "Copy Trading Requests/s",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Copy Trading Success Rate",
+            "type": "gauge",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "value": 0,
+                                "color": "red"
+                            },
+                            {
+                                "value": 0.9,
+                                "color": "yellow"
+                            },
+                            {
+                                "value": 0.98,
+                                "color": "green"
+                            }
+                        ]
+                    }
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*copyTrading.*\", status_code=~\"2..\"}[5m])) / sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*copyTrading.*\"}[5m]))",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Avg Copy Trade Latency",
+            "type": "stat",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "avg(rate(soulwallet_http_request_duration_seconds_sum{route=~\".*copyTrading.*\"}[5m]) / rate(soulwallet_http_request_duration_seconds_count{route=~\".*copyTrading.*\"}[5m])) * 1000",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Transaction Requests",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*transaction.*\"}[5m]))",
+                    "legendFormat": "Transactions/s",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Transaction Latency Distribution",
+            "type": "heatmap",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_bucket{route=~\".*transaction.*\"}[5m])) by (le)",
+                    "legendFormat": "{{le}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Wallet Operations",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 16
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*wallet.*\"}[5m]))",
+                    "legendFormat": "Wallet Ops/s",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Swap Operations",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 16
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(soulwallet_http_request_duration_seconds_count{route=~\".*swap.*\"}[5m]))",
+                    "legendFormat": "Swaps/s",
+                    "refId": "A"
+                }
+            ]
+        }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": [
+        "soulwallet",
+        "copy-trading",
+        "trading"
+    ],
+    "time": {
+        "from": "now-1h",
+        "to": "now"
+    },
+    "title": "Copy Trading",
+    "uid": "soulwallet-copy-trading",
+    "version": 1
+}

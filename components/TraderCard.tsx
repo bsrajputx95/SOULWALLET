@@ -1,73 +1,64 @@
 import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Alert } from 'react-native';
 import { Copy } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
 import { COLORS } from '../constants/colors';
-import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
+import { FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
 
 interface TraderCardProps {
-  username: string;
-  profileImage?: string;
+  username?: string;
+  walletAddress?: string;
   roi: number;
   period?: string;
-  isVerified?: boolean;
   onPress?: () => void;
-  onCopyPress?: () => void;
 }
 
 export const TraderCard: React.FC<TraderCardProps> = ({
   username,
-  profileImage,
+  walletAddress,
   roi,
-  period = '7d',
-  isVerified = false,
+  period = '24h',
   onPress,
-  onCopyPress,
 }) => {
+  // Format wallet address: first 4 chars...last 4 chars
+  const formatAddress = (addr?: string) => {
+    if (!addr) return '...';
+    return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+  };
+
+  // Copy wallet address to clipboard
+  const handleCopyAddress = async () => {
+    if (!walletAddress) return;
+    await Clipboard.setStringAsync(walletAddress);
+    Alert.alert('Copied!', 'Wallet address copied to clipboard');
+  };
+
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
       <NeonCard style={styles.container}>
         <View style={styles.content}>
-          <View style={styles.profileContainer}>
-            <View style={styles.avatarContainer}>
-              {profileImage ? (
-                <Image source={{ uri: profileImage }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatar, styles.defaultAvatar]}>
-                  <Text style={styles.avatarText}>
-                    {username.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.usernameContainer}>
-              <Text style={styles.username}>
-                @{username}
-                {isVerified && <Text style={styles.verified}> 🛡️</Text>}
-              </Text>
-            </View>
+          <View style={styles.addressRow}>
+            <Text style={styles.address}>
+              {formatAddress(walletAddress)}
+            </Text>
+            <TouchableOpacity 
+              onPress={(e) => {
+                e.stopPropagation?.();
+                void handleCopyAddress();
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={styles.copyButton}
+            >
+              <Copy size={14} color={COLORS.textSecondary} />
+            </TouchableOpacity>
           </View>
-          
-          <View style={styles.rightContainer}>
-            <View style={styles.statsContainer}>
-              <Text style={[
-                styles.roi,
-                { color: roi >= 0 ? COLORS.success : COLORS.error }
-              ]}>
-                {roi >= 0 ? '+' : ''}{roi.toFixed(1)}%
-              </Text>
-              <Text style={styles.period}>({period})</Text>
-            </View>
-            {onCopyPress && (
-              <TouchableOpacity 
-                style={styles.copyButton}
-                onPress={onCopyPress}
-                activeOpacity={0.7}
-              >
-                <Copy size={16} color={COLORS.solana} />
-              </TouchableOpacity>
-            )}
-          </View>
+          <Text style={[
+            styles.roi,
+            { color: roi >= 0 ? COLORS.success : COLORS.error }
+          ]}>
+            {roi >= 0 ? '+' : ''}{roi.toFixed(1)}% today
+          </Text>
         </View>
       </NeonCard>
     </TouchableOpacity>
@@ -77,68 +68,30 @@ export const TraderCard: React.FC<TraderCardProps> = ({
 const styles = StyleSheet.create({
   container: {
     marginBottom: SPACING.xs,
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.m,
   },
   content: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  profileContainer: {
+  addressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
   },
-  avatarContainer: {
-    marginRight: SPACING.s,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  defaultAvatar: {
-    backgroundColor: COLORS.solana + '50',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    ...FONTS.orbitronBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-  },
-  usernameContainer: {
-    flex: 1,
-  },
-  username: {
-    ...FONTS.orbitronMedium,
+  address: {
+    ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 14,
-  },
-  verified: {
-    fontSize: 14,
-  },
-  rightContainer: {
-    alignItems: 'flex-end',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.xs,
   },
   copyButton: {
-    backgroundColor: COLORS.solana + '20',
-    padding: SPACING.xs,
-    borderRadius: BORDER_RADIUS.small,
+    marginLeft: SPACING.xs,
+    padding: 4,
   },
   roi: {
     ...FONTS.monospace,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
-  },
-  period: {
-    ...FONTS.sfProRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginLeft: SPACING.xs,
   },
 });

@@ -305,7 +305,7 @@ export default function CoinDetailsScreen() {
         // noop
       }
     };
-    loadWatchlist();
+    void loadWatchlist();
   }, [symbol]);
 
   const toggleWatchlist = async () => {
@@ -367,20 +367,30 @@ export default function CoinDetailsScreen() {
     // Guard against null coinData
     if (!coinData) return;
 
-    // Navigate to swap screen with appropriate tokens
-    // For BUY: swap from USDC to this token
-    // For SELL: swap from this token to USDC
-    const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-
-    router.push({
-      pathname: '/swap',
-      params: {
-        inputMint: tradeMode === 'buy' ? usdcMint : coinData.contractAddress,
-        outputMint: tradeMode === 'buy' ? coinData.contractAddress : usdcMint,
-        amount: tradeAmount,
-        slippage: tradeSlippage,
-      },
-    });
+    // Navigate to swap screen with token param
+    // For BUY: set token as output (buying this token with SOL)
+    // For SELL: set fromSymbol to this token (selling this token for SOL)
+    if (tradeMode === 'buy') {
+      router.push({
+        pathname: '/swap',
+        params: {
+          token: coinData.contractAddress, // Pre-fill as output token
+          amount: tradeAmount,
+          slippage: tradeSlippage,
+        },
+      });
+    } else {
+      // For sell, use fromSymbol to set as input token
+      router.push({
+        pathname: '/swap',
+        params: {
+          fromSymbol: coinData.symbol,
+          toSymbol: 'SOL',
+          amount: tradeAmount,
+          slippage: tradeSlippage,
+        },
+      });
+    }
   };
 
   // Mock data loading removed - Trades and Holders tabs now show "Coming Soon"
@@ -397,7 +407,7 @@ export default function CoinDetailsScreen() {
   };
 
   const openLink = (url: string) => {
-    Linking.openURL(url);
+    void Linking.openURL(url);
   };
 
   const formatPrice = (price: number) => {
@@ -909,7 +919,7 @@ export default function CoinDetailsScreen() {
           <NeonButton
             title="More Info"
             variant="secondary"
-            onPress={() => { }}
+            onPress={() => Linking.openURL(`https://dexscreener.com/solana/${coinData.contractAddress}`)}
           />
         </View>
       </ScrollView>

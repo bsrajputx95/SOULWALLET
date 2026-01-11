@@ -99,7 +99,7 @@ export default function TransactionDetailsScreen() {
   const handleOpenExplorer = () => {
     if (!transaction) return;
     const url = `https://explorer.solana.com/tx/${transaction.signature}`;
-    Linking.openURL(url);
+    void Linking.openURL(url);
   };
 
   const handleRefresh = async () => {

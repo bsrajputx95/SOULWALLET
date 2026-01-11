@@ -1,0 +1,48 @@
+# Grafana Datasources Configuration
+# Auto-provisions datasources on startup
+
+apiVersion: 1
+
+datasources:
+  # Prometheus - primary metrics source
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: "2.47.0"
+      timeInterval: "15s"
+
+  # Elasticsearch - logs source
+  - name: Elasticsearch
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    database: "soulwallet-logs-*"
+    editable: false
+    jsonData:
+      esVersion: "8.11.0"
+      timeField: "@timestamp"
+      logMessageField: "message"
+      logLevelField: "log_level"
+      maxConcurrentShardRequests: 5
+      includeFrozen: false
+
+  # Jaeger - traces source
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: Elasticsearch
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        filterBySpanID: true

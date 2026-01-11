@@ -92,7 +92,7 @@ export default function ForgotPasswordScreen() {
       }
       
       if (Platform.OS !== 'web') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
 
       await trpcClient.auth.requestPasswordReset.mutate({ email: email.trim() });
@@ -141,7 +141,7 @@ export default function ForgotPasswordScreen() {
       }
       
       if (Platform.OS !== 'web') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
 
       const result = await trpcClient.auth.verifyOtp.mutate({ 
@@ -200,7 +200,7 @@ export default function ForgotPasswordScreen() {
       }
 
       if (Platform.OS !== 'web') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
 
       await trpcClient.auth.resetPassword.mutate({
@@ -264,7 +264,7 @@ export default function ForgotPasswordScreen() {
             style={styles.backButton}
             onPress={() => {
               if (Platform.OS !== 'web') {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }
               if (step === 'email') {
                 router.back();

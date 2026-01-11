@@ -1,9 +1,20 @@
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import prisma from '../lib/prisma';
 import { logger } from '../lib/logger';
+import { rpcManager } from '../lib/services/rpcManager';
+import { executionQueue } from '../lib/services/executionQueue';
 
-let monitorInterval: NodeJS.Timeout | null = null;
+let monitorInterval: ReturnType<typeof setInterval> | null = null;
 let isMonitoring = false;
+
+/**
+ * Comment 3: Transaction monitor refactored to use Bull queue
+ * Instead of processing transactions synchronously, we now:
+ * 1. Detect new transactions for monitored wallets
+ * 2. Enqueue them via executionQueue.addTransactionProcessing()
+ * 3. The queue processor handles the actual transaction parsing and DB writes
+ * This allows horizontal scaling across PM2 instances
+ */
 
 export async function startTransactionMonitor() {
   if (isMonitoring) {
@@ -11,13 +22,8 @@ export async function startTransactionMonitor() {
     return;
   }
 
-  logger.info('Starting transaction monitor...');
+  logger.info('Starting transaction monitor (queue-based)...');
   isMonitoring = true;
-
-  const connection = new Connection(
-    process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-    'confirmed'
-  );
 
   // Check for new transactions every 30 seconds
   monitorInterval = setInterval(async () => {
@@ -33,16 +39,17 @@ export async function startTransactionMonitor() {
         }
       });
 
+      let enqueuedCount = 0;
+
       for (const user of users) {
         if (!user.walletAddress) continue;
 
         try {
           const publicKey = new PublicKey(user.walletAddress);
-          
+
           // Get recent signatures
-          const signatures = await connection.getSignaturesForAddress(
-            publicKey,
-            { limit: 10 }
+          const signatures = await rpcManager.withFailover((connection) =>
+            connection.getSignaturesForAddress(publicKey, { limit: 10 })
           );
 
           for (const sig of signatures) {
@@ -52,91 +59,31 @@ export async function startTransactionMonitor() {
             });
 
             if (!existingTx) {
-              // Get transaction details
-              const tx = await connection.getTransaction(sig.signature, {
-                maxSupportedTransactionVersion: 0
+              // Enqueue transaction for processing instead of processing inline
+              await executionQueue.addTransactionProcessing({
+                kind: 'USER_WALLET',
+                userId: user.id,
+                walletAddress: user.walletAddress,
+                signature: sig.signature,
+                blockTime: sig.blockTime ?? null,
               });
-
-              if (tx) {
-                // Extract account keys based on message version
-                const message = tx.transaction.message;
-                let accountKeys: string[] = [];
-                
-                if ('getAccountKeys' in message) {
-                  const keys = message.getAccountKeys();
-                  accountKeys = keys.staticAccountKeys.map(k => k.toString());
-                } else if ('accountKeys' in message) {
-                  accountKeys = (message as any).accountKeys.map((k: any) => k.toString());
-                }
-                
-                // Determine if this is incoming or outgoing
-                const preBalances = tx.meta?.preBalances || [];
-                const postBalances = tx.meta?.postBalances || [];
-                
-                // Find user's account index
-                const userAccountIndex = accountKeys.findIndex(key => key === user.walletAddress);
-                
-                if (userAccountIndex === -1) {
-                  logger.warn(`User wallet not found in transaction ${sig.signature}`);
-                  continue;
-                }
-                
-                // Calculate balance change
-                const preBalance = preBalances[userAccountIndex] || 0;
-                const postBalance = postBalances[userAccountIndex] || 0;
-                const balanceChange = postBalance - preBalance;
-                
-                const isReceive = balanceChange > 0;
-                const amount = Math.abs(balanceChange) / LAMPORTS_PER_SOL;
-                
-                // Get fee
-                const fee = ((tx.meta?.fee || 0) / LAMPORTS_PER_SOL);
-                
-                // Determine from/to addresses
-                let fromAddress = 'unknown';
-                let toAddress = 'unknown';
-                
-                if (accountKeys.length >= 2) {
-                  if (isReceive) {
-                    fromAddress = accountKeys[0] || 'unknown';
-                    toAddress = user.walletAddress;
-                  } else {
-                    fromAddress = user.walletAddress;
-                    toAddress = accountKeys[1] || 'unknown';
-                  }
-                }
-                
-                // Save transaction
-                await prisma.transaction.create({
-                  data: {
-                    userId: user.id,
-                    signature: sig.signature,
-                    type: isReceive ? 'RECEIVE' : 'SEND',
-                    amount: amount,
-                    token: 'SOL',
-                    tokenSymbol: 'SOL',
-                    from: fromAddress,
-                    to: toAddress,
-                    status: tx.meta?.err ? 'FAILED' : 'CONFIRMED',
-                    fee: fee,
-                    createdAt: new Date(sig.blockTime ? sig.blockTime * 1000 : Date.now())
-                  }
-                });
-
-                logger.info(`Processed ${isReceive ? 'RECEIVE' : 'SEND'} transaction ${sig.signature} for user ${user.id}: ${amount.toFixed(6)} SOL`);
-              }
+              enqueuedCount++;
             }
           }
         } catch (error) {
           logger.error(`Error monitoring wallet ${user.walletAddress}:`, error);
         }
       }
+
+      if (enqueuedCount > 0) {
+        logger.info(`Transaction monitor: enqueued ${enqueuedCount} transactions for processing`);
+      }
     } catch (error) {
       logger.error('Transaction monitor error:', error);
     }
   }, 30000); // 30 seconds
 
-  logger.info('Transaction monitor started');
+  logger.info('Transaction monitor started (queue-based processing enabled)');
 }
 
 export function stopTransactionMonitor() {

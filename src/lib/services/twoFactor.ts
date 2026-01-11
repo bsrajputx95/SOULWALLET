@@ -9,8 +9,29 @@ authenticator.options = {
   step: 30,  // 30 second time step
 };
 
-const ENCRYPTION_KEY = process.env.TOTP_ENCRYPTION_KEY || process.env.JWT_SECRET || 'default-key-change-in-production';
 const ALGORITHM = 'aes-256-gcm';
+let cachedDevKey: string | null = null
+
+function getEncryptionKey(): string {
+  const k = process.env.TOTP_ENCRYPTION_KEY
+  if (k) return k
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'SECURITY ERROR: TOTP_ENCRYPTION_KEY is required in production. Generate a secure 32-byte key: openssl rand -base64 32'
+    )
+  }
+
+  logger.warn('TOTP using development fallback key')
+
+  const jwt = process.env.JWT_SECRET
+  if (jwt) return jwt.split(',')[0]!.trim()
+
+  if (cachedDevKey) return cachedDevKey
+  cachedDevKey = crypto.randomBytes(32).toString('base64')
+  logger.warn('Generated ephemeral TOTP key; will not persist across restarts')
+  return cachedDevKey
+}
 
 export class TwoFactorService {
   /**
@@ -63,8 +84,9 @@ export class TwoFactorService {
    */
   static encryptSecret(secret: string): string {
     try {
+      const saltHex = crypto.randomBytes(16).toString('hex')
       const iv = crypto.randomBytes(16);
-      const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
+      const key = crypto.scryptSync(getEncryptionKey(), saltHex, 32);
       const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
       
       let encrypted = cipher.update(secret, 'utf8', 'hex');
@@ -72,8 +94,7 @@ export class TwoFactorService {
       
       const authTag = cipher.getAuthTag();
       
-      // Format: iv:authTag:encrypted
-      return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+      return `v2:${saltHex}:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
     } catch (error) {
       logger.error('Failed to encrypt TOTP secret:', error);
       throw new Error('Failed to encrypt secret');
@@ -85,15 +106,33 @@ export class TwoFactorService {
    */
   static decryptSecret(encryptedData: string): string {
     try {
-      const [ivHex, authTagHex, encrypted] = encryptedData.split(':');
-      
-      if (!ivHex || !authTagHex || !encrypted) {
-        throw new Error('Invalid encrypted data format');
+      const parts = encryptedData.split(':')
+      const isV2 = parts[0] === 'v2'
+
+      let saltHex: string
+      let ivHex: string
+      let authTagHex: string
+      let encrypted: string
+
+      if (isV2) {
+        saltHex = parts[1] || ''
+        ivHex = parts[2] || ''
+        authTagHex = parts[3] || ''
+        encrypted = parts[4] || ''
+      } else {
+        saltHex = 'salt'
+        ivHex = parts[0] || ''
+        authTagHex = parts[1] || ''
+        encrypted = parts[2] || ''
       }
-      
+
+      if (!ivHex || !authTagHex || !encrypted || !saltHex) {
+        throw new Error('Invalid encrypted data format')
+      }
+
       const iv = Buffer.from(ivHex, 'hex');
       const authTag = Buffer.from(authTagHex, 'hex');
-      const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
+      const key = crypto.scryptSync(getEncryptionKey(), saltHex, 32);
       
       const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
       decipher.setAuthTag(authTag);

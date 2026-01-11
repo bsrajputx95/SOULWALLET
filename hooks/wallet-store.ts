@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import createContextHook from '@/lib/create-context-hook';
 import { trpc } from '@/lib/trpc';
+import { Alert } from 'react-native';
 
 export interface Token {
   id: string;
@@ -24,6 +25,20 @@ export interface CopiedWallet {
   stopLoss?: number;
   takeProfit?: number;
   slippage?: number;
+}
+
+export interface QueueStatus {
+  activeJobs: number;
+  waitingJobs: number;
+  failedJobs: number;
+  health: 'healthy' | 'degraded' | 'down';
+}
+
+export interface OptimisticUpdate {
+  tokenId: string;
+  originalBalance: number;
+  pendingDelta: number;
+  timestamp: number;
 }
 
 export const [WalletProvider, useWallet] = createContextHook(() => {
@@ -62,6 +77,86 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     refetchInterval: 30000,
   });
 
+  // ✅ Copy wallet edit mutation
+  const updateSettingsMutation = trpc.copyTrading.updateSettings.useMutation({
+    onSuccess: () => {
+      // Refetch copy trades after successful update
+      void copyTradesQuery.refetch();
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to update copy trade settings');
+    },
+  });
+
+  // ✅ Comment 3: Queue status polling
+  const queueStatusQuery = trpc.queue.getStatus.useQuery(undefined, {
+    refetchInterval: 10000, // Poll every 10 seconds
+    retry: false, // Don't retry on failure
+  });
+
+  const queueStatus: QueueStatus = {
+    activeJobs: queueStatusQuery.data?.activeJobs || 0,
+    waitingJobs: queueStatusQuery.data?.waitingJobs || 0,
+    failedJobs: queueStatusQuery.data?.failedJobs || 0,
+    health: queueStatusQuery.data?.health || 'healthy',
+  };
+
+  // ✅ Comment 4: Optimistic UI state
+  const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, OptimisticUpdate>>(new Map());
+
+  // Apply optimistic update (called before transaction)
+  const applyOptimisticUpdate = useCallback((tokenId: string, delta: number, currentBalance: number) => {
+    setOptimisticUpdates(prev => {
+      const next = new Map(prev);
+      next.set(tokenId, {
+        tokenId,
+        originalBalance: currentBalance,
+        pendingDelta: delta,
+        timestamp: Date.now(),
+      });
+      return next;
+    });
+  }, []);
+
+  // Revert optimistic update (called on transaction failure)
+  const revertOptimisticUpdate = useCallback((tokenId: string) => {
+    setOptimisticUpdates(prev => {
+      const next = new Map(prev);
+      next.delete(tokenId);
+      return next;
+    });
+  }, []);
+
+  // Confirm optimistic update (called on transaction success, then refetch)
+  const confirmOptimisticUpdate = useCallback(async (tokenId: string) => {
+    // Remove the optimistic update
+    setOptimisticUpdates(prev => {
+      const next = new Map(prev);
+      next.delete(tokenId);
+      return next;
+    });
+    // Refetch real data
+    await tokensQuery.refetch();
+    await assetBreakdownQuery.refetch();
+  }, [tokensQuery, assetBreakdownQuery]);
+
+  // Clean up stale optimistic updates (older than 60 seconds)
+  useEffect(() => {
+    const cleanup = setInterval(() => {
+      const now = Date.now();
+      setOptimisticUpdates(prev => {
+        const next = new Map(prev);
+        for (const [key, update] of next.entries()) {
+          if (now - update.timestamp > 60000) {
+            next.delete(key);
+          }
+        }
+        return next.size !== prev.size ? next : prev;
+      });
+    }, 30000);
+    return () => clearInterval(cleanup);
+  }, []);
+
   // ✅ Get real values from backend
   const totalBalance = overviewQuery.data?.totalValue || 0;
   const dailyPnl = pnlQuery.data?.netProfit || 0;
@@ -79,35 +174,45 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     return acc;
   }, {} as Record<string, { price: number; value: number }>) || {};
 
-  // Transform tokens data with metadata and REAL prices
+  // Transform tokens data with metadata, REAL prices, and optimistic updates
   const tokens: Token[] = tokensQuery.data?.tokens.map(token => {
     const metadata = metadataMap[token.mint];
     const priceData = assetPriceMap[token.mint];
+    const optimisticUpdate = optimisticUpdates.get(token.mint);
+
+    // Apply optimistic balance if pending
+    const balance = optimisticUpdate
+      ? optimisticUpdate.originalBalance + optimisticUpdate.pendingDelta
+      : token.balance;
+    const price = priceData?.price || 0;
+
     return {
       id: token.mint,
       symbol: metadata?.symbol || 'UNKNOWN',
       name: metadata?.name || 'Unknown Token',
-      price: priceData?.price || 0,           // ✅ Real price from DexScreener
-      change24h: 0,                            // Would need historical data
-      balance: token.balance,
-      value: priceData?.value || token.balance * (priceData?.price || 0), // ✅ Real value
+      price,                                    // ✅ Real price from DexScreener
+      change24h: 0,                             // Would need historical data
+      balance,                                  // ✅ With optimistic updates
+      value: balance * price,                   // ✅ Recalculated with optimistic balance
       logo: metadata?.logoURI,
     };
   }) || [];
 
-  // Transform copy trades data
-  const copiedWallets: CopiedWallet[] = copyTradesQuery.data?.map(ct => ({
-    id: ct.id,
-    username: ct.trader.username || 'Unknown',
-    walletAddress: ct.trader.walletAddress,
-    roi: ct.trader.totalROI,
-    pnl: ct.totalProfit,
-    totalAmount: ct.totalBudget,
-    amountPerTrade: ct.amountPerTrade,
-    stopLoss: ct.stopLoss || undefined,
-    takeProfit: ct.takeProfit || undefined,
-    slippage: ct.slippage || undefined,
-  })) || [];
+  // ✅ Memoize copiedWallets transformation
+  const copiedWallets: CopiedWallet[] = useMemo(() => {
+    return copyTradesQuery.data?.map(ct => ({
+      id: ct.id,
+      username: ct.trader.username || 'Unknown',
+      walletAddress: ct.trader.walletAddress,
+      roi: ct.trader.totalROI,
+      pnl: ct.totalProfit,
+      totalAmount: ct.totalBudget,
+      amountPerTrade: ct.amountPerTrade,
+      stopLoss: ct.stopLoss || undefined,
+      takeProfit: ct.takeProfit || undefined,
+      slippage: ct.slippage || undefined,
+    })) || [];
+  }, [copyTradesQuery.data]);
 
   const refetch = async () => {
     await Promise.all([
@@ -120,10 +225,27 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     ]);
   };
 
-  const updateCopiedWallet = async (_id: string, _updates: Partial<CopiedWallet>) => {
-    // This would call trpc.copyTrading.updateSettings
-    // For now, just refetch
-    await refetch();
+  const updateCopiedWallet = async (
+    id: string,
+    updates: Partial<CopiedWallet>,
+    totpCode: string
+  ): Promise<boolean> => {
+    // ✅ Call trpc.copyTrading.updateSettings mutation
+    try {
+      await updateSettingsMutation.mutateAsync({
+        copyTradingId: id,
+        totalBudget: updates.totalAmount,
+        amountPerTrade: updates.amountPerTrade,
+        stopLoss: updates.stopLoss ? -Math.abs(updates.stopLoss) : undefined,
+        takeProfit: updates.takeProfit ? Math.abs(updates.takeProfit) : undefined,
+        maxSlippage: updates.slippage,
+        totpCode,
+      });
+      return true;
+    } catch (error) {
+      console.error('[wallet-store] updateCopiedWallet error:', error);
+      return false;
+    }
   };
 
   return {
@@ -135,5 +257,14 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     isLoading: overviewQuery.isLoading || pnlQuery.isLoading || tokensQuery.isLoading || metadataQuery.isLoading || assetBreakdownQuery.isLoading,
     refetch,
     updateCopiedWallet,
+    isUpdatingCopyTrade: updateSettingsMutation.isPending, // ✅ Loading state for edit
+    // ✅ Comment 3: Queue status
+    queueStatus,
+    isQueueHealthy: queueStatus.health === 'healthy',
+    // ✅ Comment 4: Optimistic UI helpers
+    applyOptimisticUpdate,
+    revertOptimisticUpdate,
+    confirmOptimisticUpdate,
+    hasPendingOptimisticUpdates: optimisticUpdates.size > 0,
   };
 });

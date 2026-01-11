@@ -7,6 +7,7 @@
 import { transactionMonitor } from '../lib/services/transactionMonitor';
 import { priceMonitor } from '../lib/services/priceMonitor';
 import { executionQueue } from '../lib/services/executionQueue';
+import { messageQueue } from '../lib/services/messageQueue'
 import { logger } from '../lib/logger';
 import prisma from '../lib/prisma';
 
@@ -26,6 +27,7 @@ async function gracefulShutdown() {
     // Stop all services
     await transactionMonitor.stop();
     priceMonitor.stop();
+    await messageQueue.shutdown()
     await executionQueue.close();
     
     // Disconnect from database
@@ -50,6 +52,11 @@ async function startServices() {
     // Check Redis connection (for Bull queues)
     const queueStats = await executionQueue.getQueueStats();
     logger.info('✅ Redis connected', queueStats);
+
+    await messageQueue.startConsumers()
+    if (messageQueue.isEnabled()) {
+      logger.info('✅ RabbitMQ consumers started')
+    }
 
     // Start transaction monitor (WebSocket)
     await transactionMonitor.start();

@@ -1,6 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import type { AuthService } from './auth';
 import type { EmailService } from './email';
+import fs from 'fs/promises';
+import path from 'path';
 import { logger } from '../logger';
 
 export interface CleanupStats {
@@ -9,6 +11,7 @@ export interface CleanupStats {
   oldLoginAttempts: number;
   oldSessionActivities: number;
   lockedAccountsUnlocked: number;
+  expiredDataExports: number;
 }
 
 export interface CleanupConfig {
@@ -117,6 +120,7 @@ export class CleanupService {
         oldLoginAttempts: 0,
         oldSessionActivities: 0,
         lockedAccountsUnlocked: 0,
+        expiredDataExports: 0,
       };
 
       // Run all cleanup operations
@@ -126,6 +130,7 @@ export class CleanupService {
         this.cleanupOldLoginAttemptsInternal(stats),
         this.cleanupOldSessionActivitiesInternal(stats),
         this.unlockExpiredAccountsInternal(stats),
+        this.cleanupExpiredDataExportsInternal(stats),
       ]);
 
       const duration = Date.now() - startTime;
@@ -299,6 +304,36 @@ export class CleanupService {
     }
   }
 
+  private async cleanupExpiredDataExportsInternal(stats: CleanupStats): Promise<void> {
+    const now = new Date();
+    const expired = await this.prisma.dataExportRequest.findMany({
+      where: { status: 'COMPLETED', expiresAt: { lt: now } },
+      select: { id: true, fileUrl: true },
+      take: 500,
+    });
+
+    if (!expired.length) {
+      stats.expiredDataExports = 0;
+      return;
+    }
+
+    await Promise.all(
+      expired.map(async (r) => {
+        const fileUrl = r.fileUrl;
+        if (!fileUrl) return;
+        if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) return;
+        const filePath = path.isAbsolute(fileUrl) ? fileUrl : path.join(process.cwd(), fileUrl);
+        await fs.rm(filePath, { force: true }).catch(() => void 0);
+      })
+    );
+
+    const res = await this.prisma.dataExportRequest.deleteMany({
+      where: { id: { in: expired.map((e) => e.id) } },
+    });
+
+    stats.expiredDataExports = res.count;
+  }
+
   /**
    * Get cleanup statistics without running cleanup
    */
@@ -383,6 +418,7 @@ export class CleanupService {
       oldLoginAttempts: 0,
       oldSessionActivities: 0,
       lockedAccountsUnlocked: 0,
+      expiredDataExports: 0,
     };
 
     const cleanupPromises: Promise<void>[] = [];

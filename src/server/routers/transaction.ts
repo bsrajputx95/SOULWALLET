@@ -1,36 +1,12 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
-
-// RPC endpoints for failover
-const RPC_ENDPOINTS = [
-  process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-  'https://solana-api.projectserum.com',
-  'https://rpc.ankr.com/solana',
-  'https://solana.public-rpc.com',
-];
-
-// Create connection with failover
-const createConnection = async (): Promise<Connection> => {
-  for (const endpoint of RPC_ENDPOINTS) {
-    try {
-      const connection = new Connection(endpoint, 'confirmed');
-      // Test the connection
-      await connection.getLatestBlockhash();
-      logger.info(`Connected to Solana RPC: ${endpoint}`);
-      return connection;
-    } catch (error) {
-      logger.warn(`Failed to connect to ${endpoint}:`, error);
-      continue;
-    }
-  }
-  throw new Error('All RPC endpoints failed');
-};
-
-const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+import { rpcManager } from '../../lib/services/rpcManager';
+import { auditLogService } from '../../lib/services/auditLog'
+import { amlService } from '../../lib/services/kyc'
 
 export const transactionRouter = router({
   /**
@@ -63,6 +39,7 @@ export const transactionRouter = router({
           where,
           orderBy: { createdAt: 'desc' },
           take: input.limit + 1,
+          skip: input.cursor ? 1 : 0,  // Comment 2 Fix: Avoid cursor duplication
           ...(input.cursor ? { cursor: { id: input.cursor } } : {}),
         });
 
@@ -111,9 +88,9 @@ export const transactionRouter = router({
         // Try to get additional details from the blockchain
         let blockchainData = null;
         try {
-          const confirmedTransaction = await connection.getTransaction(input.signature, {
-            maxSupportedTransactionVersion: 0,
-          });
+          const confirmedTransaction = await rpcManager.withFailover((connection) =>
+            connection.getTransaction(input.signature, { maxSupportedTransactionVersion: 0 })
+          );
           
           if (confirmedTransaction) {
             blockchainData = {
@@ -162,9 +139,9 @@ export const transactionRouter = router({
         const publicKey = new PublicKey(user.walletAddress);
         
         // Get recent transactions from the blockchain
-        const signatures = await connection.getSignaturesForAddress(publicKey, {
-          limit: 50,
-        });
+        const signatures = await rpcManager.withFailover((connection) =>
+          connection.getSignaturesForAddress(publicKey, { limit: 50 })
+        );
 
         let newTransactionCount = 0;
 
@@ -176,9 +153,9 @@ export const transactionRouter = router({
 
           if (!existingTransaction) {
             // Fetch transaction details
-            const transaction = await connection.getTransaction(signatureInfo.signature, {
-              maxSupportedTransactionVersion: 0,
-            });
+            const transaction = await rpcManager.withFailover((connection) =>
+              connection.getTransaction(signatureInfo.signature, { maxSupportedTransactionVersion: 0 })
+            );
 
             if (transaction) {
               // Parse transaction to determine type, amount, etc.
@@ -197,7 +174,7 @@ export const transactionRouter = router({
               const balanceChange = postBalance - preBalance;
               const amount = Math.abs(balanceChange || 0) / 1_000_000_000; // Convert lamports to SOL
 
-              await prisma.transaction.create({
+              const created = await prisma.transaction.create({
                 data: {
                   userId: ctx.user.id,
                   signature: signatureInfo.signature,
@@ -212,6 +189,41 @@ export const transactionRouter = router({
                   createdAt: new Date((signatureInfo.blockTime || Date.now() / 1000) * 1000),
                 },
               });
+
+              const uaHeader = ctx.req?.headers?.['user-agent']
+              const userAgent = Array.isArray(uaHeader) ? uaHeader[0] : (typeof uaHeader === 'string' ? uaHeader : ctx.fingerprint?.userAgent)
+              const ipAddress = ctx.rateLimitContext?.ip || ctx.req?.ip || ctx.fingerprint?.ipAddress || 'unknown'
+
+              await auditLogService.logFinancialOperation({
+                userId: ctx.user.id,
+                operation: isReceive ? 'RECEIVE' : 'SEND',
+                resourceType: 'Transaction',
+                resourceId: created.id,
+                amount,
+                currency: 'SOL',
+                feeAmount: (transaction.meta?.fee || 0) / 1_000_000_000,
+                metadata: {
+                  signature: signatureInfo.signature,
+                  status: signatureInfo.confirmationStatus === 'finalized' ? 'CONFIRMED' : 'PENDING',
+                  from: isReceive ? 'unknown' : user.walletAddress,
+                  to: isReceive ? user.walletAddress : 'unknown',
+                },
+                ipAddress,
+                userAgent,
+              })
+
+              try {
+                await amlService.monitorTransaction(
+                  ctx.user.id,
+                  created.id,
+                  signatureInfo.signature,
+                  amount,
+                  'SOL',
+                  { type: isReceive ? 'RECEIVE' : 'SEND' }
+                )
+              } catch (error) {
+                logger.warn('AML monitoring failed for synced transaction', { userId: ctx.user.id, transactionId: created.id, error })
+              }
 
               newTransactionCount++;
             }
@@ -260,20 +272,9 @@ export const transactionRouter = router({
         }
 
         // Verify on blockchain with failover
-        let blockchainTransaction = null;
-        let connection = await createConnection();
-        
-        try {
-          blockchainTransaction = await connection.getTransaction(input.signature, {
-            maxSupportedTransactionVersion: 0,
-          });
-        } catch (error) {
-          logger.warn('Primary RPC failed, trying failover for transaction verification:', error);
-          connection = await createConnection();
-          blockchainTransaction = await connection.getTransaction(input.signature, {
-            maxSupportedTransactionVersion: 0,
-          });
-        }
+        const blockchainTransaction = await rpcManager.withFailover((connection) =>
+          connection.getTransaction(input.signature, { maxSupportedTransactionVersion: 0 })
+        );
 
         if (!blockchainTransaction) {
           return {
@@ -339,7 +340,6 @@ export const transactionRouter = router({
     .mutation(async ({ input, ctx }) => {
       try {
         const results = [];
-        const connection = await createConnection();
 
         for (const signature of input.signatures) {
           try {
@@ -361,9 +361,9 @@ export const transactionRouter = router({
             }
 
             // Verify on blockchain
-            const blockchainTransaction = await connection.getTransaction(signature, {
-              maxSupportedTransactionVersion: 0,
-            });
+            const blockchainTransaction = await rpcManager.withFailover((connection) =>
+              connection.getTransaction(signature, { maxSupportedTransactionVersion: 0 })
+            );
 
             if (!blockchainTransaction) {
               results.push({
@@ -462,8 +462,8 @@ export const transactionRouter = router({
           sent: transactions.filter(tx => tx.type === 'SEND').length,
           received: transactions.filter(tx => tx.type === 'RECEIVE').length,
           swapped: transactions.filter(tx => tx.type === 'SWAP').length,
-          totalVolume: transactions.reduce((sum, tx) => sum + tx.amount, 0),
-          totalFees: transactions.reduce((sum, tx) => sum + tx.fee, 0),
+          totalVolume: transactions.reduce((sum: number, tx: any) => sum + (tx.amount || 0), 0),
+          totalFees: transactions.reduce((sum: number, tx: any) => sum + (tx.fee || 0), 0),
         };
 
         return stats;

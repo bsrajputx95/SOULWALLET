@@ -1,13 +1,15 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
+import { birdeyeData } from '../../lib/services/birdeyeData';
+import { jupiterSwap } from '../../lib/services/jupiterSwap';
 import { marketData } from '../../lib/services/marketData';
-
-const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+import { rpcManager } from '../../lib/services/rpcManager';
+import { getCacheTtls, redisCache } from '../../lib/redis'
 
 // Helper to fetch SPL token balances
 interface TokenBalance {
@@ -18,9 +20,8 @@ interface TokenBalance {
 
 async function getSPLTokenBalances(publicKey: PublicKey): Promise<TokenBalance[]> {
   try {
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-      publicKey,
-      { programId: TOKEN_PROGRAM_ID }
+    const tokenAccounts = await rpcManager.withFailover((connection) =>
+      connection.getParsedTokenAccountsByOwner(publicKey, { programId: TOKEN_PROGRAM_ID })
     );
 
     return tokenAccounts.value
@@ -42,52 +43,95 @@ async function getSPLTokenBalances(publicKey: PublicKey): Promise<TokenBalance[]
 // Helper to get token prices in batch
 async function getTokenPrices(mints: string[]): Promise<Record<string, number>> {
   const prices: Record<string, number> = {};
-  
-  // Check cache first
+  if (mints.length === 0) return prices;
+
+  const uniqueMints = [...new Set(mints)];
+
   const cachedPrices = await prisma.tokenPrice.findMany({
-    where: { tokenMint: { in: mints } },
+    where: { tokenMint: { in: uniqueMints } },
   });
-  
+
+  const cachedByMint = new Map<string, (typeof cachedPrices)[number]>();
+  for (const p of cachedPrices) {
+    cachedByMint.set(p.tokenMint, p);
+  }
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
   const mintsToFetch: string[] = [];
-  
-  for (const mint of mints) {
-    const cached = cachedPrices.find(p => p.tokenMint === mint);
+  for (const mint of uniqueMints) {
+    const cached = cachedByMint.get(mint);
     if (cached && cached.updatedAt > fiveMinutesAgo) {
       prices[mint] = cached.priceUSD;
     } else {
       mintsToFetch.push(mint);
     }
   }
-  
-  // Fetch missing prices from DexScreener
-  for (const mint of mintsToFetch) {
-    try {
-      const tokenData = await marketData.getToken(mint);
-      if (tokenData?.pairs?.[0]?.priceUsd) {
-        const price = parseFloat(tokenData.pairs[0].priceUsd);
+
+  const updateCache = async (tokenMint: string, priceUSD: number, tokenSymbol: string) => {
+    if (!Number.isFinite(priceUSD) || priceUSD <= 0) return;
+    await prisma.tokenPrice.upsert({
+      where: { tokenMint },
+      create: { tokenMint, tokenSymbol, priceUSD },
+      update: { priceUSD, updatedAt: new Date() },
+    }).catch(() => {});
+  };
+
+  let remaining = [...mintsToFetch];
+
+  if (remaining.length > 0) {
+    const jupiterPrices = await jupiterSwap.getPrices(remaining);
+    for (const mint of remaining) {
+      const price = jupiterPrices[mint] || 0;
+      if (price > 0) {
         prices[mint] = price;
-        
-        // Update cache
-        await prisma.tokenPrice.upsert({
-          where: { tokenMint: mint },
-          create: {
-            tokenMint: mint,
-            tokenSymbol: tokenData.pairs[0].baseToken?.symbol || 'UNKNOWN',
-            priceUSD: price,
-          },
-          update: {
-            priceUSD: price,
-            updatedAt: new Date(),
-          },
-        }).catch(() => {}); // Ignore cache update errors
+        void updateCache(mint, price, 'UNKNOWN');
       }
-    } catch (error) {
-      // Skip tokens we can't price
-      logger.debug(`Could not fetch price for ${mint}`);
     }
+    remaining = remaining.filter((m) => !(prices[m] > 0));
   }
-  
+
+  if (remaining.length > 0) {
+    const birdeyePrices = await birdeyeData.getTokenPricesUSD(remaining);
+    for (const mint of remaining) {
+      const price = birdeyePrices[mint] || 0;
+      if (price > 0) {
+        prices[mint] = price;
+        void updateCache(mint, price, 'UNKNOWN');
+      }
+    }
+    remaining = remaining.filter((m) => !(prices[m] > 0));
+  }
+
+  if (remaining.length > 0) {
+    const queue = [...remaining];
+    const concurrency = 5;
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+        while (queue.length > 0) {
+          const mint = queue.shift();
+          if (!mint) break;
+          try {
+            const tokenData = await marketData.getToken(mint);
+            const priceStr = tokenData?.pairs?.[0]?.priceUsd;
+            const price = priceStr ? parseFloat(priceStr) : 0;
+            if (price > 0) {
+              prices[mint] = price;
+              void updateCache(mint, price, tokenData?.pairs?.[0]?.baseToken?.symbol || 'UNKNOWN');
+            }
+          } catch (error) {
+            logger.debug(`Could not fetch price for ${mint}`);
+          }
+        }
+      })
+    );
+    remaining = remaining.filter((m) => !(prices[m] > 0));
+  }
+
+  for (const mint of remaining) {
+    const cached = cachedByMint.get(mint);
+    prices[mint] = cached?.priceUSD || 0;
+  }
+
   return prices;
 }
 
@@ -115,52 +159,18 @@ export const portfolioRouter = router({
         const publicKey = new PublicKey(ctx.user.walletAddress);
         
         // Get SOL balance
-        const solBalance = await connection.getBalance(publicKey);
+        const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
 
         // Get SPL token balances
         const splTokens = await getSPLTokenBalances(publicKey);
 
-        // Get real SOL price from cache or DexScreener
-        let solPrice = 100; // Default fallback price
+        let solPrice = 0;
         const solMint = 'So11111111111111111111111111111111111111112';
-        
+
         try {
-          // Try TokenPrice table first (cached price)
-          const cachedPrice = await prisma.tokenPrice.findUnique({
-            where: { tokenMint: solMint },
-          });
-          
-          const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-          
-          if (cachedPrice && cachedPrice.updatedAt > fiveMinutesAgo) {
-            // Use cached price if less than 5 minutes old
-            solPrice = cachedPrice.priceUSD;
-          } else {
-            // Fetch fresh price from DexScreener
-            try {
-              const tokenData = await marketData.getToken(solMint);
-              if (tokenData?.pairs?.[0]?.priceUsd) {
-                solPrice = parseFloat(tokenData.pairs[0].priceUsd);
-                
-                // Update cache
-                await prisma.tokenPrice.upsert({
-                  where: { tokenMint: solMint },
-                  create: {
-                    tokenMint: solMint,
-                    tokenSymbol: 'SOL',
-                    priceUSD: solPrice,
-                  },
-                  update: { 
-                    priceUSD: solPrice,
-                    updatedAt: new Date(),
-                  },
-                });
-              }
-            } catch (err) {
-              logger.warn('Failed to fetch SOL price from DexScreener, using cached/default', err);
-            }
-          }
+          const solPrices = await getTokenPrices([solMint]);
+          solPrice = solPrices[solMint] || 0;
         } catch (error) {
           logger.warn('Error fetching SOL price, using default', error);
         }
@@ -195,14 +205,26 @@ export const portfolioRouter = router({
         let change24hValue = 0;
         
         try {
-          const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          const oldSnapshot = await prisma.portfolioSnapshot.findFirst({
-            where: {
-              userId: ctx.user.id,
-              timestamp: { gte: oneDayAgo },
-            },
-            orderBy: { timestamp: 'asc' },
-          });
+          const ttls = getCacheTtls()
+          const snapshotCacheKey: `portfolio:snapshot:${string}` = `portfolio:snapshot:${ctx.user.id}`
+          let oldSnapshot = await redisCache.get<{ totalValueUSD: number }>(snapshotCacheKey)
+
+          if (!oldSnapshot) {
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const found = await prisma.portfolioSnapshot.findFirst({
+              where: {
+                userId: ctx.user.id,
+                timestamp: { gte: oneDayAgo },
+              },
+              orderBy: { timestamp: 'asc' },
+              select: { totalValueUSD: true },
+            });
+
+            if (found) {
+              oldSnapshot = { totalValueUSD: found.totalValueUSD }
+              await redisCache.set(snapshotCacheKey, oldSnapshot, ttls.portfolio)
+            }
+          }
 
           if (oldSnapshot && oldSnapshot.totalValueUSD > 0) {
             // Calculate real 24h change
@@ -252,30 +274,15 @@ export const portfolioRouter = router({
         const publicKey = new PublicKey(ctx.user.walletAddress);
         
         // Get current SOL balance
-        const solBalance = await connection.getBalance(publicKey);
+        const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
 
-        // Get real SOL price
-        let solPrice = 100; // Default fallback
+        let solPrice = 0;
         const solMint = 'So11111111111111111111111111111111111111112';
-        
+
         try {
-          const cachedPrice = await prisma.tokenPrice.findUnique({
-            where: { tokenMint: solMint },
-          });
-          
-          if (cachedPrice && (Date.now() - cachedPrice.updatedAt.getTime()) < 300000) {
-            solPrice = cachedPrice.priceUSD;
-          } else {
-            try {
-              const tokenData = await marketData.getToken(solMint);
-              if (tokenData?.pairs?.[0]?.priceUsd) {
-                solPrice = parseFloat(tokenData.pairs[0].priceUsd);
-              }
-            } catch (err) {
-              logger.warn('Using cached/default SOL price for snapshot', err);
-            }
-          }
+          const solPrices = await getTokenPrices([solMint]);
+          solPrice = solPrices[solMint] || 0;
         } catch (error) {
           logger.warn('Error fetching SOL price for snapshot', error);
         }
@@ -296,6 +303,8 @@ export const portfolioRouter = router({
             },
           },
         });
+
+        await redisCache.del(`portfolio:snapshot:${ctx.user.id}`)
 
         return {
           success: true,
@@ -363,7 +372,7 @@ export const portfolioRouter = router({
             const solMint = 'So11111111111111111111111111111111111111112';
             
             // Get SOL balance
-            const solBalance = await connection.getBalance(publicKey);
+            const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
             const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
             
             // Get SPL token balances
@@ -412,6 +421,8 @@ export const portfolioRouter = router({
             });
 
             logger.info(`Created initial portfolio snapshot for user ${ctx.user.id}: $${totalValue.toFixed(2)}`);
+
+            await redisCache.del(`portfolio:snapshot:${ctx.user.id}`)
 
             return {
               snapshots: [newSnapshot],
@@ -536,7 +547,7 @@ export const portfolioRouter = router({
         const solMint = 'So11111111111111111111111111111111111111112';
         
         // Get SOL balance
-        const solBalance = await connection.getBalance(publicKey);
+        const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
 
         // Get SPL token balances
@@ -684,11 +695,12 @@ export const portfolioRouter = router({
         let currentValue = 0;
         if (ctx.user.walletAddress) {
           const publicKey = new PublicKey(ctx.user.walletAddress);
-          const solBalance = await connection.getBalance(publicKey);
+          const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
           const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
           
-          // Use a simple default price for P&L percentage calculation
-          const solPrice = 100; // Can be enhanced to use real price if needed
+          const solMint = 'So11111111111111111111111111111111111111112';
+          const solPrices = await getTokenPrices([solMint]);
+          const solPrice = solPrices[solMint] || 0;
           currentValue = solBalanceFormatted * solPrice;
         }
         

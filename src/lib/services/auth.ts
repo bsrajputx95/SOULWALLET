@@ -2,10 +2,13 @@ import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
 import type { Secret } from 'jsonwebtoken';
-import { OTPType } from '@prisma/client';
+import { OTPType, Role } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../logger';
 import prisma from '../prisma';
+import { getCacheTtls, redisCache, type CacheKey } from '../redis'
+import { createEmailService } from './email'
+import { jwtSecretCache } from './jwtRotation';
 import type {
   SignupInput,
   LoginInput,
@@ -38,37 +41,222 @@ export interface SessionActivityData {
   suspicious?: boolean;
 }
 
+type CachedSession = {
+  id: string
+  userId: string
+  expiresAt: string
+  ipAddress: string | null
+  userAgent: string | null
+}
+
+type CachedUserProfile = {
+  id: string
+  email: string
+  role: Role
+  emailVerifiedAt: string | null
+  walletAddress: string | null
+  walletVerifiedAt: string | null
+  username: string
+  createdAt: string
+}
+
 export class AuthService {
   private static readonly SALT_ROUNDS = 12;
-  private static readonly JWT_SECRETS: string[] = (() => {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      throw new Error('JWT_SECRET environment variable is required');
+  private static sessionKey(sessionId: string): `session:${string}` {
+    return `session:${sessionId}`
+  }
+
+  private static sessionLastActivityKey(sessionId: string): `session:${string}:lastActivityAt` {
+    return `session:${sessionId}:lastActivityAt`
+  }
+
+  private static userSessionsKey(userId: string): `user:${string}:sessions` {
+    return `user:${userId}:sessions`
+  }
+
+  private static userProfileKey(userId: string): `user:${string}:profile` {
+    return `user:${userId}:profile`
+  }
+
+  private static async invalidateUserProfileCache(userId: string): Promise<void> {
+    await redisCache.del(this.userProfileKey(userId))
+  }
+
+  static async invalidateUserCache(userId: string): Promise<void> {
+    await this.invalidateUserProfileCache(userId)
+  }
+
+  private static async invalidateSessionCache(sessionId: string, userId?: string): Promise<void> {
+    await Promise.all([
+      redisCache.del([this.sessionKey(sessionId), this.sessionLastActivityKey(sessionId)]),
+      userId ? redisCache.srem(this.userSessionsKey(userId), sessionId) : Promise.resolve(),
+    ])
+  }
+
+  private static async invalidateSessionsCache(userId: string, sessionIds: string[]): Promise<void> {
+    if (sessionIds.length === 0) return
+    const keys: CacheKey[] = []
+    for (const id of sessionIds) {
+      keys.push(this.sessionKey(id), this.sessionLastActivityKey(id))
     }
-    return secret.split(',').map(s => s.trim());
-  })();
-  private static readonly JWT_REFRESH_SECRETS: string[] = (() => {
-    const secret = process.env.JWT_REFRESH_SECRET;
-    if (!secret) {
-      throw new Error('JWT_REFRESH_SECRET environment variable is required');
+    await Promise.all([
+      redisCache.del(keys),
+      redisCache.srem(this.userSessionsKey(userId), sessionIds),
+    ])
+  }
+
+  private static toCachedSession(session: {
+    id: string
+    userId: string
+    expiresAt: Date
+    ipAddress: string | null
+    userAgent: string | null
+  }): CachedSession {
+    return {
+      id: session.id,
+      userId: session.userId,
+      expiresAt: session.expiresAt.toISOString(),
+      ipAddress: session.ipAddress,
+      userAgent: session.userAgent,
     }
-    return secret.split(',').map(s => s.trim());
-  })();
+  }
+
+  private static toCachedUserProfile(user: {
+    id: string
+    email: string
+    role: Role
+    emailVerifiedAt: Date | null
+    walletAddress: string | null
+    walletVerifiedAt: Date | null
+    username: string
+    createdAt: Date
+  }): CachedUserProfile {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      emailVerifiedAt: user.emailVerifiedAt ? user.emailVerifiedAt.toISOString() : null,
+      walletAddress: user.walletAddress,
+      walletVerifiedAt: user.walletVerifiedAt ? user.walletVerifiedAt.toISOString() : null,
+      username: user.username,
+      createdAt: user.createdAt.toISOString(),
+    }
+  }
+
+  private static fromCachedUserProfile(user: CachedUserProfile) {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      emailVerifiedAt: user.emailVerifiedAt ? new Date(user.emailVerifiedAt) : null,
+      walletAddress: user.walletAddress,
+      walletVerifiedAt: user.walletVerifiedAt ? new Date(user.walletVerifiedAt) : null,
+      username: user.username,
+      createdAt: new Date(user.createdAt),
+    }
+  }
+
+  private static async cacheSessionAndProfile(params: {
+    session: { id: string; userId: string; expiresAt: Date; ipAddress: string | null; userAgent: string | null }
+    user?: { id: string; email: string; role: Role; emailVerifiedAt: Date | null; walletAddress: string | null; walletVerifiedAt: Date | null; username: string; createdAt: Date }
+  }): Promise<void> {
+    const { session, user } = params
+    const ttls = getCacheTtls()
+    const secondsUntilExpiry = Math.floor((session.expiresAt.getTime() - Date.now()) / 1000)
+    const sessionTtl = secondsUntilExpiry > 0 ? Math.min(ttls.session, secondsUntilExpiry) : ttls.session
+
+    await Promise.all([
+      redisCache.set(this.sessionKey(session.id), this.toCachedSession(session), sessionTtl),
+      redisCache.set(this.sessionLastActivityKey(session.id), new Date().toISOString(), sessionTtl),
+      redisCache.sadd(this.userSessionsKey(session.userId), session.id),
+      user ? redisCache.set(this.userProfileKey(session.userId), this.toCachedUserProfile(user), sessionTtl) : Promise.resolve(),
+    ])
+  }
+
+  // JWT secrets are now loaded from jwtSecretCache (Comment 1 fix)
+  // Cache is initialized from environment variables on startup and updated on rotation
+  private static getAccessSecrets(): string[] {
+    return jwtSecretCache.getVerificationSecrets('access');
+  }
+
+  private static getRefreshSecrets(): string[] {
+    return jwtSecretCache.getVerificationSecrets('refresh');
+  }
+
+  private static getSigningSecret(): string {
+    return jwtSecretCache.getSigningSecret('access');
+  }
+
+  private static getRefreshSigningSecret(): string {
+    return jwtSecretCache.getSigningSecret('refresh');
+  }
+
   private static readonly JWT_SECRET_ROTATION_PERIOD_DAYS = parseInt(process.env.JWT_SECRET_ROTATION_PERIOD_DAYS || '90');
   private static readonly JWT_SECRET_OVERLAP_DAYS = parseInt(process.env.JWT_SECRET_OVERLAP_DAYS || '7');
-  private static readonly JWT_EXPIRES_IN: string | number = process.env.JWT_EXPIRES_IN || '1h';
-  private static readonly JWT_REFRESH_EXPIRES_IN: string | number = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
+
+  /**
+   * Parse JWT expiration string to seconds (Audit Issue #20)
+   * Supports formats: '1h', '30m', '7d', '3600', '3600s'
+   * Defaults to 3600 seconds (1 hour) for invalid formats
+   */
+  static parseJwtExpiration(value: string | number): number {
+    if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : 3600;
+
+    const match = value.match(/^(\d+)(h|m|s|d)?$/i);
+    if (!match) return 3600; // default 1 hour
+
+    const num = parseInt(match[1] || '0', 10);
+    const unit = (match[2] || 's').toLowerCase();
+
+    switch (unit) {
+      case 'd': return Number.isFinite(num) && num > 0 ? num * 86400 : 3600;
+      case 'h': return Number.isFinite(num) && num > 0 ? num * 3600 : 3600;
+      case 'm': return Number.isFinite(num) && num > 0 ? num * 60 : 3600;
+      case 's':
+      default: return Number.isFinite(num) && num > 0 ? num : 3600;
+    }
+  }
+
+  private static readonly JWT_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_EXPIRES_IN || '1h');
+  private static readonly JWT_REFRESH_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
   private static readonly OTP_EXPIRES_IN = 10 * 60 * 1000; // 10 minutes in milliseconds
   private static readonly MAX_LOGIN_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5');
   private static readonly ACCOUNT_LOCKOUT_DURATION_MINUTES = parseInt(process.env.ACCOUNT_LOCKOUT_DURATION_MINUTES || '30');
+  private static readonly MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || '2');
+  private static readonly emailService = createEmailService()
+
+  /**
+   * Hash OTP using SHA-256 before storage (Audit Issue #2)
+   * @param otp - Plain text OTP
+   * @returns SHA-256 hash as hex string (64 characters)
+   */
+  static hashOTP(otp: string): string {
+    return crypto.createHash('sha256').update(otp).digest('hex');
+  }
+
+  /**
+   * Verify OTP by comparing hashes (Audit Issue #2)
+   * @param inputOtp - User-provided OTP
+   * @param storedHash - Stored SHA-256 hash
+   * @returns True if OTP matches
+   */
+  static verifyOTPHash(inputOtp: string, storedHash: string): boolean {
+    const inputHash = this.hashOTP(inputOtp);
+    return crypto.timingSafeEqual(
+      Buffer.from(inputHash, 'hex'),
+      Buffer.from(storedHash, 'hex')
+    );
+  }
 
   // Log warnings for rotation status (proxy: warn if multiple secrets indicate ongoing rotation)
-  static {
-    if (this.JWT_SECRETS.length > 1) {
-      logger.warn(`Multiple JWT secrets configured (${this.JWT_SECRETS.length}). Ensure rotation period (${this.JWT_SECRET_ROTATION_PERIOD_DAYS} days) and overlap (${this.JWT_SECRET_OVERLAP_DAYS} days) are managed.`);
+  static logRotationStatus(): void {
+    const accessSecrets = this.getAccessSecrets();
+    const refreshSecrets = this.getRefreshSecrets();
+    if (accessSecrets.length > 1) {
+      logger.warn(`Multiple JWT secrets configured (${accessSecrets.length}). Rotation in progress.`);
     }
-    if (this.JWT_REFRESH_SECRETS.length > 1) {
-      logger.warn(`Multiple JWT refresh secrets configured (${this.JWT_REFRESH_SECRETS.length}). Ensure rotation period (${this.JWT_SECRET_ROTATION_PERIOD_DAYS} days) and overlap (${this.JWT_SECRET_OVERLAP_DAYS} days) are managed.`);
+    if (refreshSecrets.length > 1) {
+      logger.warn(`Multiple JWT refresh secrets configured (${refreshSecrets.length}). Rotation in progress.`);
     }
   }
 
@@ -94,7 +282,7 @@ export class AuthService {
    */
   static getSecretVersion(token: string): number | null {
     try {
-      const { secretIndex } = this.verifyTokenWithSecrets(token, this.JWT_SECRETS);
+      const { secretIndex } = this.verifyTokenWithSecrets(token, this.getAccessSecrets());
       return secretIndex;
     } catch {
       return null;
@@ -167,6 +355,11 @@ export class AuthService {
         });
       }
 
+      await Promise.all([
+        this.invalidateUserProfileCache(user.id),
+        this.invalidateSessionsCache(user.id, sessions.map((s) => s.id)),
+      ])
+
       return { message: 'Password changed successfully' };
     } catch (error) {
       if (error instanceof TRPCError) throw error;
@@ -192,8 +385,8 @@ export class AuthService {
    * Generate JWT access token
    */
   static generateToken(userId: string, sessionId: string): string {
-    const secret = this.JWT_SECRETS[0] as Secret;
-    const options: jwt.SignOptions = { expiresIn: this.JWT_EXPIRES_IN as any };
+    const secret = this.getSigningSecret() as Secret;
+    const options: jwt.SignOptions = { expiresIn: this.JWT_EXPIRES_IN };
     return jwt.sign({ userId, sessionId }, secret, options);
   }
 
@@ -201,8 +394,8 @@ export class AuthService {
    * Generate JWT refresh token
    */
   static generateRefreshToken(userId: string, sessionId: string): string {
-    const secret = this.JWT_REFRESH_SECRETS[0] as Secret;
-    const options: jwt.SignOptions = { expiresIn: this.JWT_REFRESH_EXPIRES_IN as any };
+    const secret = this.getRefreshSigningSecret() as Secret;
+    const options: jwt.SignOptions = { expiresIn: this.JWT_REFRESH_EXPIRES_IN };
     return jwt.sign({ userId, sessionId, type: 'refresh' }, secret, options);
   }
 
@@ -211,7 +404,7 @@ export class AuthService {
    */
   static verifyToken(token: string): { userId: string; sessionId: string } {
     try {
-      const { payload, secretIndex } = this.verifyTokenWithSecrets(token, this.JWT_SECRETS);
+      const { payload, secretIndex } = this.verifyTokenWithSecrets(token, this.getAccessSecrets());
       // Log if using an old secret (for rotation monitoring)
       if (secretIndex > 0) {
         logger.warn(`Access token verified with old secret version ${secretIndex}`, { secretIndex });
@@ -230,7 +423,7 @@ export class AuthService {
    */
   static verifyRefreshToken(token: string): { userId: string; sessionId: string } {
     try {
-      const { payload, secretIndex } = this.verifyTokenWithSecrets(token, this.JWT_REFRESH_SECRETS);
+      const { payload, secretIndex } = this.verifyTokenWithSecrets(token, this.getRefreshSecrets());
       if (payload.type !== 'refresh') {
         throw new Error('Invalid token type');
       }
@@ -361,6 +554,23 @@ export class AuthService {
         });
 
         logger.warn(`Account locked for identifier: ${identifier} from IP: ${ipAddress}`);
+
+        if (process.env.ENABLE_ACCOUNT_LOCKOUT_NOTIFICATIONS === 'true') {
+          const user = await prisma.user.findFirst({
+            where: { OR: [{ email: identifier }, { username: identifier }] },
+            select: { email: true },
+          })
+          if (user?.email) {
+            this.emailService.sendAccountLockoutNotification(
+              user.email,
+              this.ACCOUNT_LOCKOUT_DURATION_MINUTES,
+              failedAttempts,
+              ipAddress
+            ).catch((error) => {
+              logger.error('Failed to send lockout notification:', error)
+            })
+          }
+        }
       }
     } catch (error) {
       logger.error('Failed to check and lock account:', error);
@@ -400,6 +610,13 @@ export class AuthService {
         where: { id: sessionId },
         data: { lastActivityAt: new Date() },
       });
+
+      {
+        const ttls = getCacheTtls()
+        const secondsUntilExpiry = Math.floor((session.expiresAt.getTime() - Date.now()) / 1000)
+        const sessionTtl = secondsUntilExpiry > 0 ? Math.min(ttls.session, secondsUntilExpiry) : ttls.session
+        await redisCache.set(this.sessionLastActivityKey(sessionId), new Date().toISOString(), sessionTtl)
+      }
 
       // Log token refresh activity
       await this.logSessionActivity({
@@ -500,6 +717,16 @@ export class AuthService {
         data: { token },
       });
 
+      await this.cacheSessionAndProfile({
+        session: {
+          id: session.id,
+          userId: user.id,
+          expiresAt: session.expiresAt,
+          ipAddress: session.ipAddress ?? null,
+          userAgent: session.userAgent ?? null,
+        },
+      })
+
       // Log signup activity
       await this.logSessionActivity({
         sessionId: session.id,
@@ -542,13 +769,25 @@ export class AuthService {
     const ipAddress = fingerprint?.ipAddress || 'unknown';
 
     try {
-      // Find user by email or username
+      // Find user by email or username (Audit Issue #10: Select only needed fields)
       const user = await prisma.user.findFirst({
         where: {
           OR: [
             { email: identifier },
             { username: identifier },
           ],
+        },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          password: true,
+          lockedUntil: true,
+          failedLoginAttempts: true,
+          walletAddress: true,
+          walletVerifiedAt: true,
+          isVerified: true,
+          createdAt: true,
         },
       });
 
@@ -624,6 +863,47 @@ export class AuthService {
         },
       });
 
+      // Enforce max concurrent sessions cap (Comment 1 fix)
+      const activeSessions = await prisma.session.findMany({
+        where: { userId: u.id },
+        orderBy: { lastActivityAt: 'asc' },
+        select: { id: true, lastActivityAt: true, ipAddress: true },
+      });
+
+      const sessionsToRevoke = activeSessions.length >= this.MAX_SESSIONS_PER_USER
+        ? activeSessions.slice(0, activeSessions.length - this.MAX_SESSIONS_PER_USER + 1)
+        : [];
+
+      if (sessionsToRevoke.length > 0) {
+        // Delete oldest sessions to make room for new one
+        await prisma.session.deleteMany({
+          where: { id: { in: sessionsToRevoke.map(s => s.id) } },
+        });
+
+        await this.invalidateSessionsCache(u.id, sessionsToRevoke.map((s) => s.id))
+
+        // Log auto-revocations in session activity
+        for (const revokedSession of sessionsToRevoke) {
+          await this.logSessionActivity({
+            sessionId: revokedSession.id,
+            userId: u.id,
+            action: 'SESSION_AUTO_REVOKED',
+            ipAddress: revokedSession.ipAddress || 'unknown',
+            metadata: {
+              reason: 'max_sessions_exceeded',
+              newLoginIp: ipAddress,
+              revokedAt: new Date().toISOString(),
+            },
+          });
+        }
+
+        logger.info('Auto-revoked oldest sessions due to max session limit', {
+          userId: u.id,
+          revokedCount: sessionsToRevoke.length,
+          maxSessions: this.MAX_SESSIONS_PER_USER,
+        });
+      }
+
       // Detect suspicious activity
       const isSuspicious = await this.detectSuspiciousActivity({
         userId: u.id,
@@ -656,6 +936,16 @@ export class AuthService {
         data: { token },
       });
 
+      await this.cacheSessionAndProfile({
+        session: {
+          id: session.id,
+          userId: u.id,
+          expiresAt: session.expiresAt,
+          ipAddress: session.ipAddress ?? null,
+          userAgent: session.userAgent ?? null,
+        },
+      })
+
       // Track successful login attempt
       await this.trackLoginAttempt({
         identifier,
@@ -673,6 +963,42 @@ export class AuthService {
         ...(fingerprint?.userAgent ? { userAgent: fingerprint.userAgent } : {}),
         suspicious: isSuspicious,
       });
+
+      if (process.env.ENABLE_SUSPICIOUS_LOGIN_ALERTS === 'true' && isSuspicious) {
+        this.emailService.sendSuspiciousLoginAlert(
+          u.email,
+          ipAddress,
+          fingerprint?.userAgent || 'Unknown',
+          undefined,
+          new Date()
+        ).catch((error) => {
+          logger.error('Failed to send suspicious login alert:', error)
+        })
+      }
+
+      if (process.env.ENABLE_LOGIN_NOTIFICATIONS === 'true') {
+        this.emailService.sendLoginNotification(
+          u.email,
+          ipAddress,
+          fingerprint?.userAgent || 'Unknown',
+          new Date()
+        ).catch((error) => {
+          logger.error('Failed to send login notification:', error)
+        })
+      }
+
+      // Register device and check if new (Comment 2 fix)
+      if (fingerprint) {
+        const { DeviceService } = await import('./device');
+        const deviceResult = await DeviceService.registerDevice(u.id, fingerprint);
+
+        // Send alert for new untrusted devices
+        if (deviceResult.isNewDevice && !deviceResult.isTrusted) {
+          DeviceService.sendNewDeviceAlert(u.id, deviceResult.deviceId, fingerprint).catch((error) => {
+            logger.error('Failed to send new device alert:', error);
+          });
+        }
+      }
 
       return {
         user: {
@@ -728,11 +1054,14 @@ export class AuthService {
       const otp = this.generateOTP();
       const expiresAt = new Date(Date.now() + this.OTP_EXPIRES_IN);
 
-      // Save OTP
+      // Hash OTP before storage (Audit Issue #2)
+      const hashedOtp = this.hashOTP(otp);
+
+      // Save hashed OTP
       await prisma.oTP.create({
         data: {
           email: input.email.toLowerCase(),
-          code: otp,
+          code: hashedOtp, // Store hash, not plain text
           type: OTPType.RESET_PASSWORD,
           expiresAt,
         },
@@ -753,18 +1082,21 @@ export class AuthService {
   }
 
   /**
-   * Verify OTP
+   * Verify OTP (Audit Issue #2: Compare hashes)
    * Note: This marks the OTP as verified but not fully used.
    * The OTP can still be used for password reset within its expiry window.
    * Full "used" status is set during password reset to prevent replay attacks.
    */
   static async verifyOTP(input: VerifyOtpInput) {
     try {
-      // Find valid OTP
+      // Hash input OTP for comparison (Audit Issue #2)
+      const hashedInput = this.hashOTP(input.otp);
+
+      // Find valid OTP by hash
       const otpRecord = await prisma.oTP.findFirst({
         where: {
           email: input.email.toLowerCase(),
-          code: input.otp,
+          code: hashedInput, // Compare hashes
           type: OTPType.RESET_PASSWORD,
           expiresAt: { gt: new Date() },
           used: false,
@@ -805,15 +1137,18 @@ export class AuthService {
   }
 
   /**
-   * Reset password with activity logging
+   * Reset password with activity logging (Audit Issue #2: Compare hashes)
    */
   static async resetPassword(input: ResetPasswordInput) {
     try {
-      // Find and verify OTP
+      // Hash input OTP for comparison (Audit Issue #2)
+      const hashedInput = this.hashOTP(input.otp);
+
+      // Find and verify OTP by hash
       const otpRecord = await prisma.oTP.findFirst({
         where: {
           email: input.email.toLowerCase(),
-          code: input.otp,
+          code: hashedInput, // Compare hashes
           type: OTPType.RESET_PASSWORD,
           expiresAt: { gt: new Date() },
           used: false,
@@ -879,6 +1214,11 @@ export class AuthService {
         });
       }
 
+      await Promise.all([
+        this.invalidateUserProfileCache(user.id),
+        this.invalidateSessionsCache(user.id, userSessions.map((s) => s.id)),
+      ])
+
       return {
         message: 'Password reset successfully',
       };
@@ -898,7 +1238,56 @@ export class AuthService {
    */
   static async getCurrentUser(userId: string, sessionId: string) {
     try {
-      // Verify session
+      const cachedSession = await redisCache.get<CachedSession>(this.sessionKey(sessionId))
+      if (cachedSession && cachedSession.userId === userId) {
+        const expiresAt = new Date(cachedSession.expiresAt)
+        if (Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() > Date.now()) {
+          const cachedProfile = await redisCache.get<CachedUserProfile>(this.userProfileKey(userId))
+          const ttls = getCacheTtls()
+          const secondsUntilExpiry = Math.floor((expiresAt.getTime() - Date.now()) / 1000)
+          const sessionTtl = secondsUntilExpiry > 0 ? Math.min(ttls.session, secondsUntilExpiry) : ttls.session
+          await redisCache.set(this.sessionLastActivityKey(sessionId), new Date().toISOString(), sessionTtl)
+
+          if (cachedProfile) {
+            return this.fromCachedUserProfile(cachedProfile)
+          }
+
+          const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+              id: true,
+              email: true,
+              role: true,
+              emailVerifiedAt: true,
+              walletAddress: true,
+              walletVerifiedAt: true,
+              username: true,
+              createdAt: true,
+            },
+          })
+
+          if (!user) {
+            throw new TRPCError({
+              code: 'UNAUTHORIZED',
+              message: 'Invalid or expired session',
+            })
+          }
+
+          await this.cacheSessionAndProfile({
+            session: {
+              id: sessionId,
+              userId,
+              expiresAt,
+              ipAddress: cachedSession.ipAddress,
+              userAgent: cachedSession.userAgent,
+            },
+            user,
+          })
+
+          return user
+        }
+      }
+
       const session = await prisma.session.findFirst({
         where: {
           id: sessionId,
@@ -910,27 +1299,41 @@ export class AuthService {
             select: {
               id: true,
               email: true,
+              role: true,
+              emailVerifiedAt: true,
               walletAddress: true,
+              walletVerifiedAt: true,
+              username: true,
               createdAt: true,
             },
           },
         },
-      });
+      })
 
       if (!session) {
         throw new TRPCError({
           code: 'UNAUTHORIZED',
           message: 'Invalid or expired session',
-        });
+        })
       }
 
-      // Update last activity
       await prisma.session.update({
         where: { id: sessionId },
         data: { lastActivityAt: new Date() },
-      });
+      })
 
-      return session.user;
+      await this.cacheSessionAndProfile({
+        session: {
+          id: session.id,
+          userId: session.userId,
+          expiresAt: session.expiresAt,
+          ipAddress: session.ipAddress ?? null,
+          userAgent: session.userAgent ?? null,
+        },
+        user: session.user,
+      })
+
+      return session.user
     } catch (error) {
       if (error instanceof TRPCError) {
         throw error;
@@ -956,6 +1359,8 @@ export class AuthService {
       await prisma.session.delete({
         where: { id: sessionId },
       });
+
+      await this.invalidateSessionCache(sessionId, session?.userId)
 
       // Log logout activity if session existed
       if (session) {

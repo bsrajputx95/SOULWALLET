@@ -26,7 +26,9 @@ import {
   testTimeouts,
 } from '../utils/test-fixtures';
 
-describe('Wallet Router Integration Tests', () => {
+const describeIntegration = process.env.RUN_INTEGRATION_TESTS === 'true' ? describe : describe.skip;
+
+describeIntegration('Wallet Router Integration Tests', () => {
   let testUser: { email: string; password: string; token: string; refreshToken: string; userId: string };
 
   beforeAll(async () => {

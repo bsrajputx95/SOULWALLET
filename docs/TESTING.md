@@ -7,13 +7,13 @@ Comprehensive guide for testing the SoulWallet application.
 SoulWallet uses a multi-layered testing approach:
 - **Unit Tests**: Test individual functions and components in isolation
 - **Integration Tests**: Test API endpoints and service interactions
-- **End-to-End Tests**: Test complete user flows (future)
+- **End-to-End Tests**: Test complete user flows with Detox (Android)
 
 ### Coverage Goals
-- Lines: 85%
-- Branches: 80%
-- Functions: 85%
-- Statements: 85%
+- Lines: 90%
+- Branches: 90%
+- Functions: 90%
+- Statements: 90%
 
 ## Setup
 

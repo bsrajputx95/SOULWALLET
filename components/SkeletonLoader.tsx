@@ -118,6 +118,81 @@ export const QuickActionsSkeleton: React.FC = () => (
   </View>
 );
 
+// Skeleton for Portfolio Screen
+export const PortfolioSkeleton: React.FC = () => (
+  <View style={styles.portfolioSkeleton}>
+    {/* Balance Card Skeleton */}
+    <View style={styles.balanceCardSkeleton}>
+      <SkeletonLoader width={100} height={14} />
+      <SkeletonLoader width={180} height={32} style={{ marginTop: SPACING.s }} />
+      <SkeletonLoader width={120} height={16} style={{ marginTop: SPACING.xs }} />
+    </View>
+
+    {/* Tabs Skeleton */}
+    <View style={styles.tabsSkeleton}>
+      <SkeletonLoader width={80} height={32} borderRadius={BORDER_RADIUS.small} />
+      <SkeletonLoader width={80} height={32} borderRadius={BORDER_RADIUS.small} />
+      <SkeletonLoader width={80} height={32} borderRadius={BORDER_RADIUS.small} />
+    </View>
+
+    {/* Token List Skeleton */}
+    {[1, 2, 3, 4].map((i) => (
+      <TokenCardSkeleton key={i} />
+    ))}
+  </View>
+);
+
+// Skeleton for Market Screen
+export const MarketSkeleton: React.FC = () => (
+  <View style={styles.marketSkeleton}>
+    {/* Search Bar Skeleton */}
+    <SkeletonLoader width="100%" height={44} borderRadius={BORDER_RADIUS.medium} />
+
+    {/* Category Tabs */}
+    <View style={styles.categoryTabsSkeleton}>
+      {[1, 2, 3, 4].map((i) => (
+        <SkeletonLoader key={i} width={70} height={28} borderRadius={BORDER_RADIUS.small} />
+      ))}
+    </View>
+
+    {/* Token List */}
+    {[1, 2, 3, 4, 5].map((i) => (
+      <TokenCardSkeleton key={i} />
+    ))}
+  </View>
+);
+
+// Skeleton for Swap Screen
+export const SwapSkeleton: React.FC = () => (
+  <View style={styles.swapSkeleton}>
+    {/* From Token */}
+    <View style={styles.swapTokenSkeleton}>
+      <SkeletonLoader width={100} height={14} />
+      <View style={styles.swapTokenRow}>
+        <SkeletonLoader width={40} height={40} borderRadius={20} />
+        <SkeletonLoader width={120} height={28} style={{ marginLeft: SPACING.m }} />
+      </View>
+    </View>
+
+    {/* Swap Arrow */}
+    <View style={styles.swapArrowSkeleton}>
+      <SkeletonLoader width={40} height={40} borderRadius={20} />
+    </View>
+
+    {/* To Token */}
+    <View style={styles.swapTokenSkeleton}>
+      <SkeletonLoader width={100} height={14} />
+      <View style={styles.swapTokenRow}>
+        <SkeletonLoader width={40} height={40} borderRadius={20} />
+        <SkeletonLoader width={120} height={28} style={{ marginLeft: SPACING.m }} />
+      </View>
+    </View>
+
+    {/* Button */}
+    <SkeletonLoader width="100%" height={50} borderRadius={BORDER_RADIUS.medium} style={{ marginTop: SPACING.l }} />
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.cardBackground,
@@ -170,5 +245,50 @@ const styles = StyleSheet.create({
   },
   quickAction: {
     alignItems: 'center',
+  },
+  // Portfolio Skeleton styles
+  portfolioSkeleton: {
+    padding: SPACING.m,
+  },
+  balanceCardSkeleton: {
+    padding: SPACING.m,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    marginBottom: SPACING.m,
+  },
+  tabsSkeleton: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: SPACING.m,
+  },
+  // Market Skeleton styles
+  marketSkeleton: {
+    padding: SPACING.m,
+  },
+  categoryTabsSkeleton: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: SPACING.s,
+    marginTop: SPACING.m,
+    marginBottom: SPACING.m,
+  },
+  // Swap Skeleton styles
+  swapSkeleton: {
+    padding: SPACING.m,
+  },
+  swapTokenSkeleton: {
+    padding: SPACING.m,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    marginBottom: SPACING.s,
+  },
+  swapTokenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.s,
+  },
+  swapArrowSkeleton: {
+    alignItems: 'center',
+    marginVertical: SPACING.s,
   },
 });

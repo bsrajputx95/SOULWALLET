@@ -13,6 +13,7 @@ import {
   Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Search, X, Settings, Plus } from 'lucide-react-native';
 
 import { COLORS } from '../../constants/colors';
@@ -24,10 +25,13 @@ import { parseFilterValue } from '../../types/market-filters';
 import { TokenCard } from '../../components/TokenCard';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
+import { QueueStatusBanner } from '../../components/QueueStatusBanner';
+import { MarketSkeleton } from '../../components/SkeletonLoader';
 
 type MarketTab = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
 
 export default function MarketScreen() {
+  const router = useRouter();
   const { width } = useWindowDimensions();
   const {
     tokens,
@@ -71,6 +75,18 @@ export default function MarketScreen() {
   const [min24hBuys, setMin24hBuys] = useState('');
   const [min24hSells, setMin24hSells] = useState('');
   const [min24hVolume, setMin24hVolume] = useState('');
+
+  // Loading state for skeleton - only show on initial cold start
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  // Set initial load to false once we have data
+  React.useEffect(() => {
+    if (tokens.length > 0) {
+      setIsInitialLoad(false);
+    }
+    const timer = setTimeout(() => setIsInitialLoad(false), 3000);
+    return () => clearTimeout(timer);
+  }, [tokens.length]);
 
   // Header animation constants and state
   const HEADER_HEIGHT = 100; // Optimized height for both header and tabs
@@ -143,11 +159,14 @@ export default function MarketScreen() {
       case 'soulmarket':
         return (
           <View style={styles.tabContent}>
+            {/* Queue Status Banner for transaction monitoring */}
+            <QueueStatusBanner onRetry={() => refetch()} />
+
             {/* Loading State */}
             {isLoading && tokens.length === 0 && (
               <View style={styles.loadingContainer}>
                 <Text style={styles.loadingText}>Loading SoulMarket tokens...</Text>
-                <Text style={styles.loadingSubtext}>Filtering quality pairs with 100k+ liquidity</Text>
+                <Text style={styles.loadingSubtext}>Filtering quality pairs with $250k+ liquidity</Text>
               </View>
             )}
 
@@ -172,20 +191,38 @@ export default function MarketScreen() {
               </Text>
             )}
 
-            {/* Tokens List */}
-            {visibleTokens.map(token => (
-              <TokenCard
-                key={token.id}
-                symbol={token.symbol}
-                name={token.name}
-                price={token.price}
-                change={token.change24h}
-                {...(token.liquidity !== undefined ? { liquidity: token.liquidity } : {})}
-                {...(token.volume !== undefined ? { volume: token.volume } : {})}
-                {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
-                {...(token.logo ? { logo: token.logo } : {})}
-              />
-            ))}
+            {/* Skeleton during initial load */}
+            {isInitialLoad && tokens.length === 0 ? (
+              <MarketSkeleton />
+            ) : (
+              <>
+                {/* Tokens List */}
+                {visibleTokens.map(token => (
+                  <TokenCard
+                    key={token.id}
+                    symbol={token.symbol}
+                    name={token.name}
+                    price={token.price}
+                    change={token.change24h}
+                    {...(token.liquidity !== undefined ? { liquidity: token.liquidity } : {})}
+                    {...(token.volume !== undefined ? { volume: token.volume } : {})}
+                    {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
+                    {...(token.logo ? { logo: token.logo } : {})}
+                    onPress={() => {
+                      // Navigate to swap with token pre-filled as the "to" token
+                      router.push({
+                        pathname: '/swap',
+                        params: {
+                          toSymbol: token.symbol,
+                          tokenName: token.name,
+                          tokenLogo: token.logo || '',
+                        }
+                      });
+                    }}
+                  />
+                ))}
+              </>
+            )}
 
             {/* Load More Button */}
             {hasMore && (
@@ -427,6 +464,51 @@ export default function MarketScreen() {
             <Pressable
               style={[
                 styles.filterChip,
+                activeFilters.includes('buysRatio') && styles.activeFilterChip,
+              ]}
+              onPress={() => toggleFilter('buysRatio')}
+            >
+              <Text style={[
+                styles.filterChipText,
+                activeFilters.includes('buysRatio') && styles.activeFilterChipText,
+              ]}>
+                Buys {'>'}60%
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.filterChip,
+                activeFilters.includes('txns') && styles.activeFilterChip,
+              ]}
+              onPress={() => toggleFilter('txns')}
+            >
+              <Text style={[
+                styles.filterChipText,
+                activeFilters.includes('txns') && styles.activeFilterChipText,
+              ]}>
+                Txns {'>'}500
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.filterChip,
+                activeFilters.includes('priceChange') && styles.activeFilterChip,
+              ]}
+              onPress={() => toggleFilter('priceChange')}
+            >
+              <Text style={[
+                styles.filterChipText,
+                activeFilters.includes('priceChange') && styles.activeFilterChipText,
+              ]}>
+                Change {'>'}5%
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.filterChip,
                 activeFilters.includes('change') && styles.activeFilterChip,
               ]}
               onPress={() => toggleFilter('change')}
@@ -435,7 +517,7 @@ export default function MarketScreen() {
                 styles.filterChipText,
                 activeFilters.includes('change') && styles.activeFilterChipText,
               ]}>
-                24h Change {'>'}0%
+                24h Gainers
               </Text>
             </Pressable>
 

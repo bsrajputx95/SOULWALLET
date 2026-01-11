@@ -1,0 +1,7 @@
+{
+  "description": "ISO 3166-1 alpha-2 country codes blocked for compliance",
+  "sources": ["OFAC SDN List", "FATF High-Risk Jurisdictions"],
+  "lastUpdated": "2026-01-06",
+  "reviewFrequency": "Quarterly"
+}
+

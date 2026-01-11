@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -22,7 +22,8 @@ import { logger } from '../lib/client-logger';
 import { trpc } from '../lib/trpc';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 
-// USDC mint address on Solana
+// Mint addresses on Solana
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 interface Token {
@@ -32,6 +33,7 @@ interface Token {
   value: number;
   change24h: number;
   address: string;
+  postId?: string; // Required for Buy More
 }
 
 interface TokenBagModalProps {
@@ -49,7 +51,9 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [buyAmount, setBuyAmount] = useState<string>('');
   const [slippage, setSlippage] = useState<number>(0.5);
+  const [inputCurrency, setInputCurrency] = useState<'SOL' | 'USDC'>('SOL');
   const [isSelling, setIsSelling] = useState(false);
+  const [buyingToken, setBuyingToken] = useState<string | null>(null);
   const [tokenPrices, setTokenPrices] = useState<Map<string, number>>(new Map());
   const [pricesLoading, setPricesLoading] = useState(false);
 
@@ -68,24 +72,17 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   });
 
   // Sell iBuy token mutation
-  const sellMutation = trpc.social.sellIBuyToken.useMutation({
-    onSuccess: (data) => {
-      purchasesQuery.refetch();
-      // Show success message with profit info
-      const profitText = data.profit >= 0 ? `+$${data.profit.toFixed(2)}` : `-$${Math.abs(data.profit).toFixed(2)}`;
-      const feeText = data.creatorFee > 0 ? `\n5% creator fee: $${data.creatorFee.toFixed(2)} → @${data.creatorUsername}` : '';
-      Alert.alert('Sold!', `${profitText}${feeText}`);
-    },
-    onError: (error: any) => {
-      Alert.alert('Sell Failed', error.message);
-    },
-  });
+  const sellMutation = trpc.social.sellIBuyToken.useMutation();
+
+  // Buy iBuy token mutation (for Buy More)
+  const ibuyMutation = trpc.social.ibuyToken.useMutation();
 
   // Load settings when query completes
   useEffect(() => {
     if (settingsQuery.data) {
       setBuyAmount(settingsQuery.data.buyAmount.toString());
       setSlippage(settingsQuery.data.slippage);
+      setInputCurrency(settingsQuery.data.inputCurrency || 'SOL');
     }
   }, [settingsQuery.data]);
 
@@ -94,6 +91,24 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     if (!purchasesQuery.data) return [];
     return purchasesQuery.data.filter((p: any) => p.status === 'OPEN');
   }, [purchasesQuery.data]);
+
+  const openMints = React.useMemo(() => {
+    if (openPurchases.length === 0) return [];
+    return Array.from(new Set(openPurchases.map((p: any) => String(p.tokenMint))));
+  }, [openPurchases]);
+
+  const metadataQuery = trpc.wallet.getTokenMetadata.useQuery(
+    { mints: openMints },
+    { enabled: visible && openMints.length > 0 }
+  );
+
+  const metadataMap = React.useMemo(() => {
+    const entries = metadataQuery.data?.metadata ?? [];
+    return entries.reduce((acc, meta: any) => {
+      acc[String(meta.mint)] = meta;
+      return acc;
+    }, {} as Record<string, any>);
+  }, [metadataQuery.data]);
 
   // Fetch token prices from Jupiter
   const fetchTokenPrices = React.useCallback(async (mints: string[]) => {
@@ -122,11 +137,10 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
   // Fetch prices when modal opens
   useEffect(() => {
-    if (visible && openPurchases.length > 0) {
-      const mints = [...new Set(openPurchases.map((p: any) => p.tokenMint))];
-      fetchTokenPrices(mints);
+    if (visible && openMints.length > 0) {
+      void fetchTokenPrices(openMints);
     }
-  }, [visible, openPurchases.length]);
+  }, [visible, openMints, fetchTokenPrices]);
 
   // Transform purchases to Token format for display with P&L
   const ibuyTokens: Token[] = React.useMemo(() => {
@@ -134,18 +148,21 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
     // Group purchases by token and sum amounts
     const tokenMap = new Map<string, Token>();
-    purchasesQuery.data.forEach((p: { tokenMint: string; tokenSymbol?: string | null; tokenName?: string | null; amountBought: number; priceInUsdc: number; status: string }) => {
+    purchasesQuery.data.forEach((p: { tokenMint: string; tokenSymbol?: string | null; tokenName?: string | null; amountBought: number; amountRemaining?: number; priceInUsdc: number; status: string }) => {
       if (p.status !== 'OPEN') return; // Only show unsold
+      const remaining = p.amountRemaining && p.amountRemaining > 0 ? p.amountRemaining : p.amountBought;
+      const remainingCostBasis = p.amountBought > 0 ? p.priceInUsdc * (remaining / p.amountBought) : 0;
       const existing = tokenMap.get(p.tokenMint);
       if (existing) {
-        existing.balance += p.amountBought;
-        existing.value += p.priceInUsdc; // Total cost basis
+        existing.balance += remaining;
+        existing.value += remainingCostBasis;
       } else {
+        const meta = metadataMap[p.tokenMint];
         tokenMap.set(p.tokenMint, {
-          symbol: p.tokenSymbol || p.tokenMint.slice(0, 6),
-          name: p.tokenName || 'Unknown Token',
-          balance: p.amountBought,
-          value: p.priceInUsdc, // Cost basis
+          symbol: p.tokenSymbol || meta?.symbol || p.tokenMint.slice(0, 6),
+          name: p.tokenName || meta?.name || 'Unknown Token',
+          balance: remaining,
+          value: remainingCostBasis,
           change24h: 0, // Will be calculated below
           address: p.tokenMint,
         });
@@ -165,13 +182,14 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     });
 
     return tokens;
-  }, [purchasesQuery.data, tokenPrices]);
+  }, [purchasesQuery.data, tokenPrices, metadataMap]);
 
   const applySettings = async () => {
     try {
       await updateSettingsMutation.mutateAsync({
         buyAmount: parseFloat(buyAmount) || 10,
         slippage: slippage,
+        inputCurrency: inputCurrency,
       });
       setShowSettings(false);
     } catch (error) {
@@ -187,17 +205,29 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     }
 
     // Find all open purchases for this token
-    const tokenPurchases = openPurchases.filter((p: any) => p.tokenMint === token.address);
+    const tokenPurchases = openPurchases
+      .filter((p: any) => p.tokenMint === token.address)
+      .slice()
+      .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     if (tokenPurchases.length === 0) {
       Alert.alert('No Position', 'No open positions to sell.');
       return;
     }
 
-    // Calculate total holdings and sell amount
-    const totalBalance = tokenPurchases.reduce((sum: number, p: any) => sum + p.amountBought, 0);
-    const totalSellAmount = Math.floor(totalBalance * (percentage / 100));
+    const decimals = Number(metadataMap[token.address]?.decimals ?? 0);
+    const factor = Math.pow(10, decimals);
+    const toRaw = (ui: number) => Math.max(0, Math.floor(ui * factor));
+    const toUi = (raw: number) => raw / factor;
 
-    if (totalSellAmount <= 0) {
+    const lots = tokenPurchases.map((p: any) => {
+      const remaining = p.amountRemaining && p.amountRemaining > 0 ? p.amountRemaining : p.amountBought;
+      return { ...p, remaining };
+    });
+
+    const totalBalanceRaw = lots.reduce((sum: number, p: any) => sum + toRaw(p.remaining), 0);
+    const totalSellRaw = Math.floor(totalBalanceRaw * (percentage / 100));
+
+    if (totalSellRaw <= 0) {
       Alert.alert('Invalid Amount', 'Sell amount too small.');
       return;
     }
@@ -205,11 +235,28 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     setIsSelling(true);
 
     try {
+      let remainingToSellRaw = totalSellRaw;
+      const sellPlan: Array<{ purchase: any; sellRaw: number; sellUi: number }> = [];
+      for (const purchase of lots) {
+        if (remainingToSellRaw <= 0) break;
+        const availableRaw = toRaw(purchase.remaining);
+        if (availableRaw <= 0) continue;
+        const sellRaw = Math.min(availableRaw, remainingToSellRaw);
+        if (sellRaw <= 0) continue;
+        sellPlan.push({ purchase, sellRaw, sellUi: toUi(sellRaw) });
+        remainingToSellRaw -= sellRaw;
+      }
+
+      if (sellPlan.length === 0) {
+        Alert.alert('Invalid Amount', 'Sell amount too small.');
+        return;
+      }
+
       // Execute single swap for the total sell amount
       const result = await executeSwap({
         inputMint: token.address,
         outputMint: USDC_MINT,
-        amount: totalSellAmount,
+        amount: sellPlan.reduce((sum, p) => sum + p.sellRaw, 0),
         slippageBps: Math.round(slippage * 100),
       });
 
@@ -217,36 +264,50 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
         throw new Error('Swap failed - no transaction signature');
       }
 
-      // Calculate total cost basis for this sell
-      const totalCostBasis = tokenPurchases.reduce((sum: number, p: any) => sum + p.priceInUsdc, 0);
-      const sellProportionCost = (totalCostBasis * percentage) / 100;
+      const totalSoldRaw = sellPlan.reduce((sum, p) => sum + p.sellRaw, 0);
+      const estimatedCostBasisSold = sellPlan.reduce((sum, p) => {
+        const amountBought = Number(p.purchase.amountBought || 0);
+        const costBasis = Number(p.purchase.priceInUsdc || 0);
+        if (amountBought <= 0) return sum;
+        return sum + costBasis * (p.sellUi / amountBought);
+      }, 0);
 
       // Use actual USDC received from swap, or fallback to cost basis estimate
-      const sellAmountUsdc = result.outputAmount ?? sellProportionCost;
+      const sellAmountUsdc = result.outputAmount ?? estimatedCostBasisSold;
 
-      // For 100% sells, close ALL positions; otherwise close the largest one
-      // (In production you'd update partial amounts, but this simplifies the logic)
-      if (percentage === 100) {
-        // Sell all positions
-        for (const purchase of tokenPurchases) {
-          const proportion = purchase.amountBought / totalBalance;
-          sellMutation.mutate({
+      const results = await Promise.allSettled(
+        sellPlan.map(({ purchase, sellRaw, sellUi }) => {
+          const share = totalSoldRaw > 0 ? sellRaw / totalSoldRaw : 0;
+          return sellMutation.mutateAsync({
             purchaseId: purchase.id,
-            sellAmountUsdc: sellAmountUsdc * proportion,
+            sellAmountUsdc: sellAmountUsdc * share,
             sellTxSig: result.signature,
+            amountSoldTokens: sellUi,
           });
-        }
-      } else {
-        // Sell from first (oldest) position
-        const purchase = tokenPurchases[0];
-        if (purchase) {
-          sellMutation.mutate({
-            purchaseId: purchase.id,
-            sellAmountUsdc,
-            sellTxSig: result.signature,
-          });
-        }
+        })
+      );
+
+      const succeeded = results
+        .map((r) => (r.status === 'fulfilled' ? r.value : null))
+        .filter(Boolean) as Array<{ profit: number; creatorFee: number; creatorUsername: string }>;
+
+      await purchasesQuery.refetch();
+
+      if (succeeded.length === 0) {
+        throw new Error('Failed to record sell');
       }
+
+      const totalProfit = succeeded.reduce((sum, r) => sum + (r.profit || 0), 0);
+      const totalCreatorFee = succeeded.reduce((sum, r) => sum + (r.creatorFee || 0), 0);
+      const creatorUsernames = Array.from(new Set(succeeded.map((r) => r.creatorUsername).filter(Boolean)));
+      const profitText = totalProfit >= 0 ? `+$${totalProfit.toFixed(2)}` : `-$${Math.abs(totalProfit).toFixed(2)}`;
+      const feeText =
+        totalCreatorFee > 0
+          ? creatorUsernames.length === 1
+            ? `\n5% creator fee: $${totalCreatorFee.toFixed(2)} â†’ @${creatorUsernames[0]}`
+            : `\nCreator fees: $${totalCreatorFee.toFixed(2)}`
+          : '';
+      Alert.alert('Sold!', `${profitText}${feeText}`);
     } catch (error: any) {
       logger.error('Sell swap failed:', error);
       Alert.alert('Swap Failed', error.message || 'Failed to execute sell swap');
@@ -255,11 +316,45 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     }
   };
 
-  const handleBuyMore = (token: Token) => {
-    // In a real app, this would navigate to buy screen
-    logger.debug(
-      `Buying more ${token.symbol} with amount ${buyAmount || '(unset)'} USDC and slippage ${slippage}%`
-    );
+  const handleBuyMore = async (token: Token) => {
+    if (!publicKey) {
+      Alert.alert('Wallet Not Connected', 'Please connect your wallet first.');
+      return;
+    }
+
+    // Find any open purchase for this token to get postId
+    const existingPurchase = openPurchases.find((p: any) => p.tokenMint === token.address);
+    if (!existingPurchase?.postId) {
+      Alert.alert('No Post', 'Cannot find originating post for this token.');
+      return;
+    }
+
+    setBuyingToken(token.address);
+    try {
+      logger.info(`[iBuy] Buying more ${token.symbol} with ${inputCurrency}...`);
+
+      // Use the selected input currency
+      const inputMint = inputCurrency === 'USDC' ? USDC_MINT : SOL_MINT;
+
+      const result = await ibuyMutation.mutateAsync({
+        postId: existingPurchase.postId,
+        tokenMint: token.address,
+        inputMint: inputMint,
+      });
+
+      if (result.success) {
+        await purchasesQuery.refetch();
+        Alert.alert(
+          'Success!',
+          `Bought ${status.result.tokensReceived?.toFixed(4) || 'some'} ${token.symbol} for $${result.amountUsd || buyAmount} ${inputCurrency}`
+        );
+      }
+    } catch (error: any) {
+      logger.error('[iBuy] Buy More failed:', error);
+      Alert.alert('Buy Failed', error.message || 'Failed to execute buy');
+    } finally {
+      setBuyingToken(null);
+    }
   };
 
   const formatNumber = (num: number) => {
@@ -357,6 +452,44 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                               setSlippage(0.5);
                             }
                           }}
+                        />
+                      </View>
+                    </View>
+
+                    {/* Quick-buy preset buttons */}
+                    <View style={styles.settingsRow}>
+                      <Text style={styles.inputLabel}>Quick Amount (USDC)</Text>
+                      <View style={styles.presetsRow}>
+                        {[10, 25, 50, 100].map((amount) => (
+                          <NeonButton
+                            key={amount}
+                            title={`$${amount}`}
+                            variant={buyAmount === String(amount) ? 'primary' : 'outline'}
+                            size="small"
+                            style={styles.presetButton}
+                            onPress={() => setBuyAmount(String(amount))}
+                          />
+                        ))}
+                      </View>
+                    </View>
+
+                    {/* SOL/USDC Input Currency Toggle */}
+                    <View style={styles.settingsRow}>
+                      <Text style={styles.inputLabel}>Input Currency</Text>
+                      <View style={styles.presetsRow}>
+                        <NeonButton
+                          title="SOL"
+                          variant={inputCurrency === 'SOL' ? 'primary' : 'outline'}
+                          size="small"
+                          style={styles.presetButton}
+                          onPress={() => setInputCurrency('SOL')}
+                        />
+                        <NeonButton
+                          title="USDC"
+                          variant={inputCurrency === 'USDC' ? 'primary' : 'outline'}
+                          size="small"
+                          style={styles.presetButton}
+                          onPress={() => setInputCurrency('USDC')}
                         />
                       </View>
                     </View>
@@ -461,12 +594,13 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
                     {/* Buy More Button */}
                     <NeonButton
-                      title="Buy More"
+                      title={buyingToken === token.address ? "Buying..." : "Buy More"}
                       variant="primary"
                       size="medium"
                       fullWidth
                       style={styles.buyMoreButton}
                       onPress={() => handleBuyMore(token)}
+                      disabled={!!buyingToken}
                     />
                   </NeonCard>
                 );
@@ -686,6 +820,14 @@ const styles = StyleSheet.create({
   },
   buyMoreButton: {
     marginTop: SPACING.s,
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  presetButton: {
+    flex: 1,
   },
   applyButton: {
     marginTop: SPACING.s,

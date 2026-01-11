@@ -1,5 +1,5 @@
-import NodeCache from 'node-cache';
 import { logger } from '../lib/logger';
+import { getCacheTtls, redisCache } from '../lib/redis'
 
 interface TokenMetadata {
     symbol: string;
@@ -8,18 +8,14 @@ interface TokenMetadata {
     logoURI?: string | undefined;
 }
 
-// Cache token metadata for 1 hour
-const metadataCache = new NodeCache({ stdTTL: 3600 });
-
 /**
  * Fetch token metadata from Jupiter Token List API V2
  */
 export async function getTokenMetadata(tokenMint: string): Promise<TokenMetadata> {
-    // Check cache first
-    const cached = metadataCache.get<TokenMetadata>(tokenMint);
-    if (cached) {
-        return cached;
-    }
+    const ttls = getCacheTtls()
+    const cacheKey: `tokenMetadata:${string}` = `tokenMetadata:${tokenMint}`
+    const cached = await redisCache.get<TokenMetadata>(cacheKey)
+    if (cached) return cached
 
     try {
         // Fetch from Jupiter Token List API V2
@@ -43,8 +39,7 @@ export async function getTokenMetadata(tokenMint: string): Promise<TokenMetadata
                 logoURI: tokenData.icon || undefined,
             };
 
-            // Cache the result
-            metadataCache.set(tokenMint, metadata);
+            await redisCache.set(cacheKey, metadata, ttls.tokenMetadata)
             return metadata;
         }
 
@@ -56,7 +51,7 @@ export async function getTokenMetadata(tokenMint: string): Promise<TokenMetadata
             decimals: 9, // Default Solana decimals
         };
 
-        metadataCache.set(tokenMint, fallback);
+        await redisCache.set(cacheKey, fallback, ttls.tokenMetadata)
         return fallback;
     } catch (error) {
         logger.error('Error fetching token metadata:', error);
@@ -99,5 +94,5 @@ export async function getBatchTokenMetadata(tokenMints: string[]): Promise<Map<s
  * Clear cache (for testing or manual refresh)
  */
 export function clearMetadataCache(): void {
-    metadataCache.flushAll();
+    void redisCache.invalidatePattern('tokenMetadata:*')
 }

@@ -76,8 +76,8 @@ export default function PortfolioTrackingScreen() {
   const createSnapshot = trpc.portfolio.createSnapshot.useMutation({
     onSuccess: () => {
       Alert.alert('Success', 'Portfolio snapshot created successfully');
-      portfolioHistory.refetch();
-      portfolioOverview.refetch();
+      void portfolioHistory.refetch();
+      void portfolioOverview.refetch();
     },
     onError: (error) => {
       Alert.alert('Error', error.message);

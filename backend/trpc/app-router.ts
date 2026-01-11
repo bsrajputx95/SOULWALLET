@@ -1,5 +1,3 @@
-import type {} from '../../hooks/auth-store';
-
 // Social Media Types
 export interface SocialPost {
   id: string;

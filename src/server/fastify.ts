@@ -3,19 +3,34 @@ import Fastify from 'fastify';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
 import crypto from 'crypto';
 import * as Sentry from '@sentry/node';
 import { appRouter, initializeApp, routerConfig, getCleanupService } from './index';
 import { createTRPCContext } from './trpc';
 import { fastifyAuthPlugin } from '../lib/middleware/auth';
 import { fastifyRateLimitPlugin, getRateLimiter } from '../lib/middleware/rateLimit';
-import { disconnectDatabase, checkDatabaseHealth } from '../lib/prisma';
+import { disconnectDatabase, checkDatabaseHealth, getPoolMetrics } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { fastifyRequestIdPlugin } from '../lib/middleware/requestId';
 import { apiLoggingPlugin } from '../lib/middleware/apiLogging';
 import { getRequestId } from '../lib/middleware/requestId';
-import { Connection } from '@solana/web3.js';
+import { geoBlockMiddleware } from '../lib/middleware/geoBlock';
 import Redis from 'ioredis';
+import { collectDefaultMetrics, Gauge, Histogram, Registry } from 'prom-client';
+// Comment 2: Import request size limits for enforcing body size
+import { REQUEST_SIZE_LIMITS } from '../lib/middleware/requestSize';
+// Comment 4: Import AuthorizationService for admin IP whitelisting
+import { AuthorizationService } from '../lib/services/authorization';
+import { rpcManager } from '../lib/services/rpcManager';
+// Comment 1: Import queue manager for request queue limits
+import { queueManager } from '../lib/services/queueManager';
+import { getAllCircuitBreakerSnapshots } from '../lib/services/circuitBreaker';
+import { executionQueue } from '../lib/services/executionQueue';
+import { getCacheMetrics } from '../lib/redis';
+// Business metrics for low-cardinality route normalization and counters
+import { normalizeRoute, getBusinessMetricsRegistry } from '../lib/metrics';
 
 // Initialize Sentry for backend error tracking
 let sentryInitialized = false;
@@ -87,8 +102,22 @@ function generateCsrfToken(): string {
  * Create and configure Fastify server
  */
 export async function createServer(): Promise<FastifyInstance> {
+  // Initialize DI container before anything else (Comment 1: DI Bootstrap)
+  const { setupContainer } = await import('../lib/di/container');
+  setupContainer();
+
   // Initialize Sentry before creating server
   initializeBackendSentry();
+
+  // Initialize configuration from Vault (production) or env vars (development)
+  // This MUST be called before accessing secrets
+  const { initializeConfig, getConfig, checkFeatureFlag } = await import('../lib/config/bootstrap');
+  const appConfig = await initializeConfig();
+
+  logger.info('Configuration initialized', {
+    source: appConfig.secretsSource,
+    maintenanceMode: appConfig.maintenanceMode
+  });
 
   const server = Fastify({
     logger: {
@@ -96,6 +125,135 @@ export async function createServer(): Promise<FastifyInstance> {
     },
     bodyLimit: parseInt(routerConfig.limits.bodySize.replace('mb', '')) * 1024 * 1024,
     trustProxy: true,
+  });
+
+  // Maintenance mode check - block all non-health requests if enabled
+  server.addHook('preHandler', async (request, reply) => {
+    const config = getConfig();
+    if (config.maintenanceMode && !request.url?.startsWith('/health')) {
+      return reply.code(503).send({
+        error: 'Service Unavailable',
+        message: 'System is under maintenance. Please try again later.',
+        maintenanceMode: true,
+      });
+    }
+  });
+
+  // Feature flag middleware - check swap/copy-trading availability
+  server.addHook('preHandler', async (request: any, reply) => {
+    const url = request.url || '';
+
+    // Block swap operations if disabled
+    if (url.includes('/swap') || url.includes('swap.')) {
+      const swapEnabled = await checkFeatureFlag('swap-enabled', request.auth?.user?.id);
+      if (!swapEnabled) {
+        return reply.code(503).send({
+          error: 'Feature Disabled',
+          message: 'Swap functionality is temporarily disabled.',
+        });
+      }
+    }
+
+    // Block copy trading if disabled
+    if (url.includes('/copyTrading') || url.includes('copyTrading.')) {
+      const copyEnabled = await checkFeatureFlag('copy-trading-v2', request.auth?.user?.id);
+      if (!copyEnabled && url.includes('v2')) {
+        return reply.code(503).send({
+          error: 'Feature Disabled',
+          message: 'Copy Trading V2 is not available yet.',
+        });
+      }
+    }
+  });
+
+  const metricsRegistry = new Registry();
+  collectDefaultMetrics({ register: metricsRegistry, prefix: 'soulwallet_' });
+
+
+  const httpRequestDurationSeconds = new Histogram({
+    name: 'soulwallet_http_request_duration_seconds',
+    help: 'HTTP request duration in seconds',
+    labelNames: ['method', 'route', 'status_code'] as const,
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    registers: [metricsRegistry],
+  });
+
+  const appUp = new Gauge({
+    name: 'soulwallet_up',
+    help: '1 if the process is running',
+    registers: [metricsRegistry],
+  });
+
+  const redisCacheHitsTotal = new Gauge({
+    name: 'soulwallet_redis_cache_hits_total',
+    help: 'Redis cache hits (cumulative)',
+    registers: [metricsRegistry],
+  });
+  const redisCacheMissesTotal = new Gauge({
+    name: 'soulwallet_redis_cache_misses_total',
+    help: 'Redis cache misses (cumulative)',
+    registers: [metricsRegistry],
+  });
+  const redisCacheErrorsTotal = new Gauge({
+    name: 'soulwallet_redis_cache_errors_total',
+    help: 'Redis cache errors (cumulative)',
+    registers: [metricsRegistry],
+  });
+  const redisCacheSlowOpsTotal = new Gauge({
+    name: 'soulwallet_redis_cache_slow_ops_total',
+    help: 'Redis slow ops (cumulative)',
+    registers: [metricsRegistry],
+  });
+  const redisCacheTotalOps = new Gauge({
+    name: 'soulwallet_redis_cache_total_ops',
+    help: 'Redis total ops (cumulative)',
+    registers: [metricsRegistry],
+  });
+  const redisCacheHitRate = new Gauge({
+    name: 'soulwallet_redis_cache_hit_rate',
+    help: 'Redis cache hit rate (0..1)',
+    registers: [metricsRegistry],
+  });
+  const redisCacheAvgLatencyMs = new Gauge({
+    name: 'soulwallet_redis_cache_avg_latency_ms',
+    help: 'Redis average op latency in milliseconds',
+    registers: [metricsRegistry],
+  });
+
+  const prismaPoolActiveConnections = new Gauge({
+    name: 'soulwallet_prisma_pool_active_connections',
+    help: 'Prisma pool active connections',
+    registers: [metricsRegistry],
+  });
+  const prismaPoolIdleConnections = new Gauge({
+    name: 'soulwallet_prisma_pool_idle_connections',
+    help: 'Prisma pool idle connections',
+    registers: [metricsRegistry],
+  });
+  const prismaPoolTotalConnections = new Gauge({
+    name: 'soulwallet_prisma_pool_total_connections',
+    help: 'Prisma pool total connections',
+    registers: [metricsRegistry],
+  });
+  const prismaPoolWaitingRequests = new Gauge({
+    name: 'soulwallet_prisma_pool_waiting_requests',
+    help: 'Prisma pool waiting requests',
+    registers: [metricsRegistry],
+  });
+  const prismaPoolUtilizationPercent = new Gauge({
+    name: 'soulwallet_prisma_pool_utilization_percent',
+    help: 'Prisma pool utilization percent',
+    registers: [metricsRegistry],
+  });
+  const prismaPoolAlertThresholdPercent = new Gauge({
+    name: 'soulwallet_prisma_pool_alert_threshold_percent',
+    help: 'Prisma pool alert threshold percent',
+    registers: [metricsRegistry],
+  });
+  const prismaPoolHealthy = new Gauge({
+    name: 'soulwallet_prisma_pool_healthy',
+    help: '1 if Prisma pool utilization is below alert threshold',
+    registers: [metricsRegistry],
   });
 
   // Sentry request tracking hook
@@ -122,19 +280,108 @@ export async function createServer(): Promise<FastifyInstance> {
     });
   }
 
+  server.addHook('onRequest', async (request: any) => {
+    const url = request.url || '';
+    if (url === '/metrics' || url.startsWith('/health')) return;
+    request.__metricsStartTime = process.hrtime.bigint();
+  });
+
+  server.addHook('onResponse', async (request: any, reply: any) => {
+    const start = request.__metricsStartTime as bigint | undefined;
+    if (!start) return;
+    const durationSeconds = Number(process.hrtime.bigint() - start) / 1e9;
+
+    // Use normalizeRoute for low-cardinality labels
+    // This maps tRPC routes to procedure names and strips IDs from REST routes
+    const rawRoute =
+      request.routeOptions?.url ||
+      request.routerPath ||
+      (typeof request.url === 'string' ? request.url.split('?')[0] : 'unknown');
+    const route = normalizeRoute(rawRoute, request.method);
+
+    httpRequestDurationSeconds.observe(
+      { method: request.method, route, status_code: String(reply.statusCode) },
+      durationSeconds
+    );
+  });
+
   // Health check cache
   const healthCache = new Map<string, { data: any; timestamp: number }>();
   const CACHE_TTL = 5000; // 5 seconds
+  const healthRefreshInFlight = new Map<string, Promise<any>>();
+
+  function runHealthRefresh<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const existing = healthRefreshInFlight.get(key) as Promise<T> | undefined
+    if (existing) return existing
+    const p = fn().finally(() => {
+      healthRefreshInFlight.delete(key)
+    })
+    healthRefreshInFlight.set(key, p as any)
+    return p
+  }
+
+  // Comment 2: Initialize pub/sub for cross-instance coordination in production
+  if (process.env.NODE_ENV === 'production') {
+    const { pubsub } = await import('../lib/services/pubsub')
+
+    // Wait for pubsub to be ready or timeout after 5 seconds
+    let waitTime = 0
+    while (!pubsub.isReady() && waitTime < 5000) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      waitTime += 100
+    }
+
+    if (pubsub.isReady()) {
+      logger.info('[Fastify] Pub/sub initialized successfully', pubsub.getStatus())
+
+      // Subscribe to cache invalidation events from other instances
+      pubsub.subscribe('system:broadcast', (data: { type: string; message: string }) => {
+        if (data.type === 'cache:invalidate') {
+          logger.info('[Fastify] Cache invalidation received', data)
+          healthCache.clear() // Clear local health cache
+        }
+      })
+    } else {
+      logger.warn('[Fastify] Pub/sub not ready after timeout, continuing without cross-instance coordination')
+    }
+
+    // Graceful shutdown
+    server.addHook('onClose', async () => {
+      await pubsub.shutdown()
+    })
+  }
+
+  // Redis connection singleton (Audit Issue #7)
+  let redisClient: Redis | null = null;
+
+  function getRedisClient(): Redis | null {
+    if (!process.env.REDIS_URL) return null;
+    if (!redisClient) {
+      redisClient = new Redis(process.env.REDIS_URL, {
+        maxRetriesPerRequest: 1,
+        lazyConnect: true,
+        retryStrategy: (times) => {
+          if (times > 3) return null; // Stop retrying after 3 attempts
+          return Math.min(times * 100, 3000);
+        },
+      });
+
+      redisClient.on('error', (err) => {
+        logger.error('Redis client error:', err);
+      });
+    }
+    return redisClient;
+  }
 
   // Helper functions for health checks
   async function checkRedisHealth(): Promise<{ healthy: boolean; latency?: number; error?: string }> {
-    if (!process.env.REDIS_URL) return { healthy: false, error: 'Redis not configured' };
+    const client = getRedisClient();
+    if (!client) return { healthy: false, error: 'Redis not configured' };
     try {
-      const client = new Redis(process.env.REDIS_URL);
       const start = Date.now();
       await client.ping();
       const latency = Date.now() - start;
-      client.disconnect();
+      // Don't disconnect - reuse the connection (Audit Issue #7)
       return { healthy: true, latency };
     } catch (error: any) {
       return { healthy: false, error: error.message };
@@ -143,9 +390,8 @@ export async function createServer(): Promise<FastifyInstance> {
 
   async function checkSolanaHealth(): Promise<{ healthy: boolean; latency?: number; error?: string }> {
     try {
-      const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
       const start = Date.now();
-      await connection.getSlot();
+      await rpcManager.withFailover((connection) => connection.getSlot());
       const latency = Date.now() - start;
       return { healthy: true, latency };
     } catch (error: any) {
@@ -166,6 +412,378 @@ export async function createServer(): Promise<FastifyInstance> {
   if (fastifyRequestIdPlugin) {
     await server.register(fastifyRequestIdPlugin)
   }
+
+  /**
+   * Comment 2: Global request size validation hook
+   * Enforces Content-Length checks before body parsing to prevent DoS attacks
+   * - Default: 10MB max (matches bodyLimit config)
+   * - Returns 413 Payload Too Large when exceeded
+   */
+  server.addHook('preHandler', async (request, reply) => {
+    const contentLength = request.headers['content-length'];
+
+    if (contentLength) {
+      const size = parseInt(contentLength, 10);
+
+      if (!isNaN(size) && size > REQUEST_SIZE_LIMITS.MAX_BODY) {
+        logger.warn('Request payload too large', {
+          size,
+          maxSize: REQUEST_SIZE_LIMITS.MAX_BODY,
+          ip: request.ip,
+          path: request.url
+        });
+        return reply.code(413).send({
+          error: 'Payload Too Large',
+          message: `Request body exceeds maximum size of 10MB. Current size: ${(size / (1024 * 1024)).toFixed(2)}MB`,
+          maxSize: REQUEST_SIZE_LIMITS.MAX_BODY,
+          currentSize: size,
+        });
+      }
+    }
+  });
+
+  /**
+   * Comment 1: Request queue limits preHandler
+   * Prevents resource exhaustion by limiting concurrent requests per user/IP
+   * - Acquires a slot before processing
+   * - Returns 503 if queue is full
+   * - Stores slotId on request for release in onResponse
+   */
+  server.addHook('preHandler', async (request: any, reply) => {
+    // Skip queue management for health check endpoints
+    const url = request.url || '';
+    if (url === '/metrics' || url.startsWith('/health')) {
+      return;
+    }
+
+    // Get user ID from auth context (if available) and IP
+    const userId = request.auth?.user?.id;
+    const ip = request.ip || 'unknown';
+
+    // Try to acquire a queue slot
+    const slotId = await queueManager.acquireSlot(userId, ip);
+
+    if (slotId === null) {
+      // Queue is full, return 503
+      const queueStatus = await queueManager.getQueueStatus();
+      logger.warn('[QueueManager] Request rejected - queue full', {
+        ip,
+        userId,
+        queueDepth: queueStatus.globalQueueDepth,
+        url,
+      });
+      return reply.code(503).send({
+        error: 'Service Unavailable',
+        message: 'Too many concurrent requests. Please try again.',
+        retryAfter: 5,
+        queueDepth: queueStatus.globalQueueDepth,
+        maxQueueDepth: queueManager.getConfig().maxQueueDepth,
+      });
+    }
+
+    // Store slotId on request for release in onResponse
+    request.queueSlotId = slotId;
+  });
+
+  /**
+   * Comment 1: Release queue slot on response
+   */
+  server.addHook('onResponse', async (request: any, _reply) => {
+    if (request.queueSlotId) {
+      await queueManager.releaseSlot(request.queueSlotId);
+    }
+  });
+
+  /**
+   * Comment 4: Admin IP whitelisting middleware for Fastify admin endpoints
+   * Requires authenticated admin user and validates IP whitelist before allowing access
+   */
+  server.addHook('preHandler', async (request: any, reply: any) => {
+    // Only apply to admin routes
+    if (!request.url?.startsWith('/api/admin') && !request.url?.startsWith('/admin')) {
+      return;
+    }
+
+    // Get auth context from request (set by auth plugin)
+    const auth = request.auth;
+
+    // Check if user is authenticated and is an admin
+    if (!auth?.isAuthenticated || !auth.user || auth.user.role !== 'ADMIN') {
+      await AuthorizationService.auditAuthorization(
+        {
+          userId: auth?.user?.id,
+          role: auth?.user?.role,
+          ipAddress: request.ip || 'unknown',
+          userAgent: request.headers?.['user-agent'],
+          endpoint: request.url,
+        },
+        false,
+        'Admin access required but user is not authenticated or not admin'
+      );
+      return reply.code(403).send({ error: 'Admin access required' });
+    }
+
+    // Check admin IP whitelist
+    const ipAllowed = await AuthorizationService.checkAdminIpWhitelist(
+      auth.user.id,
+      request.ip || 'unknown'
+    );
+
+    if (!ipAllowed) {
+      await AuthorizationService.auditAuthorization(
+        {
+          userId: auth.user.id,
+          role: auth.user.role,
+          ipAddress: request.ip || 'unknown',
+          userAgent: request.headers?.['user-agent'],
+          endpoint: request.url,
+        },
+        false,
+        'IP not whitelisted for admin operations'
+      );
+      return reply.code(403).send({ error: 'Admin access not allowed from this IP address' });
+    }
+
+    // Log successful admin access
+    await AuthorizationService.auditAuthorization(
+      {
+        userId: auth.user.id,
+        role: auth.user.role,
+        ipAddress: request.ip || 'unknown',
+        userAgent: request.headers?.['user-agent'],
+        endpoint: request.url,
+      },
+      true,
+      'Admin access granted'
+    );
+  });
+
+  /**
+   * Comment 2: Global geo-blocking middleware for auth-related paths
+   * Enforces OFAC/FATF geo-blocking at Fastify level for auth endpoints
+   * - Applied to /api/trpc/auth.* and /api/auth/* paths
+   * - Can be disabled via GEO_BLOCKING_ENABLED=false for non-prod environments
+   * - Translates TRPCError to 403 Forbidden HTTP response
+   */
+  if (process.env.GEO_BLOCKING_ENABLED !== 'false') {
+    server.addHook('onRequest', async (request, reply) => {
+      const url = request.url || '';
+
+      // Only apply geo-blocking to auth-related paths
+      const isAuthPath = url.includes('/api/trpc/auth.') ||
+        url.includes('/api/trpc/auth/') ||
+        url.includes('/api/v1/trpc/auth.') ||
+        url.includes('/api/v1/trpc/auth/') ||
+        url.startsWith('/api/auth/') ||
+        url.startsWith('/api/auth');
+
+      if (!isAuthPath) {
+        return;
+      }
+
+      try {
+        await geoBlockMiddleware(request.ip || 'unknown');
+      } catch (error: any) {
+        // TRPCError from geoBlockMiddleware means the request is from a blocked region
+        if (error?.code === 'FORBIDDEN' || error?.message?.includes('region')) {
+          logger.warn('[GeoBlock] Auth request blocked by geo-restriction', {
+            ip: request.ip,
+            path: url,
+            country: error?.cause || 'unknown',
+          });
+          return reply.code(403).send({
+            error: 'Forbidden',
+            message: 'Service unavailable in your region',
+            code: 'GEO_BLOCKED',
+          });
+        }
+        // For other errors, log warning and continue (fail-open for availability)
+        logger.warn('[GeoBlock] Geo-check failed, allowing request (fail-open)', {
+          ip: request.ip,
+          path: url,
+          error: error?.message,
+        });
+      }
+    });
+
+    logger.info('[GeoBlock] Global geo-blocking middleware enabled for auth paths');
+  }
+
+  server.get('/metrics', async (_request, reply) => {
+    try {
+      appUp.set(1);
+
+      const cache = getCacheMetrics();
+      redisCacheHitsTotal.set(cache.hits);
+      redisCacheMissesTotal.set(cache.misses);
+      redisCacheErrorsTotal.set(cache.errors);
+      redisCacheSlowOpsTotal.set(cache.slowOps);
+      redisCacheTotalOps.set(cache.totalOps);
+      redisCacheHitRate.set(cache.hitRate);
+      redisCacheAvgLatencyMs.set(cache.avgLatencyMs);
+
+      const pool = getPoolMetrics();
+      prismaPoolActiveConnections.set(pool.metrics.activeConnections);
+      prismaPoolIdleConnections.set(pool.metrics.idleConnections);
+      prismaPoolTotalConnections.set(pool.metrics.totalConnections);
+      prismaPoolWaitingRequests.set(pool.metrics.waitingRequests);
+      prismaPoolUtilizationPercent.set(pool.metrics.utilizationPercent);
+      prismaPoolAlertThresholdPercent.set(pool.alertThreshold);
+      prismaPoolHealthy.set(pool.healthy ? 1 : 0);
+
+      const body = await metricsRegistry.metrics();
+      reply.header('Content-Type', metricsRegistry.contentType);
+      return reply.send(body);
+    } catch (error: any) {
+      logger.error('Failed to collect metrics', { error });
+      return reply.code(500).send('Failed to collect metrics');
+    }
+  });
+
+  // Prometheus AlertManager webhook endpoint
+  // Receives alerts from Prometheus AlertManager and processes them
+  server.post('/api/alerts/prometheus', async (request, reply) => {
+    try {
+      const { alertManager } = await import('../lib/services/alertManager');
+
+      // Basic auth validation (optional, configured via environment)
+      const authHeader = request.headers.authorization;
+      const expectedUser = process.env.PROMETHEUS_WEBHOOK_USER || 'prometheus';
+      const expectedPass = process.env.PROMETHEUS_WEBHOOK_PASSWORD;
+
+      if (expectedPass) {
+        const expectedAuth = `Basic ${Buffer.from(`${expectedUser}:${expectedPass}`).toString('base64')}`;
+        if (authHeader !== expectedAuth) {
+          logger.warn('[Prometheus Webhook] Unauthorized request', { ip: request.ip });
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+      }
+
+      const payload = request.body as any;
+
+      // Validate payload structure
+      if (!payload || !Array.isArray(payload.alerts)) {
+        return reply.code(400).send({ error: 'Invalid payload: missing alerts array' });
+      }
+
+      // Process alerts
+      const processedAlerts = await alertManager.handlePrometheusWebhook(payload);
+
+      return reply.send({
+        success: true,
+        processed: processedAlerts.length,
+        totalReceived: payload.alerts.length
+      });
+    } catch (error: any) {
+      logger.error('[Prometheus Webhook] Error processing alerts', { error: error.message });
+      return reply.code(500).send({ error: 'Failed to process alerts' });
+    }
+  });
+
+  // Query Performance Admin Endpoint
+  // Provides insights into database query performance using pg_stat_statements
+  // Requires admin authentication and IP whitelisting (enforced by preHandler hook)
+  server.get('/api/admin/query-performance', async (request: any, reply) => {
+    try {
+      const { queryPerformanceService } = await import('../lib/services/queryPerformance');
+
+      // Get comprehensive performance summary
+      const performance = await queryPerformanceService.getPerformanceSummary();
+
+      // Optional: Get additional metrics
+      const [indexUsage, tableBloat, longRunning] = await Promise.all([
+        queryPerformanceService.getIndexUsage(),
+        queryPerformanceService.getTableBloat(),
+        queryPerformanceService.getLongRunningQueries(),
+      ]);
+
+      return reply.send({
+        success: true,
+        extensionAvailable: performance.extensionAvailable,
+        slowQueries: performance.slowQueries,
+        topByTime: performance.topByTime,
+        n1Problems: performance.n1Problems,
+        cacheHitRatio: performance.cacheHitRatio,
+        indexUsage,
+        tableBloat,
+        longRunningQueries: longRunning,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      logger.error('[Query Performance] Error fetching metrics', { error: error.message });
+      return reply.code(500).send({ error: 'Failed to fetch query performance metrics' });
+    }
+  });
+
+  // Reset query statistics (admin only)
+  server.post('/api/admin/query-performance/reset', async (request: any, reply) => {
+    try {
+      const { queryPerformanceService } = await import('../lib/services/queryPerformance');
+
+      const success = await queryPerformanceService.resetStats();
+
+      if (success) {
+        logger.info('[Query Performance] Statistics reset by admin', {
+          userId: request.auth?.user?.id
+        });
+        return reply.send({ success: true, message: 'Query statistics reset successfully' });
+      } else {
+        return reply.code(500).send({ error: 'Failed to reset statistics' });
+      }
+    } catch (error: any) {
+      logger.error('[Query Performance] Error resetting stats', { error: error.message });
+      return reply.code(500).send({ error: 'Failed to reset query statistics' });
+    }
+  });
+
+  // Register Swagger/OpenAPI documentation (Comment 3)
+  await server.register(swagger, {
+    openapi: {
+      info: {
+        title: 'SoulWallet API',
+        description: 'SoulWallet trading platform API - Solana swap, copy trading, and social features',
+        version: '1.0.0',
+      },
+      servers: [
+        { url: '/api/v1', description: 'Versioned API endpoint' },
+      ],
+      tags: [
+        { name: 'auth', description: 'Authentication endpoints' },
+        { name: 'wallet', description: 'Wallet operations' },
+        { name: 'swap', description: 'Token swap operations' },
+        { name: 'copyTrading', description: 'Copy trading features' },
+        { name: 'social', description: 'Social features' },
+        { name: 'webhook', description: 'Webhook management' },
+      ],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+          },
+          apiKey: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'X-API-Key',
+          },
+        },
+      },
+    },
+  });
+
+  await server.register(swaggerUi, {
+    routePrefix: '/api/docs',
+    uiConfig: {
+      docExpansion: 'list',
+      deepLinking: true,
+    },
+  });
+
+  // OpenAPI JSON endpoint
+  server.get('/api/openapi.json', async (_request, reply) => {
+    return reply.send(server.swagger());
+  });
 
   // Register CORS with strict origin validation
   // 
@@ -412,9 +1030,25 @@ export async function createServer(): Promise<FastifyInstance> {
     await server.register(fastifyRateLimitPlugin);
   }
 
+  server.addHook('onRequest', async (request, reply) => {
+    try {
+      if (
+        request.url.startsWith('/api/trpc/auth') ||
+        request.url.startsWith('/api/v1/trpc/auth')
+      ) {
+        await geoBlockMiddleware(request.ip)
+      }
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && (err as any).code === 'FORBIDDEN') {
+        return reply.code(403).send({ error: 'Forbidden', message: 'Service unavailable in your region' })
+      }
+      return
+    }
+  })
+
   // Register tRPC
   await server.register(fastifyTRPCPlugin, {
-    prefix: '/api/trpc',
+    prefix: '/api/v1/trpc',
     trpcOptions: {
       router: appRouter,
       createContext: createTRPCContext,
@@ -441,122 +1075,407 @@ export async function createServer(): Promise<FastifyInstance> {
     },
   });
 
+  // Legacy /api/trpc -> Redirect to versioned /api/v1/trpc with deprecation headers
+  // Comment 2: API versioning - 301 redirect from unversioned to versioned endpoint
+  server.all('/api/trpc/*', async (request, reply) => {
+    const path = request.url.replace(/^\/api\/trpc/, '/api/v1/trpc');
+
+    // Add deprecation headers
+    reply.header('X-Deprecated', 'true');
+    reply.header('X-Sunset-Date', '2026-07-01');
+    reply.header('X-Replacement', path);
+    reply.header('Deprecation', 'true');
+    reply.header('Link', `<${path}>; rel="successor-version"`);
+
+    // Log deprecation usage for monitoring
+    logger.warn('Deprecated /api/trpc endpoint accessed', {
+      originalUrl: request.url,
+      redirectTo: path,
+      userAgent: request.headers['user-agent'],
+      ip: request.ip,
+    });
+
+    return reply.redirect(path, 301);
+  });
+
   // Health check endpoint (enhanced for comprehensive checks)
   server.get('/health', async (_request, _reply) => {
     const requestId = getRequestId();
     const cached = healthCache.get('full');
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return { ...cached.data, requestId };
+    if (cached) {
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+        return { ...cached.data, requestId };
+      }
+      void runHealthRefresh('full', async () => {
+        const refreshRequestId = requestId
+        let dbHealth, redisHealth, solanaHealth, rateLimiterStatus
+        let circuitBreakers, dlq
+        try {
+          dbHealth = await checkDatabaseHealth()
+        } catch (error) {
+          logger.error('Database health check failed', { error, requestId: refreshRequestId })
+          dbHealth = { healthy: false, latency: 0, error: 'Check failed' }
+        }
+        try {
+          redisHealth = await checkRedisHealth()
+        } catch (error) {
+          logger.error('Redis health check failed', { error, requestId: refreshRequestId })
+          redisHealth = { healthy: false, latency: 0, error: 'Check failed' }
+        }
+        try {
+          solanaHealth = await checkSolanaHealth()
+        } catch (error) {
+          logger.error('Solana health check failed', { error, requestId: refreshRequestId })
+          solanaHealth = { healthy: false, latency: 0, error: 'Check failed' }
+        }
+        try {
+          const rateLimiter = getRateLimiter()
+          rateLimiterStatus = await rateLimiter.getRedisStatus()
+        } catch (error) {
+          logger.error('Rate limiter health check failed', { error, requestId: refreshRequestId })
+          rateLimiterStatus = { healthy: false, mode: 'unknown', error: 'Check failed' }
+        }
+
+        try {
+          circuitBreakers = getAllCircuitBreakerSnapshots()
+        } catch {
+          circuitBreakers = []
+        }
+
+        try {
+          dlq = await executionQueue.getDlqStats()
+        } catch {
+          dlq = { buy: 0, sell: 0 }
+        }
+
+        const overallStatus = dbHealth.healthy && redisHealth.healthy && solanaHealth.healthy && rateLimiterStatus.healthy ? 'healthy' : (dbHealth.healthy || redisHealth.healthy || solanaHealth.healthy || rateLimiterStatus.healthy ? 'degraded' : 'unhealthy');
+        const data = {
+          status: overallStatus,
+          timestamp: new Date().toISOString(),
+          uptime: process.uptime(),
+          version: process.env.npm_package_version || '1.0.0',
+          checks: {
+            database: dbHealth,
+            redis: redisHealth,
+            solana: solanaHealth,
+            rateLimiter: rateLimiterStatus,
+            circuitBreakers,
+            dlq,
+          },
+          requestId: refreshRequestId,
+        }
+        healthCache.set('full', { data, timestamp: Date.now() })
+        return data
+      })
+
+      return { ...cached.data, requestId }
     }
 
-    let dbHealth, redisHealth, solanaHealth, rateLimiterStatus;
-    try {
-      dbHealth = await checkDatabaseHealth();
-    } catch (error) {
-      logger.error('Database health check failed', { error, requestId });
-      dbHealth = { healthy: false, latency: 0, error: 'Check failed' };
-    }
-    try {
-      redisHealth = await checkRedisHealth();
-    } catch (error) {
-      logger.error('Redis health check failed', { error, requestId });
-      redisHealth = { healthy: false, latency: 0, error: 'Check failed' };
-    }
-    try {
-      solanaHealth = await checkSolanaHealth();
-    } catch (error) {
-      logger.error('Solana health check failed', { error, requestId });
-      solanaHealth = { healthy: false, latency: 0, error: 'Check failed' };
-    }
-    try {
-      const rateLimiter = getRateLimiter();
-      rateLimiterStatus = await rateLimiter.getRedisStatus();
-    } catch (error) {
-      logger.error('Rate limiter health check failed', { error, requestId });
-      rateLimiterStatus = { healthy: false, mode: 'unknown', error: 'Check failed' };
-    }
+    const data = await runHealthRefresh('full', async () => {
+      let dbHealth, redisHealth, solanaHealth, rateLimiterStatus
+      let circuitBreakers, dlq
+      try {
+        dbHealth = await checkDatabaseHealth()
+      } catch (error) {
+        logger.error('Database health check failed', { error, requestId })
+        dbHealth = { healthy: false, latency: 0, error: 'Check failed' }
+      }
+      try {
+        redisHealth = await checkRedisHealth()
+      } catch (error) {
+        logger.error('Redis health check failed', { error, requestId })
+        redisHealth = { healthy: false, latency: 0, error: 'Check failed' }
+      }
+      try {
+        solanaHealth = await checkSolanaHealth()
+      } catch (error) {
+        logger.error('Solana health check failed', { error, requestId })
+        solanaHealth = { healthy: false, latency: 0, error: 'Check failed' }
+      }
+      try {
+        const rateLimiter = getRateLimiter()
+        rateLimiterStatus = await rateLimiter.getRedisStatus()
+      } catch (error) {
+        logger.error('Rate limiter health check failed', { error, requestId })
+        rateLimiterStatus = { healthy: false, mode: 'unknown', error: 'Check failed' }
+      }
 
-    const overallStatus = dbHealth.healthy && redisHealth.healthy && solanaHealth.healthy && rateLimiterStatus.healthy ? 'healthy' : (dbHealth.healthy || redisHealth.healthy || solanaHealth.healthy || rateLimiterStatus.healthy ? 'degraded' : 'unhealthy');
-    const data = {
-      status: overallStatus,
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      version: process.env.npm_package_version || '1.0.0',
-      checks: {
-        database: dbHealth,
-        redis: redisHealth,
-        solana: solanaHealth,
-        rateLimiter: rateLimiterStatus,
-      },
-      requestId,
-    };
-    healthCache.set('full', { data, timestamp: Date.now() });
-    return data;
+      try {
+        circuitBreakers = getAllCircuitBreakerSnapshots()
+      } catch {
+        circuitBreakers = []
+      }
+
+      try {
+        dlq = await executionQueue.getDlqStats()
+      } catch {
+        dlq = { buy: 0, sell: 0 }
+      }
+
+      const overallStatus = dbHealth.healthy && redisHealth.healthy && solanaHealth.healthy && rateLimiterStatus.healthy ? 'healthy' : (dbHealth.healthy || redisHealth.healthy || solanaHealth.healthy || rateLimiterStatus.healthy ? 'degraded' : 'unhealthy');
+      const data = {
+        status: overallStatus,
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: process.env.npm_package_version || '1.0.0',
+        checks: {
+          database: dbHealth,
+          redis: redisHealth,
+          solana: solanaHealth,
+          rateLimiter: rateLimiterStatus,
+          circuitBreakers,
+          dlq,
+        },
+        requestId,
+      }
+      healthCache.set('full', { data, timestamp: Date.now() })
+      return data
+    })
+    return { ...data, requestId }
+  });
+
+  // ============================================
+  // BATCH API ENDPOINTS (Performance Optimization)
+  // ============================================
+
+  // Batch fetch token prices
+  server.post('/api/batch/prices', async (request: any, reply) => {
+    try {
+      const { tokenMints } = request.body as { tokenMints: string[] };
+
+      if (!Array.isArray(tokenMints)) {
+        return reply.code(400).send({ error: 'tokenMints must be an array' });
+      }
+
+      if (tokenMints.length > 50) {
+        return reply.code(400).send({ error: 'Max 50 tokens per request' });
+      }
+
+      const { redisCache, getCacheTtls } = await import('../lib/redis');
+      const { marketData } = await import('../lib/services/marketData');
+      const ttls = getCacheTtls();
+
+      const prices = await Promise.all(
+        tokenMints.map(async (mint: string) => {
+          try {
+            // Check cache first
+            const cacheKey = `price:${mint}` as any;
+            const cached = await redisCache.get<{ price: number }>(cacheKey);
+            if (cached?.price) {
+              return { mint, price: cached.price, cached: true };
+            }
+
+            // Fetch from market data
+            const tokenData = await marketData.getToken(mint);
+            // Use tokenData.priceUsd directly (not pairs[0].priceUsd)
+            let price: number | null = null;
+            if (tokenData?.priceUsd) {
+              const parsed = parseFloat(tokenData.priceUsd);
+              if (Number.isFinite(parsed) && parsed > 0) {
+                price = parsed;
+              }
+            }
+
+            // Cache the result
+            if (price) {
+              await redisCache.set(cacheKey, { price }, ttls.price);
+            }
+
+            return { mint, price, cached: false };
+          } catch (error) {
+            return { mint, price: null, error: 'Fetch failed' };
+          }
+        })
+      );
+
+      return reply.send({
+        success: true,
+        count: prices.length,
+        prices
+      });
+    } catch (error: any) {
+      logger.error('[Batch Prices] Error', { error: error.message });
+      return reply.code(500).send({ error: 'Failed to fetch batch prices' });
+    }
+  });
+
+  // Batch fetch user portfolios
+  server.post('/api/batch/portfolio', async (request: any, reply) => {
+    try {
+      const { userIds } = request.body as { userIds: string[] };
+
+      if (!Array.isArray(userIds)) {
+        return reply.code(400).send({ error: 'userIds must be an array' });
+      }
+
+      if (userIds.length > 20) {
+        return reply.code(400).send({ error: 'Max 20 users per request' });
+      }
+
+      const { redisCache, getCacheTtls } = await import('../lib/redis');
+      const ttls = getCacheTtls();
+
+      const portfolios = await Promise.all(
+        userIds.map(async (userId: string) => {
+          try {
+            const cacheKey = `portfolio:${userId}` as any;
+            const cached = await redisCache.get(cacheKey);
+
+            if (cached) {
+              return { userId, portfolio: cached, cached: true };
+            }
+
+            // Portfolio not cached - return null (client should fetch individually)
+            return { userId, portfolio: null, cached: false };
+          } catch (error) {
+            return { userId, portfolio: null, error: 'Fetch failed' };
+          }
+        })
+      );
+
+      return reply.send({
+        success: true,
+        count: portfolios.length,
+        portfolios
+      });
+    } catch (error: any) {
+      logger.error('[Batch Portfolio] Error', { error: error.message });
+      return reply.code(500).send({ error: 'Failed to fetch batch portfolios' });
+    }
   });
 
   // Separate health check endpoints (with caching, error handling, and proper status codes)
   server.get('/health/db', async (_request, reply) => {
     const requestId = getRequestId();
     const cached = healthCache.get('db');
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return { ...cached.data, requestId };
+    if (cached) {
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+        return { ...cached.data, requestId };
+      }
+      void runHealthRefresh('db', async () => {
+        try {
+          const dbHealth = await checkDatabaseHealth()
+          const data = { database: dbHealth, requestId }
+          healthCache.set('db', { data, timestamp: Date.now() })
+          return data
+        } catch (error) {
+          logger.error('Database health check failed', { error, requestId })
+          const data = { database: { healthy: false, latency: 0, error: 'Check failed' }, requestId }
+          healthCache.set('db', { data, timestamp: Date.now() })
+          return data
+        }
+      })
+      const cachedData = { ...cached.data, requestId }
+      const status = cachedData.database?.healthy ? 200 : 503
+      return reply.code(status).send(cachedData)
     }
-    try {
-      const dbHealth = await checkDatabaseHealth();
-      const data = { database: dbHealth, requestId };
-      healthCache.set('db', { data, timestamp: Date.now() });
-      return reply.code(dbHealth.healthy ? 200 : 503).send(data);
-    } catch (error) {
-      logger.error('Database health check failed', { error, requestId });
-      const data = { database: { healthy: false, latency: 0, error: 'Check failed' }, requestId };
-      healthCache.set('db', { data, timestamp: Date.now() });
-      return reply.code(503).send(data);
-    }
+
+    const data = await runHealthRefresh('db', async () => {
+      try {
+        const dbHealth = await checkDatabaseHealth()
+        const data = { database: dbHealth, requestId }
+        healthCache.set('db', { data, timestamp: Date.now() })
+        return data
+      } catch (error) {
+        logger.error('Database health check failed', { error, requestId })
+        const data = { database: { healthy: false, latency: 0, error: 'Check failed' }, requestId }
+        healthCache.set('db', { data, timestamp: Date.now() })
+        return data
+      }
+    })
+    return reply.code(data.database?.healthy ? 200 : 503).send({ ...data, requestId })
   });
 
   server.get('/health/redis', async (_request, reply) => {
     const requestId = getRequestId();
     const cached = healthCache.get('redis');
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return { ...cached.data, requestId };
-    }
-    try {
-      // Check if Redis is configured
-      if (!process.env.REDIS_URL) {
-        const data = { redis: { healthy: true, required: false, message: 'Redis not configured' }, requestId };
-        healthCache.set('redis', { data, timestamp: Date.now() });
-        return reply.code(200).send(data);
+    if (cached) {
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+        return { ...cached.data, requestId };
       }
-
-      const redisHealth = await checkRedisHealth();
-      const data = { redis: redisHealth, requestId };
-      healthCache.set('redis', { data, timestamp: Date.now() });
-      return reply.code(redisHealth.healthy ? 200 : 503).send(data);
-    } catch (error) {
-      logger.error('Redis health check failed', { error, requestId });
-      const data = { redis: { healthy: false, latency: 0, error: 'Check failed' }, requestId };
-      healthCache.set('redis', { data, timestamp: Date.now() });
-      return reply.code(503).send(data);
+      void runHealthRefresh('redis', async () => {
+        try {
+          if (!process.env.REDIS_URL) {
+            const data = { redis: { healthy: true, required: false, message: 'Redis not configured' }, requestId }
+            healthCache.set('redis', { data, timestamp: Date.now() })
+            return data
+          }
+          const redisHealth = await checkRedisHealth()
+          const data = { redis: redisHealth, requestId }
+          healthCache.set('redis', { data, timestamp: Date.now() })
+          return data
+        } catch (error) {
+          logger.error('Redis health check failed', { error, requestId })
+          const data = { redis: { healthy: false, latency: 0, error: 'Check failed' }, requestId }
+          healthCache.set('redis', { data, timestamp: Date.now() })
+          return data
+        }
+      })
+      const cachedData = { ...cached.data, requestId }
+      const status = cachedData.redis?.healthy ? 200 : 503
+      return reply.code(status).send(cachedData)
     }
+
+    const data = await runHealthRefresh('redis', async () => {
+      try {
+        if (!process.env.REDIS_URL) {
+          const data = { redis: { healthy: true, required: false, message: 'Redis not configured' }, requestId }
+          healthCache.set('redis', { data, timestamp: Date.now() })
+          return data
+        }
+        const redisHealth = await checkRedisHealth()
+        const data = { redis: redisHealth, requestId }
+        healthCache.set('redis', { data, timestamp: Date.now() })
+        return data
+      } catch (error) {
+        logger.error('Redis health check failed', { error, requestId })
+        const data = { redis: { healthy: false, latency: 0, error: 'Check failed' }, requestId }
+        healthCache.set('redis', { data, timestamp: Date.now() })
+        return data
+      }
+    })
+    return reply.code(data.redis?.healthy ? 200 : 503).send({ ...data, requestId })
   });
 
   server.get('/health/solana', async (_request, reply) => {
     const requestId = getRequestId();
     const cached = healthCache.get('solana');
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return { ...cached.data, requestId };
+    if (cached) {
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+        return { ...cached.data, requestId };
+      }
+      void runHealthRefresh('solana', async () => {
+        try {
+          const solanaHealth = await checkSolanaHealth()
+          const data = { solana: solanaHealth, requestId }
+          healthCache.set('solana', { data, timestamp: Date.now() })
+          return data
+        } catch (error) {
+          logger.error('Solana health check failed', { error, requestId })
+          const data = { solana: { healthy: false, latency: 0, error: 'Check failed' }, requestId }
+          healthCache.set('solana', { data, timestamp: Date.now() })
+          return data
+        }
+      })
+      const cachedData = { ...cached.data, requestId }
+      const status = cachedData.solana?.healthy ? 200 : 503
+      return reply.code(status).send(cachedData)
     }
-    try {
-      const solanaHealth = await checkSolanaHealth();
-      const data = { solana: solanaHealth, requestId };
-      healthCache.set('solana', { data, timestamp: Date.now() });
-      return reply.code(solanaHealth.healthy ? 200 : 503).send(data);
-    } catch (error) {
-      logger.error('Solana health check failed', { error, requestId });
-      const data = { solana: { healthy: false, latency: 0, error: 'Check failed' }, requestId };
-      healthCache.set('solana', { data, timestamp: Date.now() });
-      return reply.code(503).send(data);
-    }
+
+    const data = await runHealthRefresh('solana', async () => {
+      try {
+        const solanaHealth = await checkSolanaHealth()
+        const data = { solana: solanaHealth, requestId }
+        healthCache.set('solana', { data, timestamp: Date.now() })
+        return data
+      } catch (error) {
+        logger.error('Solana health check failed', { error, requestId })
+        const data = { solana: { healthy: false, latency: 0, error: 'Check failed' }, requestId }
+        healthCache.set('solana', { data, timestamp: Date.now() })
+        return data
+      }
+    })
+    return reply.code(data.solana?.healthy ? 200 : 503).send({ ...data, requestId })
   });
 
   server.get('/health/ready', async (_request, reply) => {
@@ -586,6 +1505,70 @@ export async function createServer(): Promise<FastifyInstance> {
       uptime: process.uptime(),
       requestId,
     };
+  });
+
+  /**
+   * Plan5 Step 5.3: Database Connection Pool Health Check
+   * Returns pool utilization, configuration, and health status
+   */
+  server.get('/health/database/pool', async (_request, reply) => {
+    const requestId = getRequestId();
+    try {
+      const { getPoolMetrics } = await import('../lib/prisma');
+      const poolData = getPoolMetrics();
+      const status = poolData.healthy ? 200 : 503;
+      return reply.code(status).send({
+        ...poolData,
+        requestId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error('Pool health check failed', { error, requestId });
+      return reply.code(503).send({
+        healthy: false,
+        error: 'Pool check failed',
+        requestId,
+      });
+    }
+  });
+
+  /**
+   * Plan5 Step 2.3: Adaptive Rate Limiting Monitoring Dashboard
+   * Returns current adaptation state, violation rates, attack detection status
+   * Requires admin authentication + IP whitelist
+   */
+  server.get('/api/admin/rate-limits/adaptive', async (request: any, reply) => {
+    const requestId = getRequestId();
+    try {
+      // Check admin authentication (handled by global preHandler hook)
+      const auth = request.auth;
+      if (!auth?.isAuthenticated || auth.user?.role !== 'ADMIN') {
+        return reply.code(403).send({ error: 'Admin access required', requestId });
+      }
+
+      const { adaptiveRateLimiter } = await import('../lib/middleware/adaptiveRateLimiter');
+      const { queueManager } = await import('../lib/services/queueManager');
+      const { trustedIpsService } = await import('../lib/services/trustedIps');
+      const { alertManager } = await import('../lib/services/alertManager');
+
+      return {
+        adaptive: {
+          metrics: adaptiveRateLimiter.getMetrics(),
+          states: adaptiveRateLimiter.getAllStates(),
+        },
+        queue: {
+          status: await queueManager.getQueueStatus(),
+          config: queueManager.getConfig(),
+        },
+        trustedIps: trustedIpsService.getStatus(),
+        alerts: alertManager.getStats(),
+        requestId,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      logger.error('Adaptive rate limit status check failed', { error, requestId });
+      return reply.code(500).send({ error: 'Status check failed', requestId });
+    }
   });
 
   // Admin cleanup endpoint
@@ -704,7 +1687,8 @@ export async function createServer(): Promise<FastifyInstance> {
       description: 'Backend API for SoulWallet application',
       endpoints: {
         health: '/health',
-        trpc: '/api/trpc',
+        trpc: '/api/v1/trpc',
+        trpcLegacy: '/api/trpc',
         docs: '/api/docs',
       },
       timestamp: new Date().toISOString(),
@@ -733,42 +1717,42 @@ export async function createServer(): Promise<FastifyInstance> {
       <h2>Authentication Endpoints</h2>
       
       <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/trpc/auth.signup</span></div>
+        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.signup</span></div>
         <div class="description">Register a new user account</div>
       </div>
       
       <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/trpc/auth.login</span></div>
+        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.login</span></div>
         <div class="description">Login with email and password</div>
       </div>
       
       <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/trpc/auth.logout</span></div>
+        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.logout</span></div>
         <div class="description">Logout and invalidate session</div>
       </div>
       
       <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/trpc/auth.requestPasswordReset</span></div>
+        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.requestPasswordReset</span></div>
         <div class="description">Request password reset via email OTP</div>
       </div>
       
       <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/trpc/auth.resetPassword</span></div>
+        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.resetPassword</span></div>
         <div class="description">Reset password using OTP</div>
       </div>
       
       <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/trpc/auth.verifyOTP</span></div>
+        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.verifyOTP</span></div>
         <div class="description">Verify OTP code</div>
       </div>
       
       <div class="endpoint">
-        <div><span class="method">GET</span> <span class="path">/api/trpc/auth.getCurrentUser</span></div>
+        <div><span class="method">GET</span> <span class="path">/api/v1/trpc/auth.getCurrentUser</span></div>
         <div class="description">Get current authenticated user</div>
       </div>
       
       <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/trpc/auth.refreshToken</span></div>
+        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.refreshToken</span></div>
         <div class="description">Refresh JWT access token</div>
       </div>
       
@@ -913,6 +1897,13 @@ export async function startServer(port = 3001, host = '0.0.0.0'): Promise<Fastif
             server.log.info('✅ Daily performance snapshots created successfully');
           } catch (error) {
             server.log.error({ error }, '❌ Failed to create daily performance snapshots');
+            // Audit Issue #18: Report cron job errors to Sentry
+            if (sentryInitialized) {
+              Sentry.captureException(error, {
+                tags: { job: 'daily_performance_snapshot' },
+                extra: { timestamp: new Date().toISOString() },
+              });
+            }
           }
         });
 
@@ -979,5 +1970,5 @@ export async function startDevServer(): Promise<void> {
 
 // Auto-start in development if this file is run directly
 if (require.main === module && process.env.NODE_ENV !== 'test') {
-  startDevServer();
+  void startDevServer();
 }

@@ -21,6 +21,7 @@ export interface Token {
   transactions?: number;
   buys24h?: number;
   sells24h?: number;
+  buyRatio?: number; // buys / (buys + sells)
   pairAge?: number; // hours since pair creation
   logo?: string;
   verified?: boolean;
@@ -57,6 +58,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       transactions: 24000,
       buys24h: 15000,
       sells24h: 9000,
+      buyRatio: 0.625, // 15000 / 24000
       pairAge: 8760, // 1 year
       logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
       verified: true,
@@ -75,6 +77,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       transactions: 8500,
       buys24h: 4200,
       sells24h: 4300,
+      buyRatio: 0.494, // 4200 / 8500
       pairAge: 720, // 30 days
       logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm.png',
       verified: true,
@@ -93,6 +96,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       transactions: 12000,
       buys24h: 8000,
       sells24h: 4000,
+      buyRatio: 0.667, // 8000 / 12000
       pairAge: 2160, // 90 days
       logo: 'https://static.jup.ag/jup/icon.png',
       verified: true,
@@ -111,6 +115,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       transactions: 18000,
       buys24h: 12000,
       sells24h: 6000,
+      buyRatio: 0.667, // 12000 / 18000
       pairAge: 4320, // 180 days
       logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
       verified: true,
@@ -129,6 +134,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       transactions: 15000,
       buys24h: 9000,
       sells24h: 6000,
+      buyRatio: 0.6, // 9000 / 15000
       pairAge: 17520, // 2 years
       logo: 'https://raw.githubusercontent.com/raydium-io/media-assets/master/logo/logo-only-icon.svg',
       verified: true,
@@ -143,24 +149,31 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       return DUMMY_TOKENS;
     }
     
-    return (soulMarketData.pairs as any[]).map((pair: any) => ({
-      id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
-      symbol: pair.baseToken?.symbol || 'UNKNOWN',
-      name: pair.baseToken?.name || 'Unknown Token',
-      price: parseFloat(pair.priceUsd || '0'),
-      change24h: parseFloat(pair.priceChange?.h24 || '0'),
-      liquidity: parseFloat(pair.liquidity?.usd || '0'),
-      volume: parseFloat(pair.volume?.h24 || '0'),
-      marketCap: parseFloat(pair.marketCap || '0'),
-      fdv: parseFloat(pair.fdv || '0'),
-      transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
-      buys24h: pair.txns?.h24?.buys || 0,
-      sells24h: pair.txns?.h24?.sells || 0,
-      pairAge: pair.pairCreatedAt ? Math.floor((Date.now() - pair.pairCreatedAt) / 3600000) : undefined,
-      logo: pair.info?.imageUrl,
-      verified: pair.info?.verified || false,
-      pairToken: pair.quoteToken?.symbol,
-    }));
+    return (soulMarketData.pairs as any[]).map((pair: any) => {
+      const buys24h = pair.txns?.h24?.buys || 0;
+      const sells24h = pair.txns?.h24?.sells || 0;
+      const totalTxns = buys24h + sells24h;
+      
+      return {
+        id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
+        symbol: pair.baseToken?.symbol || 'UNKNOWN',
+        name: pair.baseToken?.name || 'Unknown Token',
+        price: parseFloat(pair.priceUsd || '0'),
+        change24h: parseFloat(pair.priceChange?.h24 || '0'),
+        liquidity: parseFloat(pair.liquidity?.usd || '0'),
+        volume: parseFloat(pair.volume?.h24 || '0'),
+        marketCap: parseFloat(pair.marketCap || '0'),
+        fdv: parseFloat(pair.fdv || '0'),
+        transactions: totalTxns,
+        buys24h,
+        sells24h,
+        buyRatio: totalTxns > 0 ? buys24h / totalTxns : 0,
+        pairAge: pair.pairCreatedAt ? Math.floor((Date.now() - pair.pairCreatedAt) / 3600000) : undefined,
+        logo: pair.info?.imageUrl,
+        verified: pair.info?.verified || false,
+        pairToken: pair.quoteToken?.symbol,
+      };
+    });
   }, [soulMarketData]);
 
   // Apply all filters
@@ -176,12 +189,12 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       );
     }
 
-    // Quick filters
+    // Quick filters (Beast filter thresholds - Comment 2)
     if (filters.quickFilters.includes('volume')) {
-      result = result.filter(t => (t.volume || 0) >= 1000000); // $1M+
+      result = result.filter(t => (t.volume || 0) >= 1000000); // $1M+ (beast threshold)
     }
     if (filters.quickFilters.includes('liquidity')) {
-      result = result.filter(t => (t.liquidity || 0) >= 500000); // $500K+
+      result = result.filter(t => (t.liquidity || 0) >= 500000); // $500K+ (beast threshold)
     }
     if (filters.quickFilters.includes('change')) {
       result = result.filter(t => t.change24h > 0);
@@ -191,6 +204,16 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
     }
     if (filters.quickFilters.includes('verified')) {
       result = result.filter(t => t.verified);
+    }
+    // New beast filter chips (Comment 2)
+    if (filters.quickFilters.includes('buysRatio')) {
+      result = result.filter(t => (t.buyRatio || 0) >= 0.6); // 60%+ buy ratio
+    }
+    if (filters.quickFilters.includes('txns')) {
+      result = result.filter(t => (t.transactions || 0) >= 500); // 500+ txns
+    }
+    if (filters.quickFilters.includes('priceChange')) {
+      result = result.filter(t => Math.abs(t.change24h) >= 5); // 5%+ price change
     }
 
     // Range filters - Liquidity
@@ -249,6 +272,14 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       result = result.filter(t => 
         t.pairToken?.toLowerCase() === filters.pairToken!.toLowerCase()
       );
+    }
+
+    // Advanced beast filters (Comment 2)
+    if (filters.buyRatioMin !== undefined) {
+      result = result.filter(t => (t.buyRatio || 0) >= filters.buyRatioMin!);
+    }
+    if (filters.minPriceChange24h !== undefined) {
+      result = result.filter(t => Math.abs(t.change24h) >= filters.minPriceChange24h!);
     }
 
     // Sorting

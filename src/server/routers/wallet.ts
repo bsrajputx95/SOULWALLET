@@ -1,12 +1,18 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
-import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { getAssociatedTokenAddress, createTransferInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { sign } from 'tweetnacl';
 import { logger } from '../../lib/logger';
-// import { getFeatureFlags } from '../../lib/featureFlags'; // Removed - send endpoint commented out
 import prisma from '../../lib/prisma';
+import { rpcManager } from '../../lib/services/rpcManager';
+import { nonceManager } from '../../lib/services/nonceManager'
+import { custodialWalletService } from '../../lib/services/custodialWallet'
+import { auditLogService } from '../../lib/services/auditLog'
+import { amlService } from '../../lib/services/kyc'
+import { getCacheTtls, redisCache } from '../../lib/redis'
+import { recordWalletOperation, recordTransaction as recordTxMetric, linkedWalletsTotal } from '../../lib/metrics'
 
 interface ParsedTokenAccountInfo {
   mint: string;
@@ -16,143 +22,160 @@ interface ParsedTokenAccountInfo {
   };
 }
 
-const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+interface TokenMetadata {
+  symbol: string;
+  name: string;
+  decimals: number;
+  logoURI?: string;
+}
+
+type MetaplexMetadata = {
+  symbol: string
+  name: string
+  uri?: string
+  image?: string
+}
+
+type MetaplexModule = {
+  Metaplex: {
+    make: (connection: unknown) => {
+      nfts: () => {
+        findByMint: (args: { mintAddress: PublicKey }) => unknown
+      }
+    }
+  }
+}
+
+let metaplexImportPromise: Promise<MetaplexModule> | null = null
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isPromise<T = unknown>(value: unknown): value is Promise<T> {
+  return (
+    isRecord(value) &&
+    typeof (value as Record<string, unknown>).then === 'function' &&
+    typeof (value as Record<string, unknown>).catch === 'function'
+  )
+}
+
+function hasRun(value: unknown): value is { run: () => Promise<unknown> } {
+  return isRecord(value) && typeof value.run === 'function'
+}
+
+function normalizeExternalUri(input?: string): string | undefined {
+  if (!input) return undefined
+  const raw = input.trim()
+  if (!raw) return undefined
+
+  if (raw.startsWith('ipfs://')) {
+    const cid = raw.slice('ipfs://'.length)
+    return `https://ipfs.io/ipfs/${cid}`
+  }
+
+  if (raw.startsWith('ar://')) {
+    const id = raw.slice('ar://'.length)
+    return `https://arweave.net/${id}`
+  }
+
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined
+    return u.toString()
+  } catch {
+    return undefined
+  }
+}
+
+async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      signal: controller.signal,
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchMetaplexMetadata(mint: string): Promise<MetaplexMetadata | null> {
+  try {
+    metaplexImportPromise ||= import('@metaplex-foundation/js') as unknown as Promise<MetaplexModule>
+    const { Metaplex } = await metaplexImportPromise
+
+    return await rpcManager.withFailover(async (connection) => {
+      const metaplex = Metaplex.make(connection)
+      const mintAddress = new PublicKey(mint)
+
+      const operation = metaplex.nfts().findByMint({ mintAddress }) as unknown
+      const nftUnknown = hasRun(operation)
+        ? await operation.run()
+        : isPromise(operation)
+          ? await operation
+          : operation
+
+      if (!isRecord(nftUnknown)) return null
+
+      const name = typeof nftUnknown.name === 'string' ? nftUnknown.name : ''
+      const symbol = typeof nftUnknown.symbol === 'string' ? nftUnknown.symbol : ''
+      const uriRaw =
+        (typeof nftUnknown.uri === 'string' && nftUnknown.uri) ||
+        (isRecord(nftUnknown.metadata) && typeof nftUnknown.metadata.uri === 'string' && nftUnknown.metadata.uri) ||
+        undefined
+      const uri = normalizeExternalUri(uriRaw)
+
+      let image: string | undefined
+      const jsonImage =
+        isRecord(nftUnknown.json) && typeof nftUnknown.json.image === 'string'
+          ? nftUnknown.json.image
+          : undefined
+      image = normalizeExternalUri(jsonImage)
+
+      if (!image && uri) {
+        const json = await fetchJsonWithTimeout(uri, 5_000)
+        if (isRecord(json)) {
+          const candidate =
+            (typeof json.image === 'string' && json.image) ||
+            (typeof json.logoURI === 'string' && json.logoURI) ||
+            (typeof json.icon === 'string' && json.icon) ||
+            undefined
+          image = normalizeExternalUri(candidate)
+        }
+      }
+
+      const result: MetaplexMetadata = {
+        symbol: symbol.trim(),
+        name: name.trim(),
+        ...(uri ? { uri } : {}),
+        ...(image ? { image } : {}),
+      }
+
+      if (!result.symbol && !result.name && !result.image) return null
+      return result
+    })
+  } catch {
+    return null
+  }
+}
+
+// Known tokens static cache for immediate return (Audit Issue #8)
+const KNOWN_TOKENS: Record<string, TokenMetadata> = {
+  'So11111111111111111111111111111111111111112': { symbol: 'SOL', name: 'Solana', decimals: 9, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' },
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': { symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png' },
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': { symbol: 'USDT', name: 'Tether USD', decimals: 6, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png' },
+  'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': { symbol: 'mSOL', name: 'Marinade staked SOL', decimals: 9, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So/logo.png' },
+  '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj': { symbol: 'stSOL', name: 'Lido Staked SOL', decimals: 9, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj/logo.png' },
+};
 
 export const walletRouter = router({
-  /**
-   * @deprecated This endpoint creates simulated transactions only.
-   * Frontend should use client-side wallet signing and call recordTransaction instead.
-   * 
-   * DEPRECATED - DO NOT USE
-   * Use recordTransaction endpoint instead after client-side signing
-   * 
-   * Commented out to prevent accidental use. Uncomment for testing if needed.
-   */
-  /* 
-  send: protectedProcedure
-    .input(z.object({
-      to: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address'),
-      amount: z.number().positive('Amount must be positive'),
-      token: z.string(), // 'SOL' or mint address
-      memo: z.string().optional(),
-    }))
-    .mutation(async ({ input, ctx }) => {
-      try {
-        const { sendEnabled, simulationMode } = getFeatureFlags();
-        if (!sendEnabled) {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Send feature is disabled' });
-        }
-        if (!simulationMode) {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'On-chain send is not enabled in this environment' });
-        }
-
-        // Validate recipient address
-        let recipientPubkey: PublicKey;
-        try {
-          recipientPubkey = new PublicKey(input.to);
-        } catch {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Invalid recipient address',
-          });
-        }
-
-        // Get user's wallet keypair (this would need to be implemented based on your wallet storage)
-        // For now, we'll assume the user has a wallet address stored
-        const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
-        });
-
-        if (!user?.walletAddress) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'User wallet not found',
-          });
-        }
-
-        const senderPubkey = new PublicKey(user.walletAddress);
-
-        let transaction: Transaction;
-        let tokenSymbol: string;
-
-        if (input.token === 'SOL') {
-          // SOL transfer
-          const lamports = input.amount * LAMPORTS_PER_SOL;
-          transaction = new Transaction().add(
-            SystemProgram.transfer({
-              fromPubkey: senderPubkey,
-              toPubkey: recipientPubkey,
-              lamports,
-            })
-          );
-          tokenSymbol = 'SOL';
-        } else {
-          // SPL token transfer
-          const mintPubkey = new PublicKey(input.token);
-          const senderTokenAccount = await getAssociatedTokenAddress(mintPubkey, senderPubkey);
-          const recipientTokenAccount = await getAssociatedTokenAddress(mintPubkey, recipientPubkey);
-
-          transaction = new Transaction().add(
-            createTransferInstruction(
-              senderTokenAccount,
-              recipientTokenAccount,
-              senderPubkey,
-              input.amount,
-              [],
-              TOKEN_PROGRAM_ID
-            )
-          );
-          tokenSymbol = input.token; // Would need to fetch actual symbol
-        }
-
-        // Get recent blockhash
-        const { blockhash } = await connection.getLatestBlockhash();
-        transaction.recentBlockhash = blockhash;
-        transaction.feePayer = senderPubkey;
-
-        // Calculate fee
-        const fee = await connection.getFeeForMessage(transaction.compileMessage());
-        const feeInSOL = (fee?.value || 5000) / LAMPORTS_PER_SOL;
-
-        // Note: In a real implementation, you would sign and send the transaction here
-        // For now, we'll simulate a successful transaction
-        const signature = 'simulated_signature_' + Date.now();
-
-        // Save transaction to database
-        const dbTransaction = await prisma.transaction.create({
-          data: {
-            userId: ctx.user.id,
-            signature,
-            type: 'SEND',
-            amount: input.amount,
-            token: input.token,
-            tokenSymbol,
-            from: user.walletAddress,
-            to: input.to,
-            fee: feeInSOL,
-            status: 'PENDING',
-            notes: input.memo || null,
-          },
-        });
-
-        return {
-          success: true,
-          signature,
-          transaction: dbTransaction,
-        };
-      } catch (error) {
-        if (error instanceof TRPCError) {
-          throw error;
-        }
-        logger.error('Send transaction error:', error);
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to send transaction',
-        });
-      }
-    }),
-  */
-
   /**
    * Estimate transaction fee
    */
@@ -164,6 +187,36 @@ export const walletRouter = router({
     }))
     .query(async ({ input, ctx }) => {
       try {
+        const isSol =
+          input.token === 'SOL' || input.token === 'So11111111111111111111111111111111111111112'
+
+        // Comment 4: Validate SOL transaction amounts against limits
+        if (isSol) {
+          const amountValidation = await custodialWalletService.validateTransactionAmount(input.amount, ctx.user.id)
+          if (!amountValidation.valid) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: amountValidation.error || 'Invalid amount' })
+          }
+        } else {
+          // Comment 4: Validate SPL token transfers against per-trade limit
+          // Estimate USD value using known tokens or by assuming 1:1 for stables
+          const isStable = (
+            input.token === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' || // USDC
+            input.token === 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'    // USDT
+          )
+
+          // For stablecoins, amount IS the USD value
+          // For other tokens, we need to estimate - use a generous limit check
+          const estimatedUsd = isStable ? input.amount : input.amount * 100 // Conservative estimate for non-stables
+
+          const { TRANSACTION_LIMITS } = await import('../../lib/services/custodialWallet')
+          if (estimatedUsd > TRANSACTION_LIMITS.maxPerTrade) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: `Token transfer value exceeds maximum of ${TRANSACTION_LIMITS.maxPerTrade} USDC per transaction`
+            })
+          }
+        }
+
         const user = await prisma.user.findUnique({
           where: { id: ctx.user.id },
         });
@@ -180,8 +233,8 @@ export const walletRouter = router({
 
         let transaction: Transaction;
 
-        if (input.token === 'SOL') {
-          const lamports = input.amount * LAMPORTS_PER_SOL;
+        if (isSol) {
+          const lamports = Math.floor(input.amount * LAMPORTS_PER_SOL);
           transaction = new Transaction().add(
             SystemProgram.transfer({
               fromPubkey: senderPubkey,
@@ -206,11 +259,11 @@ export const walletRouter = router({
           );
         }
 
-        const { blockhash } = await connection.getLatestBlockhash();
+        const { blockhash } = await rpcManager.withFailover((connection) => connection.getLatestBlockhash());
         transaction.recentBlockhash = blockhash;
         transaction.feePayer = senderPubkey;
 
-        const fee = await connection.getFeeForMessage(transaction.compileMessage());
+        const fee = await rpcManager.withFailover((connection) => connection.getFeeForMessage(transaction.compileMessage()));
         const feeInSOL = (fee?.value || 5000) / LAMPORTS_PER_SOL;
 
         return {
@@ -218,6 +271,9 @@ export const walletRouter = router({
           feeInLamports: fee?.value || 5000,
         };
       } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
         logger.error('Fee estimation error:', error);
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -244,7 +300,7 @@ export const walletRouter = router({
         }
 
         const publicKey = new PublicKey(user.walletAddress);
-        const balance = await connection.getBalance(publicKey);
+        const balance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
 
         return {
           balance: balance / LAMPORTS_PER_SOL,
@@ -277,14 +333,12 @@ export const walletRouter = router({
         }
 
         const publicKey = new PublicKey(user.walletAddress);
-        
-        // Get SOL balance
-        const solBalance = await connection.getBalance(publicKey);
 
-        // Get SPL token accounts
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
-          programId: TOKEN_PROGRAM_ID,
-        });
+        // Use batchCall to fetch SOL balance and SPL token accounts in parallel
+        const [solBalance, tokenAccounts] = await rpcManager.batchCallHeterogeneous<[number, Awaited<ReturnType<typeof rpcManager.getConnection>>['getParsedTokenAccountsByOwner'] extends (...args: any[]) => Promise<infer R> ? R : never]>(
+          (connection) => connection.getBalance(publicKey),
+          (connection) => connection.getParsedTokenAccountsByOwner(publicKey, { programId: TOKEN_PROGRAM_ID })
+        );
 
         const tokens = tokenAccounts.value.map((account) => {
           const info = (account.account.data as { parsed: { info: ParsedTokenAccountInfo } }).parsed.info;
@@ -309,6 +363,17 @@ export const walletRouter = router({
       }
     }),
 
+  generateSignatureNonce: protectedProcedure
+    .input(z.object({
+      publicKey: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana public key'),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const nonce = await nonceManager.generateNonce(ctx.user.id, input.publicKey)
+      const timestamp = new Date().toISOString()
+      const message = `Sign this message to verify wallet ownership:\nNonce: ${nonce}\nTimestamp: ${timestamp}\nWallet: ${input.publicKey}`
+      return { nonce, timestamp, message }
+    }),
+
   /**
    * Link wallet to user account with signature verification
    */
@@ -317,9 +382,25 @@ export const walletRouter = router({
       publicKey: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana public key'),
       signature: z.string().min(1, 'Signature is required'),
       message: z.string().min(1, 'Message is required'),
+      nonce: z.string().min(1, 'Nonce is required'),
     }))
     .mutation(async ({ input, ctx }) => {
+      const startTime = Date.now();
       try {
+        const existingUser = await prisma.user.findUnique({
+          where: { id: ctx.user.id },
+          select: { walletAddress: true },
+        })
+
+        if (!input.message.includes(`Nonce: ${input.nonce}`)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Message must include nonce' })
+        }
+
+        const nonceOk = await nonceManager.validateAndConsumeNonce(input.nonce, ctx.user.id, input.publicKey)
+        if (!nonceOk) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid or expired nonce' })
+        }
+
         // Verify the signature
         const publicKeyBytes = new PublicKey(input.publicKey).toBytes();
         const messageBytes = new TextEncoder().encode(input.message);
@@ -356,7 +437,7 @@ export const walletRouter = router({
         // Update user with wallet address
         const updatedUser = await prisma.user.update({
           where: { id: ctx.user.id },
-          data: { 
+          data: {
             walletAddress: input.publicKey,
             walletVerifiedAt: new Date(),
           },
@@ -368,12 +449,28 @@ export const walletRouter = router({
           timestamp: new Date().toISOString(),
         });
 
+        const { AuthService } = await import('../../lib/services/auth')
+        await AuthService.invalidateUserCache(ctx.user.id)
+
+        const { birdeyeData } = await import('../../lib/services/birdeyeData')
+        if (existingUser?.walletAddress) {
+          birdeyeData.clearCache(existingUser.walletAddress)
+        }
+        birdeyeData.clearCache(input.publicKey)
+
+        // Record successful wallet link metric
+        recordWalletOperation('link', true, Date.now() - startTime);
+        linkedWalletsTotal.inc();
+
         return {
           success: true,
           walletAddress: updatedUser.walletAddress,
           message: 'Wallet linked successfully',
         };
       } catch (error) {
+        // Record failed wallet link metric
+        recordWalletOperation('link', false, Date.now() - startTime);
+
         if (error instanceof TRPCError) {
           throw error;
         }
@@ -393,9 +490,19 @@ export const walletRouter = router({
       publicKey: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana public key'),
       signature: z.string().min(1, 'Signature is required'),
       message: z.string().min(1, 'Message is required'),
+      nonce: z.string().min(1, 'Nonce is required'),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       try {
+        if (!input.message.includes(`Nonce: ${input.nonce}`)) {
+          return { isValid: false, publicKey: input.publicKey, error: 'Message must include nonce' }
+        }
+
+        const nonceOk = await nonceManager.validateNonce(input.nonce, ctx.user.id, input.publicKey)
+        if (!nonceOk) {
+          return { isValid: false, publicKey: input.publicKey, error: 'Invalid or expired nonce' }
+        }
+
         const publicKeyBytes = new PublicKey(input.publicKey).toBytes();
         const messageBytes = new TextEncoder().encode(input.message);
         const signatureBytes = Buffer.from(input.signature, 'base64');
@@ -444,7 +551,7 @@ export const walletRouter = router({
 
         // Get wallet balance
         const publicKey = new PublicKey(user.walletAddress);
-        const balance = await connection.getBalance(publicKey);
+        const balance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
 
         return {
           isLinked: true,
@@ -511,20 +618,20 @@ export const walletRouter = router({
     }))
     .query(async ({ input, ctx }) => {
       try {
-        const user = await prisma.user.findUnique({ 
-          where: { id: ctx.user.id } 
+        const user = await prisma.user.findUnique({
+          where: { id: ctx.user.id }
         });
-        
+
         if (!user?.walletAddress) {
-          throw new TRPCError({ 
-            code: 'BAD_REQUEST', 
-            message: 'No wallet address found' 
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No wallet address found'
           });
         }
-        
+
         // Build Solana Pay URL parameters
         const params = new URLSearchParams();
-        
+
         if (input.amount) {
           params.append('amount', input.amount.toString());
         }
@@ -540,13 +647,13 @@ export const walletRouter = router({
         if (input.spl) {
           params.append('spl-token', input.spl);
         }
-        
+
         // Construct Solana Pay URL
         const queryString = params.toString();
-        const solanaPayUrl = queryString 
+        const solanaPayUrl = queryString
           ? `solana:${user.walletAddress}?${queryString}`
           : `solana:${user.walletAddress}`;
-        
+
         return {
           url: solanaPayUrl,
           walletAddress: user.walletAddress,
@@ -567,7 +674,7 @@ export const walletRouter = router({
     }),
 
   /**
-   * Get token metadata for multiple mints
+   * Get token metadata for multiple mints (with caching - Audit Issue #8)
    */
   getTokenMetadata: protectedProcedure
     .input(z.object({
@@ -575,53 +682,54 @@ export const walletRouter = router({
     }))
     .query(async ({ input }) => {
       try {
-        // Token metadata cache - in production this should come from a database or external service
-        const tokenMetadataCache: Record<string, { symbol: string; name: string; decimals: number; logoURI?: string }> = {
-          'So11111111111111111111111111111111111111112': { symbol: 'SOL', name: 'Solana', decimals: 9, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' },
-          'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': { symbol: 'USDC', name: 'USD Coin', decimals: 6, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png' },
-          'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': { symbol: 'USDT', name: 'Tether USD', decimals: 6, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png' },
-          'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': { symbol: 'mSOL', name: 'Marinade staked SOL', decimals: 9, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So/logo.png' },
-          '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj': { symbol: 'stSOL', name: 'Lido Staked SOL', decimals: 9, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj/logo.png' },
-        };
-
+        const ttls = getCacheTtls()
         const metadata = await Promise.all(
           input.mints.map(async (mint) => {
-            // Check cache first
-            if (tokenMetadataCache[mint]) {
+            // Check known tokens first (immediate return)
+            if (KNOWN_TOKENS[mint]) {
               return {
                 mint,
-                ...tokenMetadataCache[mint],
+                ...KNOWN_TOKENS[mint],
               };
             }
 
-            // For unknown tokens, try to fetch from chain
-            // In production, this would query a token registry service or Metaplex metadata
+            const cacheKey: `tokenMetadata:${string}` = `tokenMetadata:${mint}`
+            const cached = await redisCache.get<TokenMetadata>(cacheKey)
+            if (cached) {
+              return {
+                mint,
+                ...cached,
+              };
+            }
+
+            let decimals: number | null = null
+
+            // For unknown tokens, try to fetch decimals from chain
             try {
               const mintPubkey = new PublicKey(mint);
-              const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
-              
+              const mintInfo = await rpcManager.withFailover((connection) => connection.getParsedAccountInfo(mintPubkey));
+
               if (mintInfo.value && 'parsed' in mintInfo.value.data) {
                 const parsed = mintInfo.value.data.parsed;
                 if (parsed.type === 'mint' && parsed.info) {
-                  return {
-                    mint,
-                    symbol: mint.slice(0, 6).toUpperCase(), // Default symbol from mint
-                    name: 'Unknown Token',
-                    decimals: parsed.info.decimals || 0,
-                  };
+                  decimals = parsed.info.decimals || 0
                 }
               }
             } catch (error) {
               logger.debug('Failed to fetch metadata for mint:', { mint, error });
             }
 
-            // Return default metadata for unknown tokens
-            return {
-              mint,
-              symbol: 'UNKNOWN',
-              name: 'Unknown Token',
-              decimals: 0,
-            };
+            const metaplex = await fetchMetaplexMetadata(mint)
+            const data: TokenMetadata = {
+              symbol: (metaplex?.symbol && metaplex.symbol.length > 0) ? metaplex.symbol : (decimals !== null ? mint.slice(0, 6).toUpperCase() : 'UNKNOWN'),
+              name: (metaplex?.name && metaplex.name.length > 0) ? metaplex.name : (decimals !== null ? 'Unknown Token' : 'Unknown Token'),
+              decimals: decimals ?? 0,
+              ...(metaplex?.image ? { logoURI: metaplex.image } : {}),
+            }
+
+            const ttlSeconds = metaplex ? 86_400 : ttls.tokenMetadata
+            await redisCache.set(cacheKey, data, ttlSeconds)
+            return { mint, ...data }
           })
         );
 
@@ -668,9 +776,9 @@ export const walletRouter = router({
         let fee = 0.000005; // Default fee estimate
 
         try {
-          const txInfo = await connection.getTransaction(input.signature, {
-            maxSupportedTransactionVersion: 0,
-          });
+          const txInfo = await rpcManager.withFailover((connection) =>
+            connection.getTransaction(input.signature, { maxSupportedTransactionVersion: 0 })
+          );
 
           if (txInfo) {
             txStatus = txInfo.meta?.err ? 'FAILED' : 'CONFIRMED';
@@ -711,14 +819,58 @@ export const walletRouter = router({
           },
         });
 
+        const ipAddress = ctx.rateLimitContext?.ip || ctx.req?.ip || ctx.fingerprint?.ipAddress || 'unknown'
+        const uaHeader = ctx.req?.headers?.['user-agent']
+        const userAgent = Array.isArray(uaHeader) ? uaHeader[0] : (typeof uaHeader === 'string' ? uaHeader : ctx.fingerprint?.userAgent)
+
+        await auditLogService.logFinancialOperation({
+          userId: ctx.user.id,
+          operation: input.type,
+          resourceType: 'Transaction',
+          resourceId: transaction.id,
+          amount: input.amount,
+          currency: input.tokenSymbol,
+          feeAmount: fee,
+          metadata: {
+            signature: input.signature,
+            token: input.token,
+            from: input.from || user.walletAddress,
+            to: input.to,
+            status: txStatus,
+            notes: input.notes ?? null,
+          },
+          ipAddress,
+          userAgent,
+        })
+
+        try {
+          await amlService.monitorTransaction(
+            ctx.user.id,
+            transaction.id,
+            input.signature,
+            input.amount,
+            input.tokenSymbol,
+            { type: input.type, token: input.token, status: txStatus }
+          )
+        } catch (error) {
+          logger.warn('AML monitoring failed for recorded transaction', { userId: ctx.user.id, transactionId: transaction.id, error })
+        }
+
         logger.info('Transaction recorded successfully:', {
           id: transaction.id,
           signature: input.signature,
           type: input.type,
         });
 
+        // Record transaction metric
+        const txType = input.type === 'SEND' ? 'transfer' : input.type === 'RECEIVE' ? 'transfer' : 'swap';
+        recordTxMetric(txType, txStatus !== 'FAILED', 0); // Duration not applicable for recorded txs
+
         return { transaction, alreadyRecorded: false };
       } catch (error) {
+        // Record failed transaction metric
+        recordTxMetric('transfer', false, 0);
+
         if (error instanceof TRPCError) {
           throw error;
         }

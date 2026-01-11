@@ -67,7 +67,9 @@ export const trpcClient = trpc.createClient({
               const data = await res.json();
               csrf = data?.token;
               if (csrf) await SecureStorage.setCsrfToken(csrf);
-            } catch { }
+            } catch {
+              void 0;
+            }
           }
           if (csrf) headers['x-csrf-token'] = csrf;
         }

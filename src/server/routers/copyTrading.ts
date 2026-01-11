@@ -1,21 +1,30 @@
 import { z } from 'zod';
-import { router, protectedProcedure } from '../trpc'
+import { router, protectedProcedure, financialProcedure, createOwnershipProcedure } from '../trpc'
 import { applyRateLimit } from '../../lib/middleware/rateLimit';
 import { TRPCError } from '@trpc/server';
 import prisma from '../../lib/prisma'
 import { LockService } from '../../lib/services/lockService'
 import { logger } from '../../lib/logger';
-import { custodialWalletService, TRANSACTION_LIMITS } from '../../lib/services/custodialWallet';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { TRANSACTION_LIMITS } from '../../lib/services/custodialWallet';
+import type { CustodialWalletService } from '../../lib/services/custodialWallet';
+import { PublicKey } from '@solana/web3.js';
 import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
+import { verifyTotpForUser } from '../../lib/middleware/auth'
+import type { RpcManager } from '../../lib/services/rpcManager';
+import { MAX_SLIPPAGE_PERCENT, validateSlippage } from '../../lib/validation'
+import { auditLogService } from '../../lib/services/auditLog'
+import type { JupiterSwap } from '../../lib/services/jupiterSwap'
+import { redisCache } from '../../lib/redis'
+import { container } from '../../lib/di/container';
+
+// Resolve services from DI container
+const custodialWalletService = container.resolve<CustodialWalletService>('CustodialWallet');
+const rpcManager = container.resolve<RpcManager>('RpcManager');
+const jupiterSwap = container.resolve<JupiterSwap>('JupiterSwap');
 
 // USDC mint address on Solana mainnet
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDC_DECIMALS = 6;
-
-interface JupiterPriceResponse {
-  data: Record<string, { price: number }>;
-}
 
 interface CopyTradingUpdateInput {
   totalBudget?: number;
@@ -31,16 +40,7 @@ async function fetchCurrentPrices(tokenMints: string[]): Promise<Record<string, 
   if (tokenMints.length === 0) return {};
 
   try {
-    const response = await fetch(
-      `https://price.jup.ag/v4/price?ids=${tokenMints.join(',')}`
-    );
-    const data = await response.json() as JupiterPriceResponse;
-
-    const prices: Record<string, number> = {};
-    for (const mint of tokenMints) {
-      prices[mint] = data?.data?.[mint]?.price || 0;
-    }
-    return prices;
+    return await jupiterSwap.getPrices(tokenMints)
   } catch (error) {
     logger.error('Error fetching prices from Jupiter', error);
     return {};
@@ -102,9 +102,7 @@ export const copyTradingRouter = router({
         // Get USDC balance
         let usdcBalance = 0;
         try {
-          const rpcUrl = process.env.HELIUS_RPC_URL ||
-            `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
-          const connection = new Connection(rpcUrl, 'confirmed');
+          const connection = await rpcManager.getConnection();
 
           const walletPubkey = new PublicKey(publicKey);
           const usdcMint = new PublicKey(USDC_MINT);
@@ -137,16 +135,35 @@ export const copyTradingRouter = router({
   // ================================================
   getTopTraders: protectedProcedure
     .query(async () => {
+      const cacheKey = 'traders:top:default' as const
+      const cached = await redisCache.get<any>(cacheKey)
+      if (cached) return cached
+
       // First try to get featured traders
       let traders = await prisma.traderProfile.findMany({
         where: { isFeatured: true },
         orderBy: { featuredOrder: 'asc' },
         take: 10,
-        include: {
-          _count: {
-            select: { copiers: { where: { isActive: true } } },
-          },
-        },
+        select: {
+          id: true,
+          walletAddress: true,
+          username: true,
+          avatarUrl: true,
+          bio: true,
+          totalFollowers: true,
+          totalTrades: true,
+          winRate: true,
+          totalROI: true,
+          avgTradeSize: true,
+          totalVolume: true,
+          roi7d: true,
+          roi30d: true,
+          roi90d: true,
+          isFeatured: true,
+          featuredOrder: true,
+          createdAt: true,
+          updatedAt: true,
+        }
       });
 
       // Fallback: If no featured traders, get top performers by ROI
@@ -157,18 +174,36 @@ export const copyTradingRouter = router({
           },
           orderBy: { totalROI: 'desc' },
           take: 10,
-          include: {
-            _count: {
-              select: { copiers: { where: { isActive: true } } },
-            },
-          },
+          select: {
+            id: true,
+            walletAddress: true,
+            username: true,
+            avatarUrl: true,
+            bio: true,
+            totalFollowers: true,
+            totalTrades: true,
+            winRate: true,
+            totalROI: true,
+            avgTradeSize: true,
+            totalVolume: true,
+            roi7d: true,
+            roi30d: true,
+            roi90d: true,
+            isFeatured: true,
+            featuredOrder: true,
+            createdAt: true,
+            updatedAt: true,
+          }
         });
       }
 
-      return traders.map((trader: typeof traders[0]) => ({
+      const result = traders.map((trader: typeof traders[0]) => ({
         ...trader,
-        activeFollowers: trader._count.copiers,
-      }));
+        activeFollowers: trader.totalFollowers,
+      }))
+
+      await redisCache.set(cacheKey, result, 60)
+      return result
     }),
 
   // ================================================
@@ -206,20 +241,38 @@ export const copyTradingRouter = router({
   // ================================================
   // START COPYING A TRADER
   // ================================================
-  startCopying: protectedProcedure
+  startCopying: financialProcedure
     .input(z.object({
       walletAddress: z.string(),
       totalBudget: z.number().positive().max(1000000),
       amountPerTrade: z.number().positive().max(10000),
       stopLoss: z.number().min(-100).max(0).optional(),
       takeProfit: z.number().positive().max(1000).optional(),
-      maxSlippage: z.number().positive().max(50).optional(),
+      maxSlippage: z.number().positive().max(5).optional(),
       exitWithTrader: z.boolean().default(false),
+      minProfitForSharing: z.number().nonnegative().max(1000).optional(), // Minimum profit (USDC) for 5% fee
+      totpCode: z.string().length(6).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
       const userId = ctx.user.id
       const lockKey = `copy-trade:${userId}:${input.walletAddress}`
+
+      // Comment 3: Make TOTP optional - only verify if user has 2FA enabled
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { totpSecret: true },
+      });
+
+      const has2FAEnabled = !!user?.totpSecret;
+
+      if (has2FAEnabled) {
+        if (!input.totpCode) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required for copy trading' });
+        }
+        await verifyTotpForUser(userId, input.totpCode);
+      }
+      // If user doesn't have 2FA, allow proceeding without TOTP code
 
       // Validate amount per trade <= total budget
       if (input.amountPerTrade > input.totalBudget) {
@@ -239,6 +292,16 @@ export const copyTradingRouter = router({
           code: 'BAD_REQUEST',
           message: budgetValidation.error || 'Budget validation failed',
         });
+      }
+
+      if (input.maxSlippage !== undefined) {
+        const slippageValidation = validateSlippage(input.maxSlippage)
+        if (!slippageValidation.isValid) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: slippageValidation.error || 'Invalid slippage',
+          });
+        }
       }
 
       // Check if user has custodial wallet with sufficient balance
@@ -315,8 +378,9 @@ export const copyTradingRouter = router({
             amountPerTrade: input.amountPerTrade,
             stopLoss: input.stopLoss || null,
             takeProfit: input.takeProfit || null,
-            maxSlippage: input.maxSlippage || 0.5,
+            maxSlippage: Math.min(input.maxSlippage ?? 0.5, MAX_SLIPPAGE_PERCENT),
             exitWithTrader: input.exitWithTrader,
+            minProfitForSharing: input.minProfitForSharing ?? 0,
           },
           create: {
             userId,
@@ -325,8 +389,9 @@ export const copyTradingRouter = router({
             amountPerTrade: input.amountPerTrade,
             stopLoss: input.stopLoss || null,
             takeProfit: input.takeProfit || null,
-            maxSlippage: input.maxSlippage || 0.5,
+            maxSlippage: Math.min(input.maxSlippage ?? 0.5, MAX_SLIPPAGE_PERCENT),
             exitWithTrader: input.exitWithTrader,
+            minProfitForSharing: input.minProfitForSharing ?? 0,
           },
           include: {
             trader: true,
@@ -354,6 +419,27 @@ export const copyTradingRouter = router({
           data: { totalFollowers: { increment: 1 } },
         });
 
+        await auditLogService.logFinancialOperation({
+          userId,
+          operation: 'COPY_TRADING_START',
+          resourceType: 'CopyTrading',
+          resourceId: copyTrading.id,
+          amount: input.totalBudget,
+          currency: 'USDC',
+          metadata: {
+            traderWalletAddress: input.walletAddress,
+            traderId: trader.id,
+            totalBudget: input.totalBudget,
+            amountPerTrade: input.amountPerTrade,
+            stopLoss: input.stopLoss ?? null,
+            takeProfit: input.takeProfit ?? null,
+            maxSlippage: Math.min(input.maxSlippage ?? 0.5, MAX_SLIPPAGE_PERCENT),
+            exitWithTrader: input.exitWithTrader,
+          },
+          ipAddress: ctx.rateLimitContext.ip,
+          userAgent: ctx.fingerprint?.userAgent,
+        })
+
         return copyTrading
       })
     }),
@@ -361,21 +447,27 @@ export const copyTradingRouter = router({
   // ================================================
   // UPDATE COPY SETTINGS
   // ================================================
-  updateSettings: protectedProcedure
+  updateSettings: createOwnershipProcedure('CopyTrading', 'copyTradingId')
     .input(z.object({
       copyTradingId: z.string(),
       totalBudget: z.number().positive().optional(),
       amountPerTrade: z.number().positive().optional(),
       stopLoss: z.number().min(-100).max(0).optional(),
       takeProfit: z.number().positive().max(1000).optional(),
-      maxSlippage: z.number().positive().max(50).optional(),
+      maxSlippage: z.number().positive().max(5).optional(),
       exitWithTrader: z.boolean().optional(),
+      totpCode: z.string().length(6).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
       const userId = ctx.user.id
       const lockKey = `copy-trade:update:${userId}`
       const { copyTradingId, ...rawUpdates } = input
+
+      if (!input.totpCode) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
+      }
+      await verifyTotpForUser(userId, input.totpCode)
 
       // Filter out undefined values and handle null conversion
       const updates: CopyTradingUpdateInput = {}
@@ -384,26 +476,71 @@ export const copyTradingRouter = router({
       if (rawUpdates.stopLoss !== undefined) updates.stopLoss = rawUpdates.stopLoss
       if (rawUpdates.takeProfit !== undefined) updates.takeProfit = rawUpdates.takeProfit
       if (rawUpdates.exitWithTrader !== undefined) updates.exitWithTrader = rawUpdates.exitWithTrader
-
-      // Verify ownership
-      const copyTrading = await prisma.copyTrading.findUnique({
-        where: { id: copyTradingId },
-      })
-
-      if (!copyTrading || copyTrading.userId !== userId) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Cannot update this copy trade',
-        });
+      if (rawUpdates.maxSlippage !== undefined) {
+        const slippageValidation = validateSlippage(rawUpdates.maxSlippage)
+        if (!slippageValidation.isValid) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: slippageValidation.error || 'Invalid slippage',
+          })
+        }
       }
 
       // Update settings
       return await LockService.withLock(lockKey, async () => {
+        const existing = await prisma.copyTrading.findUnique({
+          where: { id: copyTradingId },
+          select: { totalBudget: true, amountPerTrade: true },
+        })
+        if (!existing) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Copy trade not found' })
+        }
+
+        const nextTotalBudget = rawUpdates.totalBudget ?? existing.totalBudget
+        const nextAmountPerTrade = rawUpdates.amountPerTrade ?? existing.amountPerTrade
+        if (nextAmountPerTrade > nextTotalBudget) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Amount per trade cannot exceed total budget',
+          })
+        }
+
+        const budgetValidation = custodialWalletService.validateCopyTradeBudget(
+          nextTotalBudget,
+          nextAmountPerTrade
+        )
+        if (!budgetValidation.valid) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: budgetValidation.error || 'Budget validation failed',
+          })
+        }
+
+        if (rawUpdates.maxSlippage !== undefined) {
+          updates.maxSlippage = Math.min(rawUpdates.maxSlippage, MAX_SLIPPAGE_PERCENT)
+        }
+
         const updated = await prisma.copyTrading.update({
           where: { id: copyTradingId },
           data: updates,
           include: { trader: true },
         })
+
+        await auditLogService.logFinancialOperation({
+          userId,
+          operation: 'COPY_TRADING_UPDATE_SETTINGS',
+          resourceType: 'CopyTrading',
+          resourceId: updated.id,
+          amount: updated.totalBudget,
+          currency: 'USDC',
+          metadata: {
+            updatedFields: Object.keys(updates),
+            updates,
+          },
+          ipAddress: ctx.rateLimitContext.ip,
+          userAgent: ctx.fingerprint?.userAgent,
+        })
+
         return updated
       })
     }),
@@ -411,14 +548,20 @@ export const copyTradingRouter = router({
   // ================================================
   // STOP COPYING (Pause, Keep Positions)
   // ================================================
-  stopCopying: protectedProcedure
+  stopCopying: createOwnershipProcedure('CopyTrading', 'copyTradingId')
     .input(z.object({
       copyTradingId: z.string(),
+      totpCode: z.string().length(6).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
       const userId = ctx.user.id
       const lockKey = `copy-trade:stop:${userId}`
+
+      if (!input.totpCode) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
+      }
+      await verifyTotpForUser(userId, input.totpCode)
 
       // Verify ownership
       const copyTrading = await prisma.copyTrading.findUnique({
@@ -426,11 +569,8 @@ export const copyTradingRouter = router({
         include: { trader: true },
       });
 
-      if (!copyTrading || copyTrading.userId !== userId) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Cannot stop this copy trade',
-        });
+      if (!copyTrading) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Copy trade not found' })
       }
 
       // Deactivate
@@ -454,6 +594,19 @@ export const copyTradingRouter = router({
         where: { walletAddress: copyTrading.trader.walletAddress },
         data: { totalCopiers: { decrement: 1 } },
       });
+
+      await auditLogService.logFinancialOperation({
+        userId,
+        operation: 'COPY_TRADING_STOP',
+        resourceType: 'CopyTrading',
+        resourceId: updated.id,
+        metadata: {
+          traderId: copyTrading.traderId,
+          traderWalletAddress: copyTrading.trader.walletAddress,
+        },
+        ipAddress: ctx.rateLimitContext.ip,
+        userAgent: ctx.fingerprint?.userAgent,
+      })
 
       return updated
     }),
@@ -541,58 +694,87 @@ export const copyTradingRouter = router({
   getPositionHistory: protectedProcedure
     .input(z.object({
       copyTradingId: z.string().optional(),
-      limit: z.number().default(50),
-      offset: z.number().default(0),
+      limit: z.number().int().min(1).max(200).default(50),
+      offset: z.number().int().min(0).default(0),
+      cursor: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
       const userId = ctx.user.id;
 
-      const positions = await prisma.position.findMany({
-        where: {
-          status: 'CLOSED',
-          copyTrading: {
-            userId,
-            ...(input.copyTradingId ? { id: input.copyTradingId } : {}),
-          },
+      const where = {
+        status: 'CLOSED',
+        copyTrading: {
+          userId,
+          ...(input.copyTradingId ? { id: input.copyTradingId } : {}),
         },
-        include: {
-          copyTrading: {
-            include: { trader: true },
+      } as const
+
+      const orderBy = [{ exitTimestamp: 'desc' }, { id: 'desc' }] as const
+
+      let positions = [] as Awaited<ReturnType<typeof prisma.position.findMany>>
+      let nextCursor: string | undefined
+
+      if (input.cursor) {
+        positions = await prisma.position.findMany({
+          where,
+          include: {
+            copyTrading: {
+              include: { trader: true },
+            },
           },
-        },
-        orderBy: { exitTimestamp: 'desc' },
-        take: input.limit,
-        skip: input.offset,
-      });
+          orderBy,
+          take: input.limit + 1,
+          cursor: { id: input.cursor },
+          skip: 1,
+        })
+
+        if (positions.length > input.limit) {
+          const next = positions.pop()
+          nextCursor = next?.id
+        }
+      } else {
+        positions = await prisma.position.findMany({
+          where,
+          include: {
+            copyTrading: {
+              include: { trader: true },
+            },
+          },
+          orderBy,
+          take: input.limit,
+          skip: input.offset,
+        })
+      }
 
       const total = await prisma.position.count({
-        where: {
-          status: 'CLOSED',
-          copyTrading: {
-            userId,
-            ...(input.copyTradingId ? { id: input.copyTradingId } : {}),
-          },
-        },
+        where,
       });
 
       return {
         positions,
         total,
-        hasMore: (input.offset + input.limit) < total,
+        hasMore: input.cursor ? Boolean(nextCursor) : (input.offset + input.limit) < total,
+        nextCursor,
       };
     }),
 
   // ================================================
   // CLOSE POSITION MANUALLY
   // ================================================
-  closePosition: protectedProcedure
+  closePosition: createOwnershipProcedure('Position', 'positionId')
     .input(z.object({
       positionId: z.string(),
+      totpCode: z.string().length(6).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
       const userId = ctx.user.id
       const lockKey = `copy-trade:close:${userId}`
+
+      if (!input.totpCode) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
+      }
+      await verifyTotpForUser(userId, input.totpCode)
 
       // Get position
       const position = await prisma.position.findUnique({
@@ -606,13 +788,6 @@ export const copyTradingRouter = router({
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'Position not found',
-        });
-      }
-
-      if (position.copyTrading.userId !== userId) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Cannot close this position',
         });
       }
 
@@ -639,6 +814,23 @@ export const copyTradingRouter = router({
           },
         })
         return res
+      })
+
+      await auditLogService.logFinancialOperation({
+        userId,
+        operation: 'POSITION_CLOSE_REQUEST',
+        resourceType: 'Position',
+        resourceId: position.id,
+        amount: position.entryAmount,
+        currency: 'USDC',
+        metadata: {
+          queueId: queueItem.id,
+          copyTradingId: position.copyTradingId,
+          tokenMint: position.tokenMint,
+          maxSlippage: 2,
+        },
+        ipAddress: ctx.rateLimitContext.ip,
+        userAgent: ctx.fingerprint?.userAgent,
       })
 
       return { success: true, queueId: queueItem.id, message: 'Position queued for closing' }

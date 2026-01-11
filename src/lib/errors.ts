@@ -2,6 +2,38 @@ import { TRPCError } from '@trpc/server';
 import { logger } from './logger';
 
 /**
+ * Sanitize error messages for production
+ * Removes file paths, secrets, wallet addresses, and emails
+ * Plan7 Step 8 implementation
+ */
+function sanitizeErrorMessage(message: string): string {
+  if (!message) return 'An error occurred';
+
+  let sanitized = message;
+
+  // Remove file paths (Windows and Unix)
+  sanitized = sanitized.replace(/[A-Za-z]:\\[^\s]+\.(ts|js|tsx|jsx|json)/gi, '[file]');
+  sanitized = sanitized.replace(/\/[^\s]+\.(ts|js|tsx|jsx|json)/g, '[file]');
+
+  // Remove potential secrets/tokens (32+ alphanumeric)
+  sanitized = sanitized.replace(/[A-Za-z0-9+/]{40,}={0,2}/g, '[redacted]');
+
+  // Remove wallet addresses (base58 32-44 chars)
+  sanitized = sanitized.replace(/[1-9A-HJ-NP-Za-km-z]{32,44}/g, '[address]');
+
+  // Remove email addresses
+  sanitized = sanitized.replace(/[\w.-]+@[\w.-]+\.\w+/g, '[email]');
+
+  // Remove IP addresses
+  sanitized = sanitized.replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, '[ip]');
+
+  // Remove potential private keys (hex format)
+  sanitized = sanitized.replace(/0x[a-fA-F0-9]{64}/g, '[key]');
+
+  return sanitized;
+}
+
+/**
  * Standardized error codes for the application
  */
 export const ErrorCode = {
@@ -13,7 +45,7 @@ export const ErrorCode = {
   INVALID_TOKEN: 'INVALID_TOKEN',
   OTP_EXPIRED: 'OTP_EXPIRED',
   OTP_INVALID: 'OTP_INVALID',
-  
+
   // Wallet & Blockchain
   INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
   INVALID_ADDRESS: 'INVALID_ADDRESS',
@@ -22,21 +54,21 @@ export const ErrorCode = {
   NETWORK_ERROR: 'NETWORK_ERROR',
   WALLET_NOT_FOUND: 'WALLET_NOT_FOUND',
   PRIVATE_KEY_INVALID: 'PRIVATE_KEY_INVALID',
-  
+
   // Data Validation
   INVALID_INPUT: 'INVALID_INPUT',
   MISSING_REQUIRED_FIELD: 'MISSING_REQUIRED_FIELD',
   DUPLICATE_ENTRY: 'DUPLICATE_ENTRY',
   RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
   INVALID_FORMAT: 'INVALID_FORMAT',
-  
+
   // System & Database
   DATABASE_ERROR: 'DATABASE_ERROR',
   EXTERNAL_SERVICE_ERROR: 'EXTERNAL_SERVICE_ERROR',
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
   CONFIGURATION_ERROR: 'CONFIGURATION_ERROR',
-  
+
   // Generic
   UNKNOWN_ERROR: 'UNKNOWN_ERROR',
   OPERATION_FAILED: 'OPERATION_FAILED',
@@ -80,7 +112,7 @@ export class AppError extends Error {
     isOperational: boolean = true
   ) {
     super(message);
-    
+
     this.name = 'AppError';
     this.code = code;
     this.errorCode = errorCode;
@@ -225,23 +257,33 @@ export function withErrorHandling<T extends any[], R>(
 
       // Handle known error types
       if (error instanceof Error) {
-        const appError = new AppError(
-          'INTERNAL_SERVER_ERROR',
-          process.env.NODE_ENV === 'production' 
-            ? 'An unexpected error occurred'
-            : error.message,
-          ErrorCode.UNKNOWN_ERROR,
-          {
-            ...context,
-            originalError: {
+        // Plan7 Step 8: Sanitize error messages in production
+        const sanitizedMessage = process.env.NODE_ENV === 'production'
+          ? sanitizeErrorMessage(error.message)
+          : error.message;
+
+        // Build metadata - remove stack trace in production
+        const errorMetadata: ErrorMetadata = {
+          ...context,
+          originalError: process.env.NODE_ENV === 'production'
+            ? { name: error.name, message: sanitizeErrorMessage(error.message) }
+            : {
               name: error.name,
               message: error.message,
               ...(error.stack ? { stack: error.stack } : {}),
             },
-          },
+        };
+
+        const appError = new AppError(
+          'INTERNAL_SERVER_ERROR',
+          process.env.NODE_ENV === 'production'
+            ? 'An unexpected error occurred'
+            : sanitizedMessage,
+          ErrorCode.UNKNOWN_ERROR,
+          errorMetadata,
           false // Not operational since it's unexpected
         );
-        
+
         appError.log();
         throw appError.toTRPCError();
       }
@@ -257,7 +299,7 @@ export function withErrorHandling<T extends any[], R>(
         },
         false
       );
-      
+
       appError.log();
       throw appError.toTRPCError();
     }
@@ -292,7 +334,7 @@ export const errorHandlingMiddleware = (context?: Partial<ErrorMetadata>) => {
         context,
         false
       );
-      
+
       appError.log();
       throw appError.toTRPCError();
     }

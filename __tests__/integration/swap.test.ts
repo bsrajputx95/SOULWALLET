@@ -17,7 +17,9 @@ import {
 } from '../utils/test-helpers';
 import { VALID_SOLANA_ADDRESSES, invalidData, testTimeouts } from '../utils/test-fixtures';
 
-describe('Swap Router Integration Tests', () => {
+const describeIntegration = process.env.RUN_INTEGRATION_TESTS === 'true' ? describe : describe.skip;
+
+describeIntegration('Swap Router Integration Tests', () => {
   let testUser: { email: string; password: string; token: string; refreshToken: string; userId: string };
 
   beforeAll(async () => {

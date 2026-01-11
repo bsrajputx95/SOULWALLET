@@ -6,8 +6,11 @@ import { logger } from '../../lib/logger';
 import { AuthService } from '../../lib/services/auth';
 import { createEmailService } from '../../lib/services/email';
 import prisma, { checkDatabaseHealth } from '../../lib/prisma';
+import { recordAuthAttempt, activeSessionsGauge } from '../../lib/metrics';
 
 import { applyRateLimit } from '../../lib/middleware/rateLimit';
+import { verifyCaptchaMiddleware } from '../../lib/middleware/auth'
+import { geoBlockMiddleware } from '../../lib/middleware/geoBlock'
 import {
   signupSchema,
   loginSchema,
@@ -31,12 +34,24 @@ export const authRouter = router({
   signup: publicProcedure
     .input(signupSchema)
     .mutation(async ({ input, ctx }) => {
+      const startTime = Date.now();
       try {
         // Apply rate limiting
         await applyRateLimit('signup', ctx.rateLimitContext);
+        await geoBlockMiddleware(ctx.rateLimitContext.ip)
+
+        if (process.env.CAPTCHA_ENABLED === 'true') {
+          if (!input.captchaToken) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'CAPTCHA token is required' })
+          }
+          await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
+        }
 
         // Create user account with fingerprint
         const result = await AuthService.signup(input, ctx.fingerprint);
+
+        // Record successful signup metric
+        recordAuthAttempt('register', true, Date.now() - startTime);
 
         // Send welcome email (non-blocking)
         emailService.sendWelcomeEmail(input.email).catch((error) => {
@@ -51,6 +66,10 @@ export const authRouter = router({
           refreshToken: result.refreshToken,
         };
       } catch (error) {
+        // Record failed signup metric
+        const reason = error instanceof TRPCError ? error.code : 'internal_error';
+        recordAuthAttempt('register', false, Date.now() - startTime, reason);
+
         if (error instanceof TRPCError) {
           throw error;
         }
@@ -68,12 +87,37 @@ export const authRouter = router({
   login: publicProcedure
     .input(loginSchema)
     .mutation(async ({ input, ctx }) => {
+      const startTime = Date.now();
       try {
         // Apply rate limiting
         await applyRateLimit('login', ctx.rateLimitContext);
+        await geoBlockMiddleware(ctx.rateLimitContext.ip)
+
+        if (process.env.CAPTCHA_ENABLED === 'true') {
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+          const failedCount = await prisma.loginAttempt.count({
+            where: {
+              identifier: input.identifier.toLowerCase(),
+              successful: false,
+              createdAt: { gte: oneHourAgo },
+            },
+          })
+
+          if (failedCount >= 2) {
+            if (!input.captchaToken) {
+              throw new TRPCError({ code: 'BAD_REQUEST', message: 'CAPTCHA token is required' })
+            }
+            await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
+          } else if (input.captchaToken) {
+            await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
+          }
+        }
 
         // Authenticate user with fingerprint
         const result = await AuthService.login(input, ctx.fingerprint);
+
+        // Record successful login metric
+        recordAuthAttempt('login', true, Date.now() - startTime);
 
         return {
           success: true,
@@ -83,6 +127,10 @@ export const authRouter = router({
           refreshToken: result.refreshToken,
         };
       } catch (error) {
+        // Record failed login metric
+        const reason = error instanceof TRPCError ? error.code : 'internal_error';
+        recordAuthAttempt('login', false, Date.now() - startTime, reason);
+
         if (error instanceof TRPCError) {
           throw error;
         }
@@ -134,6 +182,13 @@ export const authRouter = router({
       try {
         // Apply rate limiting
         await applyRateLimit('passwordReset', ctx.rateLimitContext);
+
+        if (process.env.CAPTCHA_ENABLED === 'true') {
+          if (!input.captchaToken) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'CAPTCHA token is required' })
+          }
+          await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
+        }
 
         // Request password reset
         const result = await AuthService.requestPasswordReset(input);
@@ -536,11 +591,11 @@ export const authRouter = router({
         // Perform basic health checks
         const emailConfigValid = await emailService.verifyConfiguration();
         const dbHealth = await checkDatabaseHealth();
-        
+
         // Get security metrics
         const now = new Date();
         const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        
+
         const [
           activeSessions,
           recentLoginAttempts,
@@ -563,7 +618,7 @@ export const authRouter = router({
             },
           }),
         ]);
-        
+
         return {
           success: true,
           status: dbHealth.healthy ? 'healthy' : 'unhealthy',

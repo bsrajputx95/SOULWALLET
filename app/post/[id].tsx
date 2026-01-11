@@ -63,7 +63,7 @@ export default function PostDetailScreen() {
   const repostMutation = trpc.social.createRepost.useMutation({
     onSuccess: () => {
       setIsReposted(true);
-      postQuery.refetch();
+      void postQuery.refetch();
     },
   });
 
@@ -76,8 +76,8 @@ export default function PostDetailScreen() {
   const addCommentMutation = trpc.social.createComment.useMutation({
     onSuccess: () => {
       setNewComment('');
-      postQuery.refetch();
-      commentsQuery.refetch(); // Also refetch comments
+      void postQuery.refetch();
+      void commentsQuery.refetch(); // Also refetch comments
     },
   });
 

@@ -5,6 +5,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    Linking,
     Platform,
     Image,
     Alert,
@@ -18,12 +19,14 @@ import { User, Mail, Lock, UserPlus, Eye, EyeOff } from 'lucide-react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
 import { useAuth } from '../../hooks/auth-store';
 import { COLORS } from '../../constants/colors';
 import { NeonButton } from '../../components/NeonButton';
 import { NeonDivider } from '../../components/NeonDivider';
 import { SocialButton } from '../../components/SocialButton';
 import { GlowingText } from '../../components/GlowingText';
+import { trpcClient } from '../../lib/trpc';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
 
@@ -39,10 +42,25 @@ export default function SignupNewScreen() {
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [tosAccepted, setTosAccepted] = useState(false);
+    const [privacyAccepted, setPrivacyAccepted] = useState(false);
 
     const emailInputRef = useRef<TextInput>(null);
     const passwordInputRef = useRef<TextInput>(null);
     const confirmPasswordInputRef = useRef<TextInput>(null);
+
+    const openUrl = async (url: string) => {
+        if (!url) return;
+        try {
+            if (Platform.OS === 'web') {
+                await Linking.openURL(url);
+            } else {
+                await WebBrowser.openBrowserAsync(url);
+            }
+        } catch {
+            setErrorMessage('Failed to open link');
+        }
+    };
 
     const handleSignup = async () => {
         Keyboard.dismiss();
@@ -63,9 +81,13 @@ export default function SignupNewScreen() {
             setErrorMessage('Passwords do not match');
             return;
         }
+        if (!tosAccepted || !privacyAccepted) {
+            setErrorMessage('You must accept Terms and Privacy Policy');
+            return;
+        }
 
         if (Platform.OS !== 'web') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }
 
         setIsLoading(true);
@@ -79,6 +101,18 @@ export default function SignupNewScreen() {
                 confirmPassword
             );
             if (success) {
+                void Promise.allSettled([
+                    trpcClient.compliance.logConsent.mutate({
+                        consentType: 'TERMS_OF_SERVICE',
+                        version: '1.0',
+                        granted: true,
+                    }),
+                    trpcClient.compliance.logConsent.mutate({
+                        consentType: 'PRIVACY_POLICY',
+                        version: '1.0',
+                        granted: true,
+                    }),
+                ]);
                 router.replace('/(tabs)');
             } else {
                 // Show actual error from auth store
@@ -116,7 +150,7 @@ export default function SignupNewScreen() {
 
     const handleSocialPress = (provider: string) => {
         if (Platform.OS !== 'web') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         }
         Alert.alert(
             'Coming Soon',
@@ -259,6 +293,53 @@ export default function SignupNewScreen() {
                             </View>
                         </View>
 
+                        <View style={styles.consentContainer}>
+                            <View style={styles.consentRow}>
+                                <TouchableOpacity
+                                    onPress={() => setTosAccepted(!tosAccepted)}
+                                    style={[
+                                        styles.checkbox,
+                                        tosAccepted ? styles.checkboxChecked : undefined,
+                                    ]}
+                                >
+                                    {tosAccepted ? (
+                                        <Text style={styles.checkboxMark}>✓</Text>
+                                    ) : null}
+                                </TouchableOpacity>
+                                <Text style={styles.consentText}>
+                                    I accept the{' '}
+                                    <Text
+                                        style={styles.consentLink}
+                                        onPress={() => openUrl('https://soulwallet.com/terms')}
+                                    >
+                                        Terms of Service
+                                    </Text>
+                                </Text>
+                            </View>
+                            <View style={styles.consentRow}>
+                                <TouchableOpacity
+                                    onPress={() => setPrivacyAccepted(!privacyAccepted)}
+                                    style={[
+                                        styles.checkbox,
+                                        privacyAccepted ? styles.checkboxChecked : undefined,
+                                    ]}
+                                >
+                                    {privacyAccepted ? (
+                                        <Text style={styles.checkboxMark}>✓</Text>
+                                    ) : null}
+                                </TouchableOpacity>
+                                <Text style={styles.consentText}>
+                                    I accept the{' '}
+                                    <Text
+                                        style={styles.consentLink}
+                                        onPress={() => openUrl('https://soulwallet.com/privacy')}
+                                    >
+                                        Privacy Policy
+                                    </Text>
+                                </Text>
+                            </View>
+                        </View>
+
                         {/* Signup Button */}
                         <NeonButton
                             title="Create Account"
@@ -393,6 +474,45 @@ const styles = StyleSheet.create({
     signupButton: {
         marginTop: 8,
         marginBottom: 24,
+    },
+    consentContainer: {
+        marginTop: 4,
+        marginBottom: 8,
+        gap: 12,
+    },
+    consentRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    checkbox: {
+        width: 20,
+        height: 20,
+        borderWidth: 1,
+        borderColor: COLORS.textSecondary,
+        borderRadius: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    checkboxChecked: {
+        borderColor: COLORS.usdc,
+        backgroundColor: COLORS.usdc + '20',
+    },
+    checkboxMark: {
+        color: COLORS.usdc,
+        fontSize: 14,
+        fontWeight: '700',
+        lineHeight: 16,
+    },
+    consentText: {
+        flex: 1,
+        color: COLORS.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    consentLink: {
+        color: COLORS.usdc,
+        fontWeight: '600',
     },
     socialButtonsContainer: {
         flexDirection: 'row',

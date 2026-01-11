@@ -54,6 +54,19 @@ export default function UserProfileScreen() {
   const [maxSlippage, setMaxSlippage] = useState('0.5');
   const [exitWithTrader, setExitWithTrader] = useState(false);
   const [targetUserId, setTargetUserId] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+
+  // Copy trading mutation - CRITICAL FIX: This was missing!
+  const startCopyingMutation = trpc.copyTrading.startCopying.useMutation({
+    onSuccess: () => {
+      Alert.alert('Success', `Now copying @${username}! Check your copy trades in the Home tab.`);
+      setShowCopyModal(false);
+      setTotpCode('');
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to start copy trading. Please check your 2FA code and try again.');
+    },
+  });
 
   // Search for user to get their ID (workaround until getProfileByUsername is deployed)
   const searchUserQuery = trpc.social.searchUsers.useQuery(
@@ -80,7 +93,7 @@ export default function UserProfileScreen() {
   // Toggle follow mutation - use existing toggleFollow with userId
   const toggleFollowMutation = trpc.social.toggleFollow.useMutation({
     onSuccess: () => {
-      userProfileQuery.refetch();
+      void userProfileQuery.refetch();
     },
     onError: (error: any) => {
       Alert.alert('Error', error.message || 'Failed to follow user');
@@ -619,24 +632,71 @@ export default function UserProfileScreen() {
                 <Text style={styles.exitWithTraderSubtext}>Automatically exit when trader exits</Text>
               </TouchableOpacity>
 
+              {/* Fee disclosure */}
+              <View style={styles.feeDisclosure}>
+                <Text style={styles.feeDisclosureText}>
+                  💡 5% of your profits will be shared with this trader when positions close in profit.
+                </Text>
+              </View>
+
+              {/* 2FA Code Input - Required for copy trading */}
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>2FA Code (Required)</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter 6-digit code"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={totpCode}
+                    onChangeText={setTotpCode}
+                    keyboardType="numeric"
+                    maxLength={6}
+                  />
+                </View>
+              </View>
+
               <TouchableOpacity
-                style={styles.startCopyButton}
-                onPress={() => {
-                  const params = {
-                    walletAddress: `${userProfile.username}-wallet`,
-                    totalAmount: parseFloat(copyAmount) || 1000,
-                    amountPerTrade: parseFloat(amountPerTrade) || 100,
-                    stopLoss: stopLoss ? -Math.abs(parseFloat(stopLoss)) : undefined,
-                    takeProfit: takeProfit ? Math.abs(parseFloat(takeProfit)) : undefined,
-                    maxSlippage: maxSlippage ? Math.abs(parseFloat(maxSlippage)) : 0.5,
-                    exitWithTrader,
-                  };
-                  if (__DEV__) console.log('Start copying trader:', params);
-                  Alert.alert('Success', `Started copying @${userProfile.username}!`);
-                  setShowCopyModal(false);
+                style={[
+                  styles.startCopyButton,
+                  (startCopyingMutation.isPending || totpCode.length !== 6) && styles.startCopyButtonDisabled
+                ]}
+                disabled={startCopyingMutation.isPending || totpCode.length !== 6}
+                onPress={async () => {
+                  // Validate inputs
+                  const totalBudget = parseFloat(copyAmount) || 1000;
+                  const perTrade = parseFloat(amountPerTrade) || 100;
+
+                  if (perTrade > totalBudget) {
+                    Alert.alert('Error', 'Amount per trade cannot exceed total budget');
+                    return;
+                  }
+
+                  // Get the actual wallet address
+                  const traderWallet = (userProfile as any)?.walletAddress;
+                  if (!traderWallet) {
+                    Alert.alert('Error', 'Trader wallet address not found. This user may not have a wallet set up.');
+                    return;
+                  }
+
+                  try {
+                    await startCopyingMutation.mutateAsync({
+                      walletAddress: traderWallet,
+                      totalBudget,
+                      amountPerTrade: perTrade,
+                      stopLoss: stopLoss ? -Math.abs(parseFloat(stopLoss)) : undefined,
+                      takeProfit: takeProfit ? Math.abs(parseFloat(takeProfit)) : undefined,
+                      maxSlippage: maxSlippage ? Math.abs(parseFloat(maxSlippage)) : 0.5,
+                      exitWithTrader,
+                      totpCode,
+                    });
+                  } catch (error: any) {
+                    console.error('[Profile] Copy trading error:', error);
+                  }
                 }}
               >
-                <Text style={styles.startCopyText}>Start Copying</Text>
+                <Text style={styles.startCopyText}>
+                  {startCopyingMutation.isPending ? 'Starting...' : 'Start Copying'}
+                </Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -1135,9 +1195,28 @@ const styles = StyleSheet.create({
     borderColor: COLORS.success + '30',
     marginBottom: SPACING.s,
   },
+  startCopyButtonDisabled: {
+    backgroundColor: COLORS.cardBackground,
+    borderColor: COLORS.textSecondary + '30',
+    opacity: 0.6,
+  },
   startCopyText: {
     ...FONTS.phantomBold,
     color: COLORS.success,
     fontSize: 16,
+  },
+  feeDisclosure: {
+    backgroundColor: COLORS.solana + '10',
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.m,
+    marginBottom: SPACING.m,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '20',
+  },
+  feeDisclosureText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
 });

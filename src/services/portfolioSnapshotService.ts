@@ -4,18 +4,15 @@
  * to enable accurate 24h/7d/30d change calculations
  */
 
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import prisma from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { marketData } from '../lib/services/marketData';
+import { rpcManager } from '../lib/services/rpcManager';
+import { redisCache, getCacheTtls } from '../lib/redis'
 
 let snapshotInterval: NodeJS.Timeout | null = null;
 let isRunning = false;
-
-const connection = new Connection(
-  process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-  'confirmed'
-);
 
 export async function startPortfolioSnapshotService() {
   if (isRunning) {
@@ -85,48 +82,53 @@ async function createSnapshotsForAllUsers() {
 }
 
 async function createSnapshotForUser(userId: string, walletAddress: string) {
+  const recentSnapshot = await prisma.portfolioSnapshot.findFirst({
+    where: {
+      userId,
+      timestamp: { gte: new Date(Date.now() - 55 * 60 * 1000) },
+    },
+  });
+
+  if (recentSnapshot) {
+    return;
+  }
+
+  const publicKey = new PublicKey(walletAddress);
+
+  const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
+  const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
+
+  let solPrice = 100;
+  const solMint = 'So11111111111111111111111111111111111111112';
+  const ttls = getCacheTtls();
+
   try {
-    // Check if we already have a recent snapshot (within last 55 minutes)
-    const recentSnapshot = await prisma.portfolioSnapshot.findFirst({
-      where: {
-        userId,
-        timestamp: { gte: new Date(Date.now() - 55 * 60 * 1000) }
-      },
-    });
-
-    if (recentSnapshot) {
-      // Skip - we already have a recent snapshot
-      return;
-    }
-
-    const publicKey = new PublicKey(walletAddress);
-    
-    // Get SOL balance
-    const solBalance = await connection.getBalance(publicKey);
-    const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
-
-    // Get SOL price
-    let solPrice = 100; // Default fallback
-    const solMint = 'So11111111111111111111111111111111111111112';
-    
-    try {
-      // Try to get cached price first
+    // Comment 4: First check Redis cache for SOL price
+    const cachedSolPrice = await redisCache.get<number>('portfolio:sol:price');
+    if (typeof cachedSolPrice === 'number' && cachedSolPrice > 0) {
+      solPrice = cachedSolPrice;
+      logger.debug(`Using cached SOL price: $${solPrice}`);
+    } else {
+      // Fallback to database cache
       const cachedPrice = await prisma.tokenPrice.findUnique({
         where: { tokenMint: solMint },
       });
-      
+
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      
+
       if (cachedPrice && cachedPrice.updatedAt > fiveMinutesAgo) {
         solPrice = cachedPrice.priceUSD;
+        // Cache in Redis for faster access
+        await redisCache.set('portfolio:sol:price', solPrice, ttls.price);
       } else {
-        // Fetch fresh price
         try {
           const tokenData = await marketData.getToken(solMint);
           if (tokenData?.pairs?.[0]?.priceUsd) {
             solPrice = parseFloat(tokenData.pairs[0].priceUsd);
-            
-            // Update cache
+
+            // Cache SOL price in Redis
+            await redisCache.set('portfolio:sol:price', solPrice, ttls.price);
+
             await prisma.tokenPrice.upsert({
               where: { tokenMint: solMint },
               create: {
@@ -134,7 +136,7 @@ async function createSnapshotForUser(userId: string, walletAddress: string) {
                 tokenSymbol: 'SOL',
                 priceUSD: solPrice,
               },
-              update: { 
+              update: {
                 priceUSD: solPrice,
                 updatedAt: new Date(),
               },
@@ -144,32 +146,44 @@ async function createSnapshotForUser(userId: string, walletAddress: string) {
           logger.debug(`Using cached/default price for snapshot (user ${userId})`, err);
         }
       }
-    } catch (error) {
-      logger.debug(`Error fetching SOL price for snapshot (user ${userId})`, error);
     }
-    
-    const totalValue = solBalanceFormatted * solPrice;
+  } catch (error) {
+    logger.debug(`Error fetching SOL price for snapshot (user ${userId})`, error);
+  }
 
-    // Create snapshot
-    await prisma.portfolioSnapshot.create({
-      data: {
-        userId,
-        totalValueUSD: totalValue,
-        tokens: {
-          SOL: {
-            symbol: 'SOL',
-            balance: solBalanceFormatted,
-            value: totalValue,
-            price: solPrice,
-          },
+  const totalValue = solBalanceFormatted * solPrice;
+
+  const snapshot = await prisma.portfolioSnapshot.create({
+    data: {
+      userId,
+      totalValueUSD: totalValue,
+      tokens: {
+        SOL: {
+          symbol: 'SOL',
+          balance: solBalanceFormatted,
+          value: totalValue,
+          price: solPrice,
         },
       },
-    });
+    },
+  });
 
-    logger.debug(`Snapshot created for user ${userId}: $${totalValue.toFixed(2)}`);
-  } catch (error) {
-    throw error;
-  }
+  // Comment 4: Cache the snapshot in Redis with portfolio TTL
+  const snapshotData = {
+    totalValueUSD: totalValue,
+    tokens: {
+      SOL: {
+        symbol: 'SOL',
+        balance: solBalanceFormatted,
+        value: totalValue,
+        price: solPrice,
+      },
+    },
+    timestamp: snapshot.timestamp,
+  };
+  await redisCache.set(`portfolio:snapshot:${userId}` as any, snapshotData, ttls.portfolio);
+
+  logger.debug(`Snapshot created and cached for user ${userId}: $${totalValue.toFixed(2)}`);
 }
 
 /**

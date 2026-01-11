@@ -24,6 +24,7 @@ import {
   Share2,
   Link,
   Trash2,
+  Shield,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 
@@ -382,6 +383,19 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         )}
+
+        {/* Privacy & Data Section - Available to all authenticated users */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Privacy & Data</Text>
+          <TouchableOpacity
+            style={styles.supportItem}
+            onPress={() => router.push('/(tabs)/settings/privacy')}
+          >
+            <Shield size={20} color={COLORS.textSecondary} />
+            <Text style={styles.supportText}>Privacy & Data</Text>
+            <ExternalLink size={16} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
 
         {/* Support Section */}
         {hasWallet && (

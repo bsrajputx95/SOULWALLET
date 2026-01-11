@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { router, protectedProcedure } from '../trpc';
+import { router, protectedProcedure, publicProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { marketData } from '../../lib/services/marketData';
+import { redisCache } from '../../lib/redis';
 
 // Well-known token logos for popular Solana tokens as fallback
 const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
@@ -32,6 +33,31 @@ function getWellKnownTokenLogo(symbol?: string): string | null {
 }
 
 export const marketRouter = router({
+  getTopCoins: publicProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }).partial().optional())
+    .query(async ({ input }) => {
+      const limit = input?.limit ?? 20;
+      const cached = await redisCache.get<any>('soulmarket');
+      if (cached?.pairs && Array.isArray(cached.pairs)) {
+        return { pairs: cached.pairs.slice(0, limit) };
+      }
+
+      void marketData.getSoulMarket().catch(() => void 0);
+
+      const fallbackSymbols = ['SOL', 'USDC', 'USDT', 'JUP', 'PYTH', 'RAY', 'ORCA', 'BONK', 'WIF', 'POPCAT'];
+      const pairs = fallbackSymbols.slice(0, limit).map((symbol) => ({
+        baseToken: { symbol },
+        priceUsd: '0',
+        liquidity: { usd: '0' },
+        volume: { h24: '0' },
+        chainId: 'solana',
+        pairAddress: null,
+        info: { imageUrl: getWellKnownTokenLogo(symbol) },
+      }));
+
+      return { pairs };
+    }),
+
   // Get token details by mint/address
   getToken: protectedProcedure
     .input(z.object({ address: z.string().min(10) }))
@@ -150,20 +176,26 @@ export const marketRouter = router({
     }),
 
   // Trending (fallback implementation)
-  trending: protectedProcedure
+  trending: publicProcedure
     .query(async () => {
       try {
-        return await marketData.trending();
+        const cached = await redisCache.get<any>('trending');
+        if (cached) return cached;
+        void marketData.trending().catch(() => void 0);
+        return { pairs: [] };
       } catch (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch trending tokens' });
       }
     }),
 
   // SoulMarket - Curated tokens with quality filters
-  soulMarket: protectedProcedure
+  soulMarket: publicProcedure
     .query(async () => {
       try {
-        return await marketData.getSoulMarket();
+        const cached = await redisCache.get<any>('soulmarket');
+        if (cached) return cached;
+        void marketData.getSoulMarket().catch(() => void 0);
+        return { pairs: [] };
       } catch (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch SoulMarket tokens' });
       }

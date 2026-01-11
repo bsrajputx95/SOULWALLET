@@ -1,10 +1,14 @@
 import { z } from 'zod';
-import { router, protectedProcedure } from '../trpc';
+import { router, protectedProcedure, financialProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../../lib/logger';
 import { getFeatureFlags } from '../../lib/featureFlags';
 import prisma from '../../lib/prisma';
 import { jupiterSwap } from '../../lib/services/jupiterSwap';
+import { verifyTotpForUser } from '../../lib/middleware/auth'
+import { auditLogService } from '../../lib/services/auditLog'
+import { amlService } from '../../lib/services/kyc'
+import { DECIMALS, FEES } from '@/constants'
 
 // Jupiter API base URL
 const JUPITER_API_URL = 'https://quote-api.jup.ag/v6';
@@ -18,12 +22,12 @@ export const swapRouter = router({
       inputMint: z.string(),
       outputMint: z.string(),
       amount: z.number().positive(),
-      slippage: z.number().min(0.1).max(50).default(0.5),
+      slippage: z.number().min(FEES.SWAP.SLIPPAGE_PERCENT.MIN).max(FEES.SWAP.SLIPPAGE_PERCENT.MAX).default(FEES.SWAP.SLIPPAGE_PERCENT.DEFAULT),
     }))
     .query(async ({ input }) => {
       try {
         // Convert amount to smallest unit (assuming 6 decimals for most tokens)
-        const amountInSmallestUnit = Math.floor(input.amount * 1_000_000);
+        const amountInSmallestUnit = Math.floor(input.amount * DECIMALS.MICRO_LAMPORTS);
 
         const params = new URLSearchParams({
           inputMint: input.inputMint === 'SOL' ? 'So11111111111111111111111111111111111111112' : input.inputMint,
@@ -59,12 +63,13 @@ export const swapRouter = router({
   /**
    * Execute swap transaction
    */
-  swap: protectedProcedure
+  swap: financialProcedure
     .input(z.object({
       fromMint: z.string(),
       toMint: z.string(),
       amount: z.number().positive(),
-      slippage: z.number().min(0).max(50).default(0.5),
+      slippage: z.number().min(0).max(5).default(0.5),
+      totpCode: z.string().length(6).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const { swapEnabled } = getFeatureFlags();
@@ -89,12 +94,17 @@ export const swapRouter = router({
       }
 
       try {
+        if (!input.totpCode) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
+        }
+        await verifyTotpForUser(ctx.user.id, input.totpCode)
+
         // Get quote from Jupiter
         const quote = await jupiterSwap.getQuote({
           inputMint: input.fromMint,
           outputMint: input.toMint,
-          amount: Math.floor(input.amount * 1_000_000), // Convert to lamports/smallest unit
-          slippageBps: Math.floor(input.slippage * 100), // Convert % to bps
+          amount: Math.floor(input.amount * DECIMALS.MICRO_LAMPORTS),
+          slippageBps: Math.floor(input.slippage * (FEES.SWAP.SLIPPAGE_BPS.MAX / FEES.SWAP.SLIPPAGE_PERCENT.MAX)),
         });
 
         if (!quote) {
@@ -106,7 +116,7 @@ export const swapRouter = router({
         const signature = `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         // Save transaction to database
-        await prisma.transaction.create({
+        const transaction = await prisma.transaction.create({
           data: {
             userId: ctx.user.id,
             signature,
@@ -120,6 +130,40 @@ export const swapRouter = router({
             status: 'PENDING',
           },
         });
+
+        const uaHeader = ctx.req?.headers?.['user-agent']
+        const userAgent = Array.isArray(uaHeader) ? uaHeader[0] : (typeof uaHeader === 'string' ? uaHeader : ctx.fingerprint?.userAgent)
+        const tokenSymbol = input.fromMint === 'So11111111111111111111111111111111111111112' ? 'SOL' : input.fromMint.slice(0, 8)
+
+        await auditLogService.logFinancialOperation({
+          userId: ctx.user.id,
+          operation: 'SWAP',
+          resourceType: 'Transaction',
+          resourceId: transaction.id,
+          amount: input.amount,
+          currency: tokenSymbol,
+          feeAmount: 0.00005,
+          metadata: {
+            signature,
+            fromMint: input.fromMint,
+            toMint: input.toMint,
+            slippage: input.slippage,
+            outputAmount: parseFloat(quote.outAmount || '0') / 1_000_000,
+            priceImpact: quote.priceImpactPct || 0,
+          },
+          ipAddress: ctx.rateLimitContext?.ip || ctx.req?.ip || ctx.fingerprint?.ipAddress || 'unknown',
+          userAgent,
+        })
+
+        try {
+          await amlService.monitorTransaction(ctx.user.id, transaction.id, signature, input.amount, tokenSymbol, {
+            fromMint: input.fromMint,
+            toMint: input.toMint,
+            slippage: input.slippage,
+          })
+        } catch (error) {
+          logger.warn('AML monitoring failed for swap', { userId: ctx.user.id, transactionId: transaction.id, error })
+        }
 
         return {
           signature,

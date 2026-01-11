@@ -114,15 +114,71 @@ fi
 log "Starting $DB_TYPE database backup"
 START_TIME=$(date +%s)
 
+# WAL archive settings
+WAL_ARCHIVE_DIR="${WAL_ARCHIVE_DIR:-/var/lib/postgresql/wal_archive}"
+ENABLE_WAL_S3_BACKUP="${ENABLE_WAL_S3_BACKUP:-false}"
+S3_BUCKET="${S3_BUCKET:-soulwallet-backups}"
+WAL_ARCHIVE_RETENTION_DAYS="${WAL_ARCHIVE_RETENTION_DAYS:-7}"
+
 if [ "$DB_TYPE" = "postgresql" ]; then
-    # Use pg_dump with connection string directly
-    pg_dump \
-        --dbname="$DATABASE_URL" \
-        --format=custom \
-        --verbose \
-        --no-owner \
-        --no-acl \
-        --file="$BACKUP_FILE"
+    # Check for PITR mode
+    PITR_MODE="${PITR_MODE:-false}"
+    
+    if [ "$PITR_MODE" = "true" ]; then
+        # Use pg_basebackup for PITR-compatible backups
+        log "Using pg_basebackup for PITR-compatible backup..."
+        BACKUP_FILE="$BACKUP_DIR/basebackup-${TIMESTAMP}.tar.gz"
+        
+        # pg_basebackup with tar format and gzip compression
+        pg_basebackup \
+            --dbname="$DATABASE_URL" \
+            --format=tar \
+            --gzip \
+            --wal-method=stream \
+            --checkpoint=fast \
+            --progress \
+            --pgdata=- > "$BACKUP_FILE"
+        
+        # Create metadata file for PITR recovery
+        cat > "$BACKUP_FILE.meta" << EOF
+backup_timestamp=$TIMESTAMP
+backup_type=pg_basebackup
+pitr_compatible=true
+postgres_version=$(pg_dump --version | head -1)
+wal_archive=$WAL_ARCHIVE_DIR
+EOF
+        log "Created PITR metadata file"
+    else
+        # Use pg_dump with connection string directly (logical backup)
+        pg_dump \
+            --dbname="$DATABASE_URL" \
+            --format=custom \
+            --verbose \
+            --no-owner \
+            --no-acl \
+            --file="$BACKUP_FILE"
+    fi
+    
+    # Archive WAL files to S3 (optional)
+    if [ "$ENABLE_WAL_S3_BACKUP" = "true" ]; then
+        log "Archiving WAL files to S3..."
+        if [ -d "$WAL_ARCHIVE_DIR" ] && [ "$(ls -A "$WAL_ARCHIVE_DIR" 2>/dev/null)" ]; then
+            aws s3 sync "$WAL_ARCHIVE_DIR/" "s3://$S3_BUCKET/wal_archive/" --sse AES256 \
+                && log "WAL files synced to S3" \
+                || log "WARNING: WAL sync to S3 failed"
+        else
+            log "No WAL files to archive"
+        fi
+    fi
+    
+    # WAL cleanup (keep last N days)
+    if [ -d "$WAL_ARCHIVE_DIR" ]; then
+        DELETED_COUNT=$(find "$WAL_ARCHIVE_DIR" -type f -mtime +"$WAL_ARCHIVE_RETENTION_DAYS" -delete -print | wc -l)
+        if [ "$DELETED_COUNT" -gt 0 ]; then
+            log "Cleaned up $DELETED_COUNT old WAL files (older than $WAL_ARCHIVE_RETENTION_DAYS days)"
+        fi
+    fi
+    
 elif [ "$DB_TYPE" = "sqlite" ]; then
     # Use sqlite3 dump with gzip compression
     sqlite3 "$DB_FILE" .dump | gzip > "$BACKUP_FILE"
@@ -142,6 +198,7 @@ log "Backup completed successfully: $BACKUP_FILE ($BACKUP_SIZE) in ${DURATION}s"
 
 # Calculate and store checksum
 sha256sum "$BACKUP_FILE" > "$BACKUP_FILE.sha256"
+
 
 # Backup organization (grandfather-father-son strategy)
 cp "$BACKUP_FILE" "$BACKUP_DIR/daily/"

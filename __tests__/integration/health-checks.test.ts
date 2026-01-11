@@ -18,7 +18,9 @@ import {
 } from '../utils/test-helpers';
 import { testTimeouts } from '../utils/test-fixtures';
 
-describe('Health Check Integration Tests', () => {
+const describeIntegration = process.env.RUN_INTEGRATION_TESTS === 'true' ? describe : describe.skip;
+
+describeIntegration('Health Check Integration Tests', () => {
   beforeAll(async () => {
     const serverReady = await waitForServer(testTimeouts.long);
     if (!serverReady) {
@@ -45,6 +47,8 @@ describe('Health Check Integration Tests', () => {
       expect(data.checks.redis).toBeDefined();
       expect(data.checks.solana).toBeDefined();
       expect(data.checks.rateLimiter).toBeDefined();
+      expect(data.checks.circuitBreakers).toBeDefined();
+      expect(data.checks.dlq).toBeDefined();
     });
 
     it('should include request ID', async () => {

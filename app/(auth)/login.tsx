@@ -53,7 +53,7 @@ export default function LoginNewScreen() {
         }
 
         if (Platform.OS !== 'web') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }
 
         setIsLoading(true);
@@ -87,7 +87,7 @@ export default function LoginNewScreen() {
 
     const handleSocialPress = (provider: string) => {
         if (Platform.OS !== 'web') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         }
         Alert.alert(
             'Coming Soon',

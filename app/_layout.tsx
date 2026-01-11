@@ -24,6 +24,7 @@ import { MarketProvider } from "../hooks/market-store";
 import { NotificationBadgeProvider } from "../hooks/notification-provider";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { performanceMonitor, trackBundleSize } from "../utils/performance";
+import { WebPreviewBanner } from "../components/WebPreviewBanner";
 
 // Validate environment variables at app startup
 import { validateEnvironmentOrThrow } from "../lib/validate-env";
@@ -53,7 +54,7 @@ if (__DEV__) {
 // }
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -75,7 +76,7 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [appIsReady, setAppIsReady] = useState(false);
+  const [timeoutReady, setTimeoutReady] = useState(false);
 
   // Load fonts
   const [fontsLoaded] = useFonts({
@@ -85,17 +86,13 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded) {
-      setAppIsReady(true);
-    } else {
-      // Proceed after 2 seconds if fonts fail to load
-      const timeout = setTimeout(() => {
-        console.warn('Font loading timeout - proceeding without custom fonts');
-        setAppIsReady(true);
-      }, 2000);
-      return () => clearTimeout(timeout);
-    }
+    const timeout = setTimeout(() => {
+      setTimeoutReady(true);
+    }, 2000);
+    return () => clearTimeout(timeout);
   }, [fontsLoaded]);
+
+  const appIsReady = fontsLoaded || timeoutReady;
 
   // Hide splash screen when app is ready
   useEffect(() => {
@@ -147,6 +144,8 @@ export default function RootLayout() {
                       <NotificationBadgeProvider>
                         <GestureHandlerRootView style={{ flex: 1 }}>
                           <View style={styles.container}>
+                            {/* Web Preview Banner - shows only on web platform */}
+                            <WebPreviewBanner />
                             <RootLayoutNav />
                           </View>
                         </GestureHandlerRootView>

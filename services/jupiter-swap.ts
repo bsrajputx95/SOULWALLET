@@ -1,19 +1,45 @@
 /**
  * Jupiter Swap Service
  * Integrates with Jupiter Protocol for token swaps on Solana
+ * Comment 1: Updated to use correct Jupiter v6 API signatures
  */
 
 import { logger } from '../src/lib/logger';
 
-export interface SwapRoute {
+// Jupiter v6 Quote Response shape
+export interface QuoteResponse {
   inputMint: string;
+  inAmount: string;
   outputMint: string;
-  amount: string;
-  slippageBps: number;
+  outAmount: string;
   otherAmountThreshold: string;
   swapMode: 'ExactIn' | 'ExactOut';
+  slippageBps: number;
+  platformFee: { amount: string; feeBps: number } | null;
   priceImpactPct: string;
-  marketInfos: {
+  routePlan: RoutePlanStep[];
+  contextSlot?: number;
+  timeTaken?: number;
+}
+
+export interface RoutePlanStep {
+  swapInfo: {
+    ammKey: string;
+    label: string;
+    inputMint: string;
+    outputMint: string;
+    inAmount: string;
+    outAmount: string;
+    feeAmount: string;
+    feeMint: string;
+  };
+  percent: number;
+}
+
+// Legacy SwapRoute type for backward compatibility
+export interface SwapRoute extends QuoteResponse {
+  // Deprecated: use routePlan instead
+  marketInfos?: {
     id: string;
     label: string;
     inputMint: string;
@@ -26,40 +52,56 @@ export interface SwapRoute {
 }
 
 export interface SwapTransaction {
-  setupTransaction?: string;
   swapTransaction: string;
-  cleanupTransaction?: string;
+  lastValidBlockHeight: number;
+  prioritizationFeeLamports?: number;
+}
+
+export interface GetQuoteParams {
+  inputMint: string;
+  outputMint: string;
+  amount: number;
+  slippageBps?: number;
+  onlyDirectRoutes?: boolean;
+  asLegacyTransaction?: boolean;
+}
+
+export interface ExecuteSwapParams {
+  wallet: any; // Wallet adapter
+  quoteResponse: QuoteResponse;
+  wrapAndUnwrapSol?: boolean;
+  prioritizationFeeLamports?: number;
+  asLegacyTransaction?: boolean;
 }
 
 class JupiterSwapService {
   private readonly baseUrl = 'https://quote-api.jup.ag/v6';
   
   /**
-   * Get swap quote from Jupiter
+   * Get swap quote from Jupiter v6 API
+   * Comment 1: Updated signature to accept params object
    */
-  async getQuote(
-    inputMint: string,
-    outputMint: string,
-    amount: string,
-    slippageBps: number = 50 // 0.5% default slippage
-  ): Promise<SwapRoute> {
+  async getQuote(params: GetQuoteParams): Promise<QuoteResponse> {
+    const { inputMint, outputMint, amount, slippageBps = 50, onlyDirectRoutes = false, asLegacyTransaction = false } = params;
+    
     try {
-      const params = new URLSearchParams({
+      const urlParams = new URLSearchParams({
         inputMint,
         outputMint,
-        amount,
+        amount: amount.toString(),
         slippageBps: slippageBps.toString(),
-        onlyDirectRoutes: 'false',
-        asLegacyTransaction: 'false'
+        onlyDirectRoutes: onlyDirectRoutes.toString(),
+        asLegacyTransaction: asLegacyTransaction.toString()
       });
 
-      const response = await fetch(`${this.baseUrl}/quote?${params}`);
+      const response = await fetch(`${this.baseUrl}/quote?${urlParams}`);
       
       if (!response.ok) {
-        throw new Error(`Jupiter API error: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Jupiter API error: ${response.status} - ${errorText}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as QuoteResponse;
       return data;
     } catch (error) {
       logger.error('Error getting Jupiter quote', error);
@@ -68,12 +110,52 @@ class JupiterSwapService {
   }
 
   /**
-   * Get swap transaction from Jupiter
+   * Execute swap using Jupiter v6 API
+   * Comment 1: New method that handles full swap execution
    */
-  async getSwapTransaction(
-    route: SwapRoute,
+  async executeSwap(params: ExecuteSwapParams): Promise<string> {
+    const { wallet, quoteResponse, wrapAndUnwrapSol = true, prioritizationFeeLamports = 10000000, asLegacyTransaction = false } = params;
+    
+    try {
+      // Get swap transaction from Jupiter
+      const swapTx = await this.getSwapTransaction(quoteResponse, wallet.publicKey?.toString() || '', wrapAndUnwrapSol, prioritizationFeeLamports, asLegacyTransaction);
+      
+      if (!swapTx?.swapTransaction) {
+        throw new Error('Failed to get swap transaction from Jupiter');
+      }
+
+      // Execute swap with wallet
+      let signature: string;
+      if (typeof wallet.executeSwap === 'function') {
+        signature = await wallet.executeSwap(swapTx.swapTransaction);
+      } else if (typeof wallet.signAndSendTransaction === 'function') {
+        // Decode and sign transaction
+        const txBuffer = Buffer.from(swapTx.swapTransaction, 'base64');
+        signature = await wallet.signAndSendTransaction(txBuffer);
+      } else {
+        throw new Error('Wallet does not support transaction signing');
+      }
+
+      if (!signature) {
+        throw new Error('Swap execution returned no signature');
+      }
+
+      return signature;
+    } catch (error) {
+      logger.error('Error executing swap', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get swap transaction from Jupiter (internal)
+   */
+  private async getSwapTransaction(
+    quoteResponse: QuoteResponse,
     userPublicKey: string,
-    wrapAndUnwrapSol: boolean = true
+    wrapAndUnwrapSol: boolean = true,
+    prioritizationFeeLamports: number = 10000000,
+    asLegacyTransaction: boolean = false
   ): Promise<SwapTransaction> {
     try {
       const response = await fetch(`${this.baseUrl}/swap`, {
@@ -82,13 +164,14 @@ class JupiterSwapService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          quoteResponse: route,
+          quoteResponse,
           userPublicKey,
           wrapAndUnwrapSol,
           dynamicComputeUnitLimit: true,
+          asLegacyTransaction,
           prioritizationFeeLamports: {
             priorityLevelWithMaxLamports: {
-              maxLamports: 10000000,
+              maxLamports: prioritizationFeeLamports,
               priorityLevel: "veryHigh"
             }
           }
@@ -96,15 +179,63 @@ class JupiterSwapService {
       });
 
       if (!response.ok) {
-        throw new Error(`Jupiter swap API error: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Jupiter swap API error: ${response.status} - ${errorText}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as SwapTransaction;
       return data;
     } catch (error) {
       logger.error('Error getting swap transaction', error);
       throw error;
     }
+  }
+
+  /**
+   * @deprecated Use getQuote(params) instead
+   * Legacy method for backward compatibility
+   */
+  async getQuoteLegacy(
+    inputMint: string,
+    outputMint: string,
+    amount: string,
+    slippageBps: number = 50
+  ): Promise<SwapRoute> {
+    const quote = await this.getQuote({
+      inputMint,
+      outputMint,
+      amount: parseInt(amount, 10),
+      slippageBps
+    });
+    
+    // Convert routePlan to legacy marketInfos format
+    const marketInfos = quote.routePlan?.map((step, index) => ({
+      id: step.swapInfo.ammKey,
+      label: step.swapInfo.label,
+      inputMint: step.swapInfo.inputMint,
+      outputMint: step.swapInfo.outputMint,
+      notEnoughLiquidity: false,
+      inAmount: step.swapInfo.inAmount,
+      outAmount: step.swapInfo.outAmount,
+      priceImpactPct: index === quote.routePlan.length - 1 ? quote.priceImpactPct : '0',
+    })) || [];
+
+    return {
+      ...quote,
+      marketInfos,
+    };
+  }
+
+  /**
+   * @deprecated Use executeSwap instead
+   * Legacy method for backward compatibility
+   */
+  async getSwapTransactionLegacy(
+    route: SwapRoute,
+    userPublicKey: string,
+    wrapAndUnwrapSol: boolean = true
+  ): Promise<SwapTransaction> {
+    return this.getSwapTransaction(route, userPublicKey, wrapAndUnwrapSol);
   }
 
   /**

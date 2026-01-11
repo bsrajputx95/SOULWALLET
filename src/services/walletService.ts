@@ -17,20 +17,26 @@ import {
 import * as crypto from 'crypto';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
+import { rpcManager } from '../lib/services/rpcManager';
+import * as bip39 from 'bip39';
+import { derivePath } from 'ed25519-hd-key';
 
 const algorithm = 'aes-256-gcm';
+let cachedDevWalletKey: Buffer | null = null
+
+// Solana BIP44 derivation path
+const SOLANA_DERIVATION_PATH = "m/44'/501'/0'/0'";
 
 // Get encryption key and ensure it's properly formatted
 function getEncryptionKey(): Buffer {
   const keyString = process.env.WALLET_ENCRYPTION_KEY;
   
   if (!keyString || keyString === 'default-key-change-in-production') {
-    // In development, use a default key (32 bytes for AES-256)
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('WALLET_ENCRYPTION_KEY must be set in production');
+      throw new Error('WALLET_ENCRYPTION_KEY must be set in production')
     }
-    // Default dev key (32 bytes hex = 64 characters)
-    return Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex');
+    if (!cachedDevWalletKey) cachedDevWalletKey = crypto.randomBytes(32)
+    return cachedDevWalletKey
   }
   
   // Validate the key is proper hex and correct length
@@ -41,17 +47,25 @@ function getEncryptionKey(): Buffer {
   return Buffer.from(keyString, 'hex');
 }
 
-const ENCRYPTION_KEY = getEncryptionKey();
+/**
+ * Generate a Solana keypair from BIP39 mnemonic using proper derivation
+ * This ensures all wallets have recoverable mnemonic backup
+ */
+function keypairFromMnemonic(mnemonic: string): Keypair {
+  const seed = bip39.mnemonicToSeedSync(mnemonic);
+  const derivedSeed = derivePath(SOLANA_DERIVATION_PATH, seed.toString('hex')).key;
+  return Keypair.fromSeed(derivedSeed);
+}
 
 export class WalletService {
-  private static connection = new Connection(
-    process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
-  );
+  private static async getConnection(): Promise<Connection> {
+    return rpcManager.getConnection();
+  }
 
   // Encryption utilities
   private static encrypt(text: string): string {
     const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(algorithm, ENCRYPTION_KEY, iv);
+    const cipher = crypto.createCipheriv(algorithm, getEncryptionKey(), iv);
     
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
@@ -67,7 +81,7 @@ export class WalletService {
     const authTag = Buffer.from(parts[1], 'hex');
     const encrypted = parts[2];
     
-    const decipher = crypto.createDecipheriv(algorithm, ENCRYPTION_KEY, iv);
+    const decipher = crypto.createDecipheriv(algorithm, getEncryptionKey(), iv);
     decipher.setAuthTag(authTag);
     
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
@@ -79,7 +93,8 @@ export class WalletService {
   // Get SOL balance
   static async getBalance(publicKey: string): Promise<number> {
     try {
-      const balance = await this.connection.getBalance(new PublicKey(publicKey));
+      const connection = await this.getConnection();
+      const balance = await connection.getBalance(new PublicKey(publicKey));
       return balance / LAMPORTS_PER_SOL;
     } catch (error) {
       logger.error('Error getting balance', error);
@@ -106,33 +121,42 @@ export class WalletService {
     }
   }
 
-  // Create new wallet
+  // Create new wallet with BIP39 mnemonic backup
   static async createWallet(userId: string) {
     try {
-      // Generate new keypair
-      const keypair = Keypair.generate();
+      // Generate BIP39 mnemonic for recovery capability
+      const mnemonic = bip39.generateMnemonic(128); // 12 words
+      
+      // Derive keypair from mnemonic using proper Solana derivation path
+      const keypair = keypairFromMnemonic(mnemonic);
       const publicKey = keypair.publicKey.toString();
       const privateKey = Buffer.from(keypair.secretKey).toString('base64');
       
       // Encrypt private key
       const encryptedPrivateKey = this.encrypt(privateKey);
       
+      // Encrypt mnemonic for recovery (stored separately for security)
+      const encryptedMnemonic = this.encrypt(mnemonic);
+      
       // Check if user has any wallets
       const existingWallets = await prisma.wallet.findMany({
         where: { userId }
       });
       
-      // Create wallet in database
+      // Create wallet in database with encrypted mnemonic backup
       const wallet = await prisma.wallet.create({
         data: {
           userId,
           publicKey,
           privateKey: encryptedPrivateKey,
+          encryptedMnemonic: encryptedMnemonic, // BIP39 backup for recovery
           isPrimary: existingWallets.length === 0, // First wallet is primary
           balance: 0,
           network: 'mainnet-beta'
         }
       });
+
+      logger.info(`Created BIP39-backed wallet for user ${userId}: ${publicKey}`);
 
       return {
         id: wallet.id,
@@ -250,7 +274,7 @@ export class WalletService {
         );
         
         signature = await sendAndConfirmTransaction(
-          this.connection,
+          await this.getConnection(),
           transaction,
           [keypair]
         );
@@ -280,14 +304,14 @@ export class WalletService {
         );
         
         signature = await sendAndConfirmTransaction(
-          this.connection,
+          await this.getConnection(),
           transaction,
           [keypair]
         );
       }
       
       // Record transaction
-      await prisma.transaction.create({
+      await prisma.walletTransaction.create({
         data: {
           walletId: wallet.id,
           signature,
@@ -381,7 +405,7 @@ export class WalletService {
       const wallet = await prisma.wallet.findFirst({
         where: { userId, isPrimary: true },
         include: {
-          transactions: {
+          walletTransactions: {
             orderBy: { createdAt: 'desc' },
             take: limit
           }
@@ -395,7 +419,7 @@ export class WalletService {
         });
       }
       
-      return wallet.transactions;
+      return wallet.walletTransactions;
     } catch (error) {
       logger.error('Error getting transaction history', error);
       if (error instanceof TRPCError) throw error;

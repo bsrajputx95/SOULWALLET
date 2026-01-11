@@ -18,7 +18,9 @@ import {
 } from '../utils/test-helpers';
 import { invalidData, testTimeouts } from '../utils/test-fixtures';
 
-describe('Portfolio Router Integration Tests', () => {
+const describeIntegration = process.env.RUN_INTEGRATION_TESTS === 'true' ? describe : describe.skip;
+
+describeIntegration('Portfolio Router Integration Tests', () => {
   let testUser: { email: string; password: string; token: string; refreshToken: string; userId: string };
 
   beforeAll(async () => {

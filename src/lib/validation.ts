@@ -4,17 +4,63 @@
  * Provides validation functions for user inputs across the app
  */
 
-import * as DOMPurify from 'isomorphic-dompurify';
+import DOMPurify from 'isomorphic-dompurify';
 import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
+import { FEES, VALIDATION } from '@/constants';
+
+/**
+ * Centralized validation limits - Single source of truth for all input validation
+ * Plan2 Step 1: Standardize Input Length Limits
+ */
+export const VALIDATION_LIMITS = {
+  // Username
+  USERNAME_MIN: VALIDATION.USERNAME_MIN,
+  USERNAME_MAX: VALIDATION.USERNAME_MAX,
+
+  // Content limits
+  POST_CONTENT_MAX: VALIDATION.POST_CONTENT_MAX,
+  COMMENT_CONTENT_MAX: VALIDATION.COMMENT_CONTENT_MAX,
+  BIO_MAX: VALIDATION.BIO_MAX,
+  NAME_MAX: VALIDATION.NAME_MAX,
+
+  // Contact limits
+  CONTACT_NAME_MAX: VALIDATION.CONTACT_NAME_MAX,
+  CONTACT_NOTES_MAX: VALIDATION.CONTACT_NOTES_MAX,
+
+  // Media limits
+  PROFILE_IMAGE_MAX_SIZE: VALIDATION.PROFILE_IMAGE_MAX_SIZE,
+
+  // Search
+  SEARCH_QUERY_MAX: VALIDATION.SEARCH_QUERY_MAX,
+
+  // VIP description
+  VIP_DESCRIPTION_MAX: VALIDATION.VIP_DESCRIPTION_MAX,
+
+  // Images per post
+  IMAGES_PER_POST_MAX: VALIDATION.IMAGES_PER_POST_MAX,
+} as const;
 
 export interface ValidationResult {
   isValid: boolean;
   error?: string;
 }
 
+export const MAX_SLIPPAGE_PERCENT = FEES.SWAP.SLIPPAGE_PERCENT.MAX;
+export const MAX_SLIPPAGE_BPS = FEES.SWAP.SLIPPAGE_BPS.MAX;
+
+export function validateSlippage(slippage: number): ValidationResult {
+  if (!Number.isFinite(slippage)) return { isValid: false, error: 'Slippage must be a valid number' };
+  if (slippage < 0) return { isValid: false, error: 'Slippage cannot be negative' };
+  if (slippage > MAX_SLIPPAGE_PERCENT) {
+    return { isValid: false, error: `Slippage cannot exceed ${MAX_SLIPPAGE_PERCENT}%` };
+  }
+  return { isValid: true };
+}
+
 /**
  * Validates a Solana wallet address
+ * SAFE REGEX: Base58 character class only, no backtracking - ReDoS safe
  */
 export function validateSolanaAddress(address: string): ValidationResult {
   if (!address || address.trim() === '') {
@@ -25,18 +71,18 @@ export function validateSolanaAddress(address: string): ValidationResult {
 
   // Solana addresses are base58 encoded and typically 32-44 characters
   if (trimmed.length < 32 || trimmed.length > 44) {
-    return { 
-      isValid: false, 
-      error: 'Invalid Solana address length (must be 32-44 characters)' 
+    return {
+      isValid: false,
+      error: 'Invalid Solana address length (must be 32-44 characters)'
     };
   }
 
-  // Check if it contains only valid base58 characters
+  // SAFE REGEX: Character class only, no nested quantifiers - ReDoS safe
   const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
   if (!base58Regex.test(trimmed)) {
-    return { 
-      isValid: false, 
-      error: 'Invalid Solana address format (invalid characters)' 
+    return {
+      isValid: false,
+      error: 'Invalid Solana address format (invalid characters)'
     };
   }
 
@@ -66,9 +112,9 @@ export function validateAmount(
   }
 
   if (numericAmount > maxAmount) {
-    return { 
-      isValid: false, 
-      error: `Insufficient balance. Available: ${maxAmount.toFixed(6)} ${tokenSymbol}` 
+    return {
+      isValid: false,
+      error: `Insufficient balance. Available: ${maxAmount.toFixed(6)} ${tokenSymbol}`
     };
   }
 
@@ -77,12 +123,14 @@ export function validateAmount(
 
 /**
  * Validates email address
+ * SAFE REGEX: Simple pattern with no backtracking - ReDoS safe
  */
 export function validateEmail(email: string): ValidationResult {
   if (!email || email.trim() === '') {
     return { isValid: false, error: 'Email is required' };
   }
 
+  // SAFE REGEX: Simple single-pass pattern - ReDoS safe
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     return { isValid: false, error: 'Invalid email format' };
@@ -93,26 +141,68 @@ export function validateEmail(email: string): ValidationResult {
 
 /**
  * Validates phone number
+ * SAFE REGEX: Simple pattern with no nesting - ReDoS safe
  */
 export function validatePhoneNumber(phone: string): ValidationResult {
   if (!phone || phone.trim() === '') {
     return { isValid: false, error: 'Phone number is required' };
   }
 
-  // Basic international phone validation
+  const normalized = phone.replace(/[\s-]/g, '');
+  const digits = normalized.replace(/^\+/, '');
+
+  if (digits.length < 8) {
+    return {
+      isValid: false,
+      error: 'Invalid phone number format. Use international format (+1234567890)'
+    };
+  }
+
+  // SAFE REGEX: Character class only - ReDoS safe
   const phoneRegex = /^\+?[1-9]\d{1,14}$/;
-  if (!phoneRegex.test(phone.replace(/[\s-]/g, ''))) {
-    return { 
-      isValid: false, 
-      error: 'Invalid phone number format. Use international format (+1234567890)' 
+  if (!phoneRegex.test(normalized)) {
+    return {
+      isValid: false,
+      error: 'Invalid phone number format. Use international format (+1234567890)'
     };
   }
 
   return { isValid: true };
 }
 
+export function validateDateOfBirth(dateOfBirth?: string | null): ValidationResult {
+  if (!dateOfBirth || dateOfBirth.trim() === '') {
+    return { isValid: true };
+  }
+
+  const trimmed = dateOfBirth.trim();
+  const isoDateOnly = /^\d{4}-\d{2}-\d{2}$/;
+  const isoDateTimeUtc = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+  if (!isoDateOnly.test(trimmed) && !isoDateTimeUtc.test(trimmed)) {
+    return { isValid: false, error: 'Invalid date of birth (must be 13+ years old)' };
+  }
+
+  const date = new Date(dateOfBirth);
+  if (Number.isNaN(date.getTime())) {
+    return { isValid: false, error: 'Invalid date of birth (must be 13+ years old)' };
+  }
+
+  const now = new Date();
+  if (date >= now) {
+    return { isValid: false, error: 'Invalid date of birth (must be 13+ years old)' };
+  }
+
+  const ageYears = (now.getTime() - date.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  if (ageYears < 13) {
+    return { isValid: false, error: 'Invalid date of birth (must be 13+ years old)' };
+  }
+
+  return { isValid: true };
+}
+
 /**
- * Validates username
+ * Validates username using centralized limits
+ * SAFE REGEX: Character class only - ReDoS safe
  */
 export function validateUsername(username: string): ValidationResult {
   if (!username || username.trim() === '') {
@@ -121,20 +211,20 @@ export function validateUsername(username: string): ValidationResult {
 
   const trimmed = username.trim();
 
-  if (trimmed.length < 3) {
-    return { isValid: false, error: 'Username must be at least 3 characters' };
+  if (trimmed.length < VALIDATION_LIMITS.USERNAME_MIN) {
+    return { isValid: false, error: `Username must be at least ${VALIDATION_LIMITS.USERNAME_MIN} characters` };
   }
 
-  if (trimmed.length > 20) {
-    return { isValid: false, error: 'Username must be at most 20 characters' };
+  if (trimmed.length > VALIDATION_LIMITS.USERNAME_MAX) {
+    return { isValid: false, error: `Username must be at most ${VALIDATION_LIMITS.USERNAME_MAX} characters` };
   }
 
-  // Only allow alphanumeric and underscores
+  // SAFE REGEX: Character class only - ReDoS safe
   const usernameRegex = /^[a-zA-Z0-9_]+$/;
   if (!usernameRegex.test(trimmed)) {
-    return { 
-      isValid: false, 
-      error: 'Username can only contain letters, numbers, and underscores' 
+    return {
+      isValid: false,
+      error: 'Username can only contain letters, numbers, and underscores'
     };
   }
 
@@ -159,9 +249,9 @@ export function validatePassword(password: string): ValidationResult {
   const hasNumber = /[0-9]/.test(password);
 
   if (!hasUppercase || !hasLowercase || !hasNumber) {
-    return { 
-      isValid: false, 
-      error: 'Password must contain uppercase, lowercase, and numbers' 
+    return {
+      isValid: false,
+      error: 'Password must contain uppercase, lowercase, and numbers'
     };
   }
 
@@ -169,7 +259,7 @@ export function validatePassword(password: string): ValidationResult {
 }
 
 /**
- * Validates post content
+ * Validates post content using centralized limits
  */
 export function validatePostContent(content: string): ValidationResult {
   if (!content || content.trim() === '') {
@@ -178,10 +268,73 @@ export function validatePostContent(content: string): ValidationResult {
 
   const trimmed = content.trim();
 
-  if (trimmed.length > 500) {
-    return { 
-      isValid: false, 
-      error: `Post is too long (${trimmed.length}/500 characters)` 
+  if (trimmed.length > VALIDATION_LIMITS.POST_CONTENT_MAX) {
+    return {
+      isValid: false,
+      error: `Post is too long (${trimmed.length}/${VALIDATION_LIMITS.POST_CONTENT_MAX} characters)`
+    };
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Validates bio content using centralized limits
+ * Plan2 Step 1: New validation function
+ */
+export function validateBio(bio: string): ValidationResult {
+  if (!bio) {
+    return { isValid: true };  // Bio is optional
+  }
+
+  const trimmed = bio.trim();
+
+  if (trimmed.length > VALIDATION_LIMITS.BIO_MAX) {
+    return {
+      isValid: false,
+      error: `Bio is too long (${trimmed.length}/${VALIDATION_LIMITS.BIO_MAX} characters)`
+    };
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Validates name using centralized limits
+ * Plan2 Step 1: New validation function
+ */
+export function validateName(name: string): ValidationResult {
+  if (!name) {
+    return { isValid: true };  // Name is optional
+  }
+
+  const trimmed = name.trim();
+
+  if (trimmed.length > VALIDATION_LIMITS.NAME_MAX) {
+    return {
+      isValid: false,
+      error: `Name is too long (${trimmed.length}/${VALIDATION_LIMITS.NAME_MAX} characters)`
+    };
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Validates search query using centralized limits
+ * Plan2 Step 1: New validation function
+ */
+export function validateSearchQuery(query: string): ValidationResult {
+  if (!query || query.trim() === '') {
+    return { isValid: false, error: 'Search query is required' };
+  }
+
+  const trimmed = query.trim();
+
+  if (trimmed.length > VALIDATION_LIMITS.SEARCH_QUERY_MAX) {
+    return {
+      isValid: false,
+      error: `Search query is too long (max ${VALIDATION_LIMITS.SEARCH_QUERY_MAX} characters)`
     };
   }
 
@@ -193,21 +346,25 @@ export function validatePostContent(content: string): ValidationResult {
  */
 export function sanitizeString(input: string): string {
   if (!input) return '';
-  
-  return input
-    .trim()
-    // Remove null bytes
-    .replace(/\0/g, '')
-    // Remove control characters
-    .replace(/[\x00-\x1F\x7F]/g, '');
+
+  const trimmed = input.trim();
+  let out = '';
+  for (const ch of trimmed) {
+    const code = ch.codePointAt(0);
+    if (code === undefined) continue;
+    if (code === 0 || code < 32 || code === 127) continue;
+    out += ch;
+  }
+  return out;
 }
 
 /**
- * Sanitizes HTML (for display purposes)
+ * HTML Entity Encoding helper
+ * Plan2 Step 3: Renamed from sanitizeHTML for clarity - encodes HTML entities for safe display
  */
-export function sanitizeHTML(input: string): string {
+export function encodeHtmlEntities(input: string): string {
   if (!input) return '';
-  
+
   return input
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -217,23 +374,31 @@ export function sanitizeHTML(input: string): string {
     .replace(/\//g, '&#x2F;');
 }
 
+/** @deprecated Use encodeHtmlEntities instead */
+export const sanitizeHTML = encodeHtmlEntities;
+
 /**
  * Sanitizes HTML content using DOMPurify with allowed tags
+ * Plan2 Step 3: Enhanced XSS protection with stricter config
  */
 export function sanitizeHtml(dirty: string): string {
   return DOMPurify.sanitize(dirty, {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a', 'p', 'br'],
-    ALLOWED_ATTR: ['href', 'target'],
+    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a', 'p', 'br', 'ul', 'ol', 'li'],
+    ALLOWED_ATTR: ['href'],  // Removed 'target' to prevent target="_blank" attacks
+    ALLOW_DATA_ATTR: false,  // Prevent data attributes
+    SAFE_FOR_TEMPLATES: true,  // Prevent template injection
   });
 }
 
 /**
  * Sanitizes text content by removing all HTML tags
+ * Plan2 Step 3: Enhanced with additional security flags
  */
 export function sanitizeText(text: string): string {
   return DOMPurify.sanitize(text, {
     ALLOWED_TAGS: [],
     ALLOWED_ATTR: [],
+    KEEP_CONTENT: true,  // Preserve text content while stripping tags
   });
 }
 
@@ -268,11 +433,11 @@ export function isValidSolanaAddress(address: string): boolean {
  */
 export function sanitizeSolanaAmount(amount: number | string): number {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-  
+
   if (isNaN(num) || num < 0) {
     throw new Error('Invalid amount');
   }
-  
+
   return Math.floor(num * 1e9) / 1e9;
 }
 
@@ -281,7 +446,7 @@ export function sanitizeSolanaAmount(amount: number | string): number {
  */
 export function sanitizeNumericInput(input: string): string {
   if (!input) return '';
-  
+
   // Remove all non-numeric characters except decimal point
   return input.replace(/[^0-9.]/g, '');
 }
@@ -298,18 +463,18 @@ export function validatePrivateKey(privateKey: string): ValidationResult {
 
   // Solana private keys in base58 are typically around 88 characters
   if (trimmed.length < 80 || trimmed.length > 100) {
-    return { 
-      isValid: false, 
-      error: 'Invalid private key length' 
+    return {
+      isValid: false,
+      error: 'Invalid private key length'
     };
   }
 
   // Check if it contains only valid base58 characters
   const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
   if (!base58Regex.test(trimmed)) {
-    return { 
-      isValid: false, 
-      error: 'Invalid private key format (invalid characters)' 
+    return {
+      isValid: false,
+      error: 'Invalid private key format (invalid characters)'
     };
   }
 
@@ -345,9 +510,9 @@ export function validateMnemonic(mnemonic: string): ValidationResult {
   // BIP39 mnemonics are 12, 15, 18, 21, or 24 words
   const validLengths = [12, 15, 18, 21, 24];
   if (!validLengths.includes(words.length)) {
-    return { 
-      isValid: false, 
-      error: `Invalid mnemonic length (${words.length} words). Must be 12, 15, 18, 21, or 24 words` 
+    return {
+      isValid: false,
+      error: `Invalid mnemonic length (${words.length} words). Must be 12, 15, 18, 21, or 24 words`
     };
   }
 
@@ -355,9 +520,9 @@ export function validateMnemonic(mnemonic: string): ValidationResult {
   const wordRegex = /^[a-z]+$/;
   for (const word of words) {
     if (!wordRegex.test(word)) {
-      return { 
-        isValid: false, 
-        error: 'Invalid mnemonic format. Words should only contain lowercase letters' 
+      return {
+        isValid: false,
+        error: 'Invalid mnemonic format. Words should only contain lowercase letters'
       };
     }
   }

@@ -3,6 +3,11 @@
  * 
  * Displays external DEX platforms (DexScreener, Raydium, Bonk, Pump.fun, Orca)
  * in a WebView with wallet connection capability.
+ * 
+ * Features:
+ * - Token-aware routing: Extracts token mint from WebView URL for smart swap navigation
+ * - Wallet injection bridge: Exposes SoulWallet object to WebView for wallet interactions
+ * - Jupiter fallback: Redirects to native swap when WebView fails
  */
 
 import React, { useState, useCallback, useRef } from 'react';
@@ -15,13 +20,15 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
-import { ExternalLink, RefreshCw, AlertTriangle, Globe } from 'lucide-react-native';
+import { WebView, WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
+import { ExternalLink, RefreshCw, AlertTriangle, Globe, ArrowUpDown, Copy } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { useSolanaWallet } from '../../hooks/solana-wallet-store';
 import { NeonButton } from '../NeonButton';
+import { logger } from '../../lib/client-logger';
 
 // Check if running in Expo Go (WebView doesn't work in Expo Go)
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -49,19 +56,216 @@ interface ExternalPlatformWebViewProps {
 }
 
 /**
+ * Extract token mint address from various DEX platform URLs
+ * Supports: DexScreener, Raydium, Pump.fun, and generic token/mint patterns
+ */
+const extractTokenFromUrl = (url: string): string | null => {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const searchParams = urlObj.searchParams;
+
+    // DexScreener: /solana/{pairAddress} - pair address is the token
+    // Example: https://dexscreener.com/solana/8xMrTgcGhKLjvYqPGmszpSBHfqHGLvU8STiLLmKNcwU2
+    const dexScreenerMatch = pathname.match(/\/solana\/([A-Za-z0-9]{32,44})/);
+    if (dexScreenerMatch) {
+      return dexScreenerMatch[1];
+    }
+
+    // Raydium: ?inputMint=xxx&outputMint=xxx - extract outputMint (token to buy)
+    // Example: https://raydium.io/swap/?inputMint=sol&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+    const outputMint = searchParams.get('outputMint');
+    if (outputMint && outputMint.length >= 32) {
+      return outputMint;
+    }
+    const inputMint = searchParams.get('inputMint');
+    if (inputMint && inputMint.length >= 32 && inputMint !== 'sol') {
+      return inputMint;
+    }
+
+    // Pump.fun: /coin/{tokenAddress} or /{tokenAddress}
+    // Example: https://pump.fun/coin/8xMrTgcGhKLjvYqPGmszpSBHfqHGLvU8STiLLmKNcwU2
+    const pumpFunMatch = pathname.match(/(?:\/coin)?\/([A-Za-z0-9]{32,44})$/);
+    if (pumpFunMatch) {
+      return pumpFunMatch[1];
+    }
+
+    // Generic fallback: Look for token/mint/pair query params or path segments
+    // Matches Solana addresses (32-44 base58 characters)
+    const genericParams = ['token', 'mint', 'pair', 'address', 'ca'];
+    for (const param of genericParams) {
+      const value = searchParams.get(param);
+      if (value && /^[A-Za-z0-9]{32,44}$/.test(value)) {
+        return value;
+      }
+    }
+
+    // Last resort: Find any Solana address in the URL path
+    const addressMatch = pathname.match(/([A-HJ-NP-Za-km-z1-9]{32,44})/);
+    if (addressMatch) {
+      return addressMatch[1];
+    }
+
+    return null;
+  } catch (error) {
+    // URL parsing failed, try regex on raw string
+    const fallbackMatch = url.match(/[A-HJ-NP-Za-km-z1-9]{32,44}/);
+    return fallbackMatch ? fallbackMatch[0] : null;
+  }
+};
+
+/**
+ * Generate wallet injection JavaScript for WebView
+ * Exposes window.SoulWallet object for wallet interactions
+ */
+const generateWalletInjectionScript = (publicKey: string | null): string => {
+  return `
+    (function() {
+      // SoulWallet injection bridge
+      window.SoulWallet = {
+        isConnected: ${publicKey ? 'true' : 'false'},
+        publicKey: ${publicKey ? `'${publicKey}'` : 'null'},
+        
+        // Request wallet connection
+        connect: function() {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'WALLET_CONNECT_REQUEST'
+          }));
+          return new Promise((resolve, reject) => {
+            window._soulWalletResolve = resolve;
+            window._soulWalletReject = reject;
+          });
+        },
+        
+        // Request transaction signing
+        signTransaction: function(transaction) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'SIGN_TRANSACTION_REQUEST',
+            payload: { transaction }
+          }));
+          return new Promise((resolve, reject) => {
+            window._soulWalletSignResolve = resolve;
+            window._soulWalletSignReject = reject;
+          });
+        },
+        
+        // Request message signing
+        signMessage: function(message) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'SIGN_MESSAGE_REQUEST',
+            payload: { message }
+          }));
+          return new Promise((resolve, reject) => {
+            window._soulWalletMsgResolve = resolve;
+            window._soulWalletMsgReject = reject;
+          });
+        }
+      };
+      
+      // Notify page that wallet is available
+      window.dispatchEvent(new Event('soulwallet:ready'));
+      
+      true; // Required for injectedJavaScript
+    })();
+  `;
+};
+
+/**
  * WebView component for external DEX platforms
  */
 export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({
   platform,
   onError,
 }) => {
+  const router = useRouter();
   const { publicKey } = useSolanaWallet();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentTokenMint, setCurrentTokenMint] = useState<string | null>(null);
+  const [lastKnownUrl, setLastKnownUrl] = useState<string>('');
   const webViewRef = useRef<WebView>(null);
 
   const platformUrl = PLATFORM_URLS[platform] || '';
   const platformName = PLATFORM_NAMES[platform] || platform;
+
+  // Navigate to native swap screen with optional token pre-fill
+  const handleTradeInApp = useCallback(() => {
+    if (currentTokenMint) {
+      // Token-aware routing: Pass extracted token to swap screen
+      router.push({
+        pathname: '/swap',
+        params: { token: currentTokenMint }
+      });
+    } else {
+      router.push('/swap');
+    }
+  }, [router, currentTokenMint]);
+
+  // Handle WebView navigation state changes to extract token from URL
+  const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
+    const { url } = navState;
+    if (url) {
+      setLastKnownUrl(url);
+      const extractedToken = extractTokenFromUrl(url);
+      if (extractedToken && extractedToken !== currentTokenMint) {
+        setCurrentTokenMint(extractedToken);
+        if (__DEV__) {
+          logger.info('Extracted token from WebView URL:', extractedToken);
+        }
+      }
+    }
+  }, [currentTokenMint]);
+
+  // Handle messages from WebView (wallet injection bridge)
+  const handleWebViewMessage = useCallback((event: WebViewMessageEvent) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      
+      switch (data.type) {
+        case 'WALLET_CONNECT_REQUEST':
+          // User requested wallet connection from WebView
+          // For now, just show that wallet is already connected
+          if (publicKey) {
+            webViewRef.current?.injectJavaScript(`
+              if (window._soulWalletResolve) {
+                window._soulWalletResolve({ publicKey: '${publicKey}' });
+              }
+              true;
+            `);
+          } else {
+            webViewRef.current?.injectJavaScript(`
+              if (window._soulWalletReject) {
+                window._soulWalletReject(new Error('Wallet not connected'));
+              }
+              true;
+            `);
+          }
+          break;
+          
+        case 'SIGN_TRANSACTION_REQUEST':
+          // Transaction signing not supported in WebView - redirect to native swap
+          handleTradeInApp();
+          break;
+          
+        case 'SIGN_MESSAGE_REQUEST':
+          // Message signing not supported in WebView
+          webViewRef.current?.injectJavaScript(`
+            if (window._soulWalletMsgReject) {
+              window._soulWalletMsgReject(new Error('Please use Trade in App for transactions'));
+            }
+            true;
+          `);
+          break;
+          
+        default:
+          if (__DEV__) {
+            logger.warn('Unknown WebView message type:', data.type);
+          }
+      }
+    } catch (err) {
+      // Not a JSON message, ignore
+    }
+  }, [publicKey, handleTradeInApp]);
 
   const handleOpenInBrowser = useCallback(async () => {
     if (!platformUrl) {
@@ -91,18 +295,48 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     webViewRef.current?.reload();
   }, []);
 
-  // Error state
+  // Error state with Jupiter fallback (Comment 4)
   if (error) {
+    // Try to extract token from last known URL for smart fallback
+    const fallbackToken = lastKnownUrl ? extractTokenFromUrl(lastKnownUrl) : currentTokenMint;
+    
     return (
       <View style={styles.container}>
         <View style={styles.errorContainer}>
           <AlertTriangle size={48} color={COLORS.error} />
-          <Text style={styles.errorTitle}>Failed to Load</Text>
+          <Text style={styles.errorTitle}>Platform Unavailable</Text>
           <Text style={styles.errorText}>{error}</Text>
+          
+          {/* Retry button */}
           <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
             <RefreshCw size={16} color={COLORS.textPrimary} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
+          
+          {/* Jupiter fallback button with token-aware routing */}
+          <TouchableOpacity 
+            style={styles.jupiterFallbackButton} 
+            onPress={() => {
+              if (fallbackToken) {
+                router.push({
+                  pathname: '/swap',
+                  params: { token: fallbackToken }
+                });
+              } else {
+                router.push('/swap');
+              }
+            }}
+          >
+            <ArrowUpDown size={18} color={COLORS.textPrimary} />
+            <Text style={styles.jupiterFallbackText}>Trade on Jupiter (In-App)</Text>
+          </TouchableOpacity>
+          
+          <Text style={styles.fallbackHint}>
+            {fallbackToken 
+              ? `Token detected: ${fallbackToken.slice(0, 8)}...${fallbackToken.slice(-4)}`
+              : 'Use our native swap powered by Jupiter aggregator'
+            }
+          </Text>
         </View>
       </View>
     );
@@ -241,6 +475,8 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         style={styles.webView}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
+        onNavigationStateChange={handleNavigationStateChange}
+        onMessage={handleWebViewMessage}
         onError={(syntheticEvent) => {
           const { nativeEvent } = syntheticEvent;
           setError(nativeEvent.description || 'Failed to load page');
@@ -256,6 +492,8 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         mixedContentMode="compatibility"
         originWhitelist={['*']}
         userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
+        // Wallet injection bridge
+        injectedJavaScript={generateWalletInjectionScript(publicKey)}
         // Caching for faster subsequent loads
         cacheEnabled={true}
         cacheMode="LOAD_CACHE_ELSE_NETWORK"
@@ -263,6 +501,27 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         sharedCookiesEnabled={true}
         incognito={false}
       />
+
+      {/* Floating "Trade in App" button with token context */}
+      <TouchableOpacity
+        style={styles.floatingTradeButton}
+        onPress={handleTradeInApp}
+        activeOpacity={0.8}
+      >
+        <ArrowUpDown size={16} color={COLORS.textPrimary} />
+        <Text style={styles.floatingTradeText}>
+          {currentTokenMint ? 'Trade This Token' : 'Trade in App'}
+        </Text>
+      </TouchableOpacity>
+      
+      {/* Token detected indicator */}
+      {currentTokenMint && (
+        <View style={styles.tokenDetectedBadge}>
+          <Text style={styles.tokenDetectedText}>
+            Token: {currentTokenMint.slice(0, 6)}...
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -398,12 +657,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.s,
     borderRadius: BORDER_RADIUS.medium,
+    marginBottom: SPACING.m,
   },
   retryText: {
     ...FONTS.sfProMedium,
     fontSize: 14,
     color: COLORS.textPrimary,
     marginLeft: SPACING.xs,
+  },
+  // Jupiter fallback styles (Comment 4)
+  jupiterFallbackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.solana,
+    paddingHorizontal: SPACING.l,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.medium,
+    marginBottom: SPACING.s,
+    gap: SPACING.s,
+  },
+  jupiterFallbackText: {
+    ...FONTS.sfProMedium,
+    fontSize: 16,
+    color: COLORS.textPrimary,
+  },
+  fallbackHint: {
+    ...FONTS.sfProRegular,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: SPACING.xs,
   },
   // WebView specific styles
   webHeader: {
@@ -466,6 +749,46 @@ const styles = StyleSheet.create({
   iframeContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  // Floating "Trade in App" button
+  floatingTradeButton: {
+    position: 'absolute',
+    bottom: 24,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.solana,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.medium,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    gap: SPACING.xs,
+  },
+  floatingTradeText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 14,
+  },
+  // Token detected badge
+  tokenDetectedBadge: {
+    position: 'absolute',
+    bottom: 70,
+    right: 16,
+    backgroundColor: COLORS.cardBackground,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.small,
+    borderWidth: 1,
+    borderColor: COLORS.solana,
+  },
+  tokenDetectedText: {
+    ...FONTS.sfProMedium,
+    fontSize: 10,
+    color: COLORS.solana,
   },
 });
 

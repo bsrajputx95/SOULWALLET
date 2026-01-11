@@ -39,6 +39,7 @@ export const signupSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   confirmPassword: z.string(),
+  captchaToken: z.string().optional(),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"],
@@ -48,11 +49,13 @@ export const signupSchema = z.object({
 export const loginSchema = z.object({
   identifier: z.string().min(1, 'Email or username is required'),
   password: z.string().min(1, 'Password is required'),
+  captchaToken: z.string().optional(),
 });
 
 // Password reset request schema
 export const passwordResetRequestSchema = z.object({
   email: emailSchema,
+  captchaToken: z.string().optional(),
 });
 
 // Reset password schema

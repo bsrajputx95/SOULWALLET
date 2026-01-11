@@ -50,16 +50,6 @@ export default function HomeScreen() {
     }
   }, [authLoading, isAuthenticated, router]);
 
-  // Show nothing while checking auth (splash screen is still visible)
-  if (authLoading) {
-    return null;
-  }
-
-  // If not authenticated, don't render (redirect will happen)
-  if (!isAuthenticated) {
-    return null;
-  }
-
   const {
     wallet: solanaWallet,
     publicKey: solanaPublicKey,
@@ -80,6 +70,7 @@ export default function HomeScreen() {
   });
 
   // Transform trending data to displayable format
+  // Comment 3: Include liquidity, volume, and transactions for TokenCard
   const topCoins = React.useMemo(() => {
     if (!trendingData?.pairs) return [];
 
@@ -94,6 +85,7 @@ export default function HomeScreen() {
       volume24h: parseFloat(pair.volume?.h24 || '0'),
       logo: pair.info?.imageUrl,
       liquidity: parseFloat(pair.liquidity?.usd || '0'),
+      transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
       contractAddress: pair.baseToken?.address || '',
       pairAddress: pair.pairAddress || '',
     }));
@@ -204,7 +196,7 @@ export default function HomeScreen() {
   const [tradersSearchQuery, setTradersSearchQuery] = React.useState('');
   const [debouncedTradersSearch, setDebouncedTradersSearch] = React.useState('');
   const [coinsTimeFilter, setCoinsTimeFilter] = React.useState<'1h' | '1d' | '7d' | '1m' | '1y'>('1d');
-  const [tradersTimeFilter, setTradersTimeFilter] = React.useState<'1h' | '1d' | '7d' | '1m' | '1y'>('1d');
+  const [tradersTimeFilter, setTradersTimeFilter] = React.useState<'1d' | '7d' | '1m' | '1y'>('1d');
 
   // ✅ Debounced search for real-time market search
   const [debouncedCoinsSearch, setDebouncedCoinsSearch] = React.useState('');
@@ -246,9 +238,9 @@ export default function HomeScreen() {
   const displayCoins = debouncedCoinsSearch.length >= 2 ? searchCoins : topCoins;
   const isLoadingCoins = debouncedCoinsSearch.length >= 2 ? searchLoading : trendingLoading;
 
-  // ✅ Fetch top traders from backend (Birdeye data)
+  // ✅ Fetch top traders from backend (Birdeye data) - Top 10, refreshes every 24h
   const { data: tradersData, isLoading: tradersLoading } = trpc.traders.getTopTraders.useQuery(
-    { limit: 5, period: '7d' },
+    { limit: 10, period: '1d' },
     { enabled: isAuthenticated, staleTime: 86_400_000, refetchInterval: 86_400_000, refetchOnWindowFocus: false }
   );
 
@@ -480,6 +472,18 @@ export default function HomeScreen() {
     return (val > 0 ? val : 0).toFixed(4);
   }, [estimatedOutput, slippage]);
 
+  // Comment 3: Filter chips state for Coins tab
+  const [activeQuickFilters, setActiveQuickFilters] = React.useState<string[]>([]);
+  const quickFilterOptions = ['Volume', 'Liquidity', 'Change', 'Age', 'Verified'];
+
+  const toggleQuickFilter = (filter: string) => {
+    setActiveQuickFilters(prev => 
+      prev.includes(filter) 
+        ? prev.filter(f => f !== filter)
+        : [...prev, filter]
+    );
+  };
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'coins':
@@ -516,13 +520,52 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {/* ✅ Display trending market coins or search results */}
+              {/* Comment 3: Filter Chips with active count badge */}
+              <View style={styles.filterChipsContainer}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsScroll}>
+                  {quickFilterOptions.map((filter) => (
+                    <TouchableOpacity
+                      key={filter}
+                      style={[
+                        styles.filterChip,
+                        activeQuickFilters.includes(filter) && styles.filterChipActive
+                      ]}
+                      onPress={() => toggleQuickFilter(filter)}
+                    >
+                      <Text style={[
+                        styles.filterChipText,
+                        activeQuickFilters.includes(filter) && styles.filterChipTextActive
+                      ]}>
+                        {filter}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {activeQuickFilters.length > 0 && (
+                    <View style={styles.filterCountBadge}>
+                      <Text style={styles.filterCountText}>{activeQuickFilters.length}</Text>
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
+
+              {/* Comment 3: Display skeleton list while loading instead of spinner */}
               {isLoadingCoins ? (
-                <View style={styles.loadingContainer}>
-                  <RefreshCw size={32} color={COLORS.primary} />
-                  <Text style={styles.loadingText}>
-                    {debouncedCoinsSearch ? 'Searching market...' : 'Loading trending coins...'}
-                  </Text>
+                <View style={styles.skeletonContainer}>
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <View key={i} style={styles.skeletonCard}>
+                      <View style={styles.skeletonLeft}>
+                        <View style={styles.skeletonAvatar} />
+                        <View style={styles.skeletonTextContainer}>
+                          <View style={styles.skeletonTextLarge} />
+                          <View style={styles.skeletonTextSmall} />
+                        </View>
+                      </View>
+                      <View style={styles.skeletonRight}>
+                        <View style={styles.skeletonTextMedium} />
+                        <View style={styles.skeletonTextSmall} />
+                      </View>
+                    </View>
+                  ))}
                 </View>
               ) : displayCoins.length === 0 ? (
                 <View style={styles.emptyContainer}>
@@ -557,6 +600,9 @@ export default function HomeScreen() {
                       name={coin.name}
                       price={coin.price}
                       change={getChangeForPeriod()}
+                      liquidity={coin.liquidity}
+                      volume={coin.volume24h}
+                      transactions={coin.transactions}
                       {...(coin.logo ? { logo: coin.logo } : {})}
                       onPress={() => {
                         // Navigate with token data to ensure consistency
@@ -628,26 +674,19 @@ export default function HomeScreen() {
               ) : (
                 (debouncedTradersSearch.length >= 3 ? (searchedTradersData?.data || []) : topTraders)
                   .filter((trader: any) =>
-                    trader.name.toLowerCase().includes(tradersSearchQuery.toLowerCase()) ||
+                    (trader.name || '').toLowerCase().includes(tradersSearchQuery.toLowerCase()) ||
                     trader.walletAddress.toLowerCase().includes(tradersSearchQuery.toLowerCase())
                   )
                   .map((trader: any) => (
                     <TraderCard
                       key={trader.id || trader.walletAddress}
                       username={trader.name || trader.username}
+                      walletAddress={trader.walletAddress}
                       roi={trader.roi}
-                      period={tradersTimeFilter}
-                      isVerified={trader.verified ?? trader.isVerified}
+                      period="24h"
                       onPress={() => {
-                        // ✅ Redirect to Birdeye wallet page
-                        const birdeyeUrl = `https://birdeye.so/profile/${trader.walletAddress}?chain=solana`;
-                        Linking.openURL(birdeyeUrl).catch((err) => {
-                          Alert.alert('Error', 'Could not open Birdeye profile');
-                          if (__DEV__) console.error('Failed to open Birdeye:', err);
-                        });
-                      }}
-                      onCopyPress={() => {
-                        setSelectedTrader(trader.name || trader.username);
+                        // Simple: tap anywhere opens copy modal with address pre-filled
+                        setSelectedTrader(trader.walletAddress);
                         setSelectedTraderWallet(trader.walletAddress);
                         setShowCopyModal(true);
                       }}
@@ -658,15 +697,16 @@ export default function HomeScreen() {
           </ErrorBoundary>
         );
       case 'copy':
-        const stats = getStats();
+        {
+          const stats = getStats();
 
-        return (
-          <ErrorBoundary>
-            <View style={styles.copyTradeContainer}>
-              <Text style={styles.copyTradeTitle}>Copy Trading</Text>
-              <Text style={styles.copyTradeDescription}>
-                Follow top traders and automatically copy their trades in real-time.
-              </Text>
+          return (
+            <ErrorBoundary>
+              <View style={styles.copyTradeContainer}>
+                <Text style={styles.copyTradeTitle}>Copy Trading</Text>
+                <Text style={styles.copyTradeDescription}>
+                  Follow top traders and automatically copy their trades in real-time.
+                </Text>
 
               {/* Copy Trading Stats */}
               <View style={styles.statsContainer}>
@@ -772,11 +812,16 @@ export default function HomeScreen() {
               )}
             </View>
           </ErrorBoundary>
-        );
+          );
+        }
       default:
         return null;
     }
   };
+
+  if (authLoading || !isAuthenticated) {
+    return null;
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -2404,5 +2449,97 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     fontSize: 14,
+  },
+  // Comment 3: Filter chip styles
+  filterChipsContainer: {
+    marginBottom: SPACING.s,
+  },
+  filterChipsScroll: {
+    paddingHorizontal: SPACING.m,
+    gap: SPACING.xs,
+  },
+  filterChip: {
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.small,
+    backgroundColor: COLORS.cardBackground,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '20',
+    marginRight: SPACING.xs,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.solana + '20',
+    borderColor: COLORS.solana + '40',
+  },
+  filterChipText: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  filterChipTextActive: {
+    color: COLORS.solana,
+  },
+  filterCountBadge: {
+    backgroundColor: COLORS.solana,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: SPACING.xs,
+  },
+  filterCountText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 10,
+  },
+  // Comment 3: Skeleton loading styles
+  skeletonContainer: {
+    paddingHorizontal: SPACING.m,
+  },
+  skeletonCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.m,
+    marginBottom: SPACING.s,
+  },
+  skeletonLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  skeletonRight: {
+    alignItems: 'flex-end',
+  },
+  skeletonAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.background,
+  },
+  skeletonTextContainer: {
+    marginLeft: SPACING.s,
+  },
+  skeletonTextLarge: {
+    width: 80,
+    height: 14,
+    borderRadius: 4,
+    backgroundColor: COLORS.background,
+    marginBottom: SPACING.xs,
+  },
+  skeletonTextSmall: {
+    width: 60,
+    height: 10,
+    borderRadius: 4,
+    backgroundColor: COLORS.background,
+  },
+  skeletonTextMedium: {
+    width: 70,
+    height: 14,
+    borderRadius: 4,
+    backgroundColor: COLORS.background,
+    marginBottom: SPACING.xs,
   },
 });

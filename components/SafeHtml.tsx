@@ -1,9 +1,12 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { sanitizeHtml } from '../lib/validation';
+import DOMPurify from 'isomorphic-dompurify';
 import { COLORS } from '../constants/colors';
 import { FONTS } from '../constants/theme';
 import { logger } from '../lib/client-logger';
+
+// Default allowed tags for safe HTML rendering
+const DEFAULT_ALLOWED_TAGS: string[] = [];  // Default: strip all HTML
 
 interface SafeHtmlProps {
   html: string;
@@ -11,12 +14,14 @@ interface SafeHtmlProps {
   textStyle?: any;
   maxLength?: number;
   fallbackText?: string;
+  /** Custom allowed tags (default: empty array - strip all HTML) */
   allowedTags?: string[];
 }
 
 /**
  * SafeHtml component for securely rendering HTML content
  * Uses DOMPurify to sanitize HTML and prevents XSS attacks
+ * Plan2 Step 3: Enhanced with custom allowed tags prop
  */
 export const SafeHtml: React.FC<SafeHtmlProps> = ({
   html,
@@ -24,7 +29,7 @@ export const SafeHtml: React.FC<SafeHtmlProps> = ({
   textStyle,
   maxLength = 1000,
   fallbackText = 'Content unavailable',
-  allowedTags,
+  allowedTags = DEFAULT_ALLOWED_TAGS,
 }) => {
   // Sanitize the HTML content
   const sanitizedHtml = React.useMemo(() => {
@@ -34,13 +39,19 @@ export const SafeHtml: React.FC<SafeHtmlProps> = ({
 
     try {
       // Truncate if too long
-      const truncatedHtml = html.length > maxLength 
-        ? html.substring(0, maxLength) + '...' 
+      const truncatedHtml = html.length > maxLength
+        ? html.substring(0, maxLength) + '...'
         : html;
 
-      // Sanitize the HTML
-      const cleaned = sanitizeHtml(truncatedHtml, allowedTags);
-      
+      // Sanitize the HTML with custom allowed tags
+      // Plan2 Step 3: Use stricter DOMPurify config with custom tags
+      const cleaned = DOMPurify.sanitize(truncatedHtml, {
+        ALLOWED_TAGS: allowedTags,
+        ALLOWED_ATTR: allowedTags.includes('a') ? ['href'] : [],  // Only allow href if 'a' tag is allowed
+        ALLOW_DATA_ATTR: false,
+        SAFE_FOR_TEMPLATES: true,
+      });
+
       // If sanitization results in empty content, use fallback
       return cleaned.trim() || fallbackText;
     } catch (error) {
@@ -98,8 +109,12 @@ export const SafeHtmlText: React.FC<{
     }
 
     try {
-      // First sanitize, then strip all HTML
-      const sanitized = sanitizeHtml(html);
+      // First sanitize with no allowed tags, then strip any remaining HTML
+      const sanitized = DOMPurify.sanitize(html, {
+        ALLOWED_TAGS: [],
+        ALLOWED_ATTR: [],
+        KEEP_CONTENT: true,
+      });
       const stripped = sanitized
         .replace(/<[^>]*>/g, '')
         .replace(/&amp;/g, '&')
@@ -110,7 +125,7 @@ export const SafeHtmlText: React.FC<{
         .replace(/&#x2F;/g, '/')
         .trim();
 
-      return stripped.length > maxLength 
+      return stripped.length > maxLength
         ? stripped.substring(0, maxLength) + '...'
         : stripped;
     } catch (error) {

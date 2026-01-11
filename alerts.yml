@@ -1,0 +1,163 @@
+# Prometheus Alerting Rules for SoulWallet
+# Industry-standard alerts for API health, performance, and business metrics
+
+groups:
+  # API Health Alerts
+  - name: api_health
+    interval: 30s
+    rules:
+      # High Error Rate - fires when 5xx errors exceed 5% of requests
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(soulwallet_http_request_duration_seconds_count{status_code=~"5.."}[5m])) 
+            / 
+            sum(rate(soulwallet_http_request_duration_seconds_count[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High API error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+          runbook_url: "https://docs.soulwallet.com/runbooks/high-error-rate"
+
+      # High Latency - P95 exceeds 1 second
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(soulwallet_http_request_duration_seconds_bucket[5m])) by (le, route)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency detected"
+          description: "P95 latency for {{ $labels.route }} is {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.soulwallet.com/runbooks/high-latency"
+
+      # API Down - no successful requests
+      - alert: APIDown
+        expr: soulwallet_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SoulWallet API is down"
+          description: "The API has been unreachable for more than 1 minute"
+          runbook_url: "https://docs.soulwallet.com/runbooks/api-down"
+
+  # Database Alerts
+  - name: database_health
+    interval: 30s
+    rules:
+      # High Database Connection Pool Utilization
+      - alert: HighDatabaseConnections
+        expr: soulwallet_prisma_pool_utilization_percent > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database connection pool utilization"
+          description: "Pool utilization is {{ $value }}% (threshold: 90%)"
+          runbook_url: "https://docs.soulwallet.com/runbooks/high-db-connections"
+
+      # Database Pool Unhealthy
+      - alert: DatabasePoolUnhealthy
+        expr: soulwallet_prisma_pool_healthy == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection pool is unhealthy"
+          description: "Pool utilization has exceeded alert threshold"
+          runbook_url: "https://docs.soulwallet.com/runbooks/db-pool-unhealthy"
+
+  # Cache Alerts
+  - name: cache_health
+    interval: 30s
+    rules:
+      # Low Cache Hit Rate
+      - alert: LowCacheHitRate
+        expr: soulwallet_redis_cache_hit_rate < 0.7
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low Redis cache hit rate"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} (threshold: 70%)"
+          runbook_url: "https://docs.soulwallet.com/runbooks/low-cache-hit-rate"
+
+      # High Cache Latency
+      - alert: HighCacheLatency
+        expr: soulwallet_redis_cache_avg_latency_ms > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redis cache latency"
+          description: "Average cache latency is {{ $value }}ms (threshold: 50ms)"
+          runbook_url: "https://docs.soulwallet.com/runbooks/high-cache-latency"
+
+      # High Cache Error Rate
+      - alert: HighCacheErrors
+        expr: |
+          rate(soulwallet_redis_cache_errors_total[5m]) 
+          / 
+          rate(soulwallet_redis_cache_total_ops[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redis cache error rate"
+          description: "Cache error rate is {{ $value | humanizePercentage }}"
+          runbook_url: "https://docs.soulwallet.com/runbooks/high-cache-errors"
+
+  # Business Metrics Alerts
+  - name: business_metrics
+    interval: 60s
+    rules:
+      # High Transaction Failure Rate
+      - alert: HighTransactionFailureRate
+        expr: |
+          (
+            sum(rate(soulwallet_http_request_duration_seconds_count{route=~".*transaction.*", status_code=~"4..|5.."}[15m]))
+            /
+            sum(rate(soulwallet_http_request_duration_seconds_count{route=~".*transaction.*"}[15m]))
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High transaction failure rate"
+          description: "Transaction failure rate is {{ $value | humanizePercentage }}"
+          runbook_url: "https://docs.soulwallet.com/runbooks/high-tx-failure"
+
+  # Infrastructure Alerts
+  - name: infrastructure
+    interval: 30s
+    rules:
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes 
+          / 
+          (node_memory_MemTotal_bytes or 4294967296) > 0.90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+          runbook_url: "https://docs.soulwallet.com/runbooks/high-memory"
+
+      # Event Loop Lag
+      - alert: HighEventLoopLag
+        expr: nodejs_eventloop_lag_seconds > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Node.js event loop lag"
+          description: "Event loop lag is {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.soulwallet.com/runbooks/event-loop-lag"

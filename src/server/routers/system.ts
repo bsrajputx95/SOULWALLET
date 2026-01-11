@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import { router, publicProcedure, protectedProcedure } from '../trpc';
 import { getFeatureFlags } from '../../lib/featureFlags';
-import { Connection } from '@solana/web3.js';
 import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
 import { TRPCError } from '@trpc/server';
 import * as os from 'os';
+import { KeyMigrationService } from '../../lib/services/keyMigration'
+import { JWTRotationService } from '../../lib/services/jwtRotation'
+import { rpcManager } from '../../lib/services/rpcManager'
+import { getCacheMetrics, getRedisHealth } from '../../lib/redis'
 
-const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+const keyMigrationService = new KeyMigrationService()
 
 export const systemRouter = router({
   /**
@@ -34,9 +37,9 @@ export const systemRouter = router({
         version: process.env.npm_package_version || '1.0.0',
       };
 
-      // Check database
+      // Check database - Plan2 Step 2: Use $executeRaw for health check (safe constant query)
       try {
-        await prisma.$queryRaw`SELECT 1`;
+        await prisma.$executeRaw`SELECT 1`;
         checks.checks.database = true;
       } catch (error) {
         logger.error('Database health check failed:', error);
@@ -45,7 +48,7 @@ export const systemRouter = router({
 
       // Check Solana RPC
       try {
-        const slot = await connection.getSlot();
+        const slot = await rpcManager.withFailover((connection) => connection.getSlot());
         checks.checks.solana = slot > 0;
       } catch (error) {
         logger.error('Solana RPC health check failed:', error);
@@ -53,17 +56,15 @@ export const systemRouter = router({
       }
 
       // Check Redis if configured
-      if (process.env.REDIS_URL) {
-        try {
-          // Would need Redis client instance here
-          // For now, mark as true if URL is configured
-          checks.checks.redis = true;
-        } catch (error) {
-          logger.error('Redis health check failed:', error);
-          checks.status = 'degraded';
+      try {
+        const redisHealth = await getRedisHealth()
+        checks.checks.redis = redisHealth.healthy
+        if (!redisHealth.healthy) {
+          checks.status = 'degraded'
         }
-      } else {
-        checks.checks.redis = true; // Not required in dev
+      } catch (error) {
+        logger.error('Redis health check failed:', error);
+        checks.status = 'degraded';
       }
 
       // Set overall status
@@ -123,6 +124,7 @@ export const systemRouter = router({
             transactions: 0,
             sessions: 0,
           },
+          redis: null as null | { health: Awaited<ReturnType<typeof getRedisHealth>>; cache: ReturnType<typeof getCacheMetrics> },
         };
 
         if (input.includeDetails) {
@@ -132,6 +134,11 @@ export const systemRouter = router({
           metrics.database.sessions = await prisma.session.count({
             where: { expiresAt: { gt: new Date() } },
           });
+
+          metrics.redis = {
+            health: await getRedisHealth(),
+            cache: getCacheMetrics(),
+          }
         }
 
         return metrics;
@@ -183,6 +190,81 @@ export const systemRouter = router({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to get logs',
         });
+      }
+    }),
+
+  migrateCustodialWallets: protectedProcedure
+    .input(z.object({
+      batchSize: z.number().min(1).max(1000).default(100),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.user.role !== 'ADMIN') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Admin access required',
+        })
+      }
+      try {
+        return await keyMigrationService.migrateWallets(input.batchSize)
+      } catch (error) {
+        logger.error('Migrate custodial wallets error:', error)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to migrate custodial wallets',
+        })
+      }
+    }),
+
+  getKeyOperationLogs: protectedProcedure
+    .input(z.object({
+      operation: z.string().optional(),
+      userId: z.string().optional(),
+      take: z.number().min(1).max(500).default(100),
+    }))
+    .query(async ({ input, ctx }) => {
+      if (ctx.user.role !== 'ADMIN') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Admin access required',
+        })
+      }
+      try {
+        const where: any = {}
+        if (input.operation) where.operation = input.operation
+        if (input.userId) where.userId = input.userId
+        return await prisma.keyOperationLog.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: input.take,
+        })
+      } catch (error) {
+        logger.error('Get key operation logs error:', error)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch key operation logs',
+        })
+      }
+    }),
+
+  /**
+   * Get JWT rotation status (admin only)
+   */
+  getJWTRotationStatus: protectedProcedure
+    .query(async ({ ctx }) => {
+      if (ctx.user.role !== 'ADMIN') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Admin access required',
+        })
+      }
+      try {
+        return await JWTRotationService.getRotationStatus()
+      } catch (error) {
+        logger.error('Get JWT rotation status error:', error)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to get JWT rotation status',
+        })
       }
     }),
 

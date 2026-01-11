@@ -6,15 +6,17 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Image,
   Switch,
   Alert,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
   Animated,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import {
   User,
   Mail,
@@ -37,10 +39,14 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { trpc } from '../lib/trpc';
 
 import { useAccount } from '../hooks/account-store';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { ProfileForm } from '../components/account/ProfileForm';
+import { SecurityModal } from '../components/account/SecurityModal';
 
 export default function AccountScreen() {
   const {
     profile,
+    isLoading,
     isUpdating: isAccountUpdating,
     updateProfile,
     updateSecurity,
@@ -91,11 +97,17 @@ export default function AccountScreen() {
   const [totpVerifyCode, setTotpVerifyCode] = useState('');
   const [isTwoFactorLoading, setIsTwoFactorLoading] = useState(false);
 
+  const [showDisableTwoFactorModal, setShowDisableTwoFactorModal] = useState(false);
+  const [disableTotpPassword, setDisableTotpPassword] = useState('');
+  const [disableTotpCode, setDisableTotpCode] = useState('');
+  const [isDisablingTwoFactor, setIsDisablingTwoFactor] = useState(false);
+
   // Delete Account Modal States
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
 
   // Sync form state when profile data loads
   useEffect(() => {
@@ -122,18 +134,18 @@ export default function AccountScreen() {
           onPress: async () => {
             const { status } = await ImagePicker.requestCameraPermissionsAsync();
             if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Camera access is needed to take photos.');
+              Alert.alert('Permission Required', 'Please grant camera access in Settings');
               return;
             }
             const result = await ImagePicker.launchCameraAsync({
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
               allowsEditing: true,
               aspect: [1, 1],
-              quality: 0.8,
-              base64: true,
+              quality: 1,
+              base64: false,
             });
-            if (!result.canceled && result.assets[0]?.base64) {
-              await uploadImage(result.assets[0].base64, result.assets[0].mimeType || 'image/jpeg');
+            if (!result.canceled && result.assets[0]) {
+              await uploadImageFromAsset(result.assets[0]);
             }
           },
         },
@@ -142,24 +154,49 @@ export default function AccountScreen() {
           onPress: async () => {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Photo library access is needed.');
+              Alert.alert('Permission Required', 'Please grant photo library access in Settings');
               return;
             }
             const result = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
               allowsEditing: true,
               aspect: [1, 1],
-              quality: 0.8,
-              base64: true,
+              quality: 1,
+              base64: false,
             });
-            if (!result.canceled && result.assets[0]?.base64) {
-              await uploadImage(result.assets[0].base64, result.assets[0].mimeType || 'image/jpeg');
+            if (!result.canceled && result.assets[0]) {
+              await uploadImageFromAsset(result.assets[0]);
             }
           },
         },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
+  };
+
+  const uploadImageFromAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    setIsProcessingImage(true);
+    try {
+      const processed = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 800, height: 800 } }],
+        {
+          compress: 0.7,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        }
+      );
+
+      if (!processed.base64) {
+        throw new Error('Failed to process image');
+      }
+
+      await uploadImage(processed.base64, 'image/jpeg');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Failed to process image');
+    } finally {
+      setIsProcessingImage(false);
+    }
   };
 
   const uploadImage = async (base64: string, mimeType: string) => {
@@ -205,7 +242,6 @@ export default function AccountScreen() {
 
       Alert.alert('Success', 'Account settings updated successfully!');
     } catch (error) {
-      if (__DEV__) console.error('Failed to save settings:', error);
       Alert.alert('Error', 'Failed to update settings. Please try again.');
     }
   };
@@ -256,54 +292,20 @@ export default function AccountScreen() {
       'Invite Friends',
       'Share your referral code: GHOST2024',
       [
-        { text: 'Copy Code', onPress: () => { if (__DEV__) console.log('Code copied'); } },
-        { text: 'Share', onPress: () => { if (__DEV__) console.log('Share referral'); } },
+        { text: 'OK' },
       ]
     );
   };
 
-  const handleSetupTwoFactor = async () => {
-    if (twoFactorEnabled) {
-      // Show disable 2FA modal - will need password and TOTP code
-      Alert.alert(
-        'Disable 2FA',
-        'To disable two-factor authentication, you will need to enter your password and a verification code from your authenticator app.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Continue',
-            onPress: () => {
-              // For now, show a prompt for password and code
-              // In a full implementation, this would be a proper modal
-              Alert.prompt(
-                'Enter Password',
-                'Enter your account password:',
-                async (password) => {
-                  if (!password) return;
-                  Alert.prompt(
-                    'Enter 2FA Code',
-                    'Enter the 6-digit code from your authenticator app:',
-                    async (code) => {
-                      if (!code) return;
-                      try {
-                        await disableTOTPMutation.mutateAsync({ password, code });
-                        setTwoFactorEnabled(false);
-                        Alert.alert('Success', '2FA disabled successfully!');
-                      } catch (error: any) {
-                        Alert.alert('Error', error?.message || 'Failed to disable 2FA.');
-                      }
-                    },
-                    'plain-text'
-                  );
-                },
-                'secure-text'
-              );
-            }
-          },
-        ]
-      );
-    } else {
-      // Start 2FA setup flow
+  const handleSetupTwoFactor = async (nextValue: boolean) => {
+    if (!nextValue && twoFactorEnabled) {
+      setShowDisableTwoFactorModal(true);
+      setDisableTotpPassword('');
+      setDisableTotpCode('');
+      return;
+    }
+
+    if (nextValue && !twoFactorEnabled) {
       setShowTwoFactorModal(true);
       setTwoFactorStep(1);
       setTotpPassword('');
@@ -460,6 +462,31 @@ export default function AccountScreen() {
     }
   };
 
+  const handleConfirmDisableTwoFactor = async () => {
+    if (!disableTotpPassword.trim()) {
+      Alert.alert('Error', 'Please enter your password');
+      return;
+    }
+    if (!disableTotpCode.trim() || disableTotpCode.trim().length !== 6) {
+      Alert.alert('Error', 'Please enter a valid 6-digit code');
+      return;
+    }
+
+    try {
+      setIsDisablingTwoFactor(true);
+      await disableTOTPMutation.mutateAsync({ password: disableTotpPassword.trim(), code: disableTotpCode.trim() });
+      setTwoFactorEnabled(false);
+      setShowDisableTwoFactorModal(false);
+      setDisableTotpPassword('');
+      setDisableTotpCode('');
+      Alert.alert('Success', '2FA disabled successfully!');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Failed to disable 2FA.');
+    } finally {
+      setIsDisablingTwoFactor(false);
+    }
+  };
+
   // Session Management Handlers
   const handleRevokeSession = async (sessionId: string) => {
     Alert.alert(
@@ -473,7 +500,7 @@ export default function AccountScreen() {
           onPress: async () => {
             try {
               await revokeSessionMutation.mutateAsync({ sessionId });
-              sessionsQuery.refetch();
+              void sessionsQuery.refetch();
               Alert.alert('Success', 'Session revoked successfully');
             } catch (error: any) {
               Alert.alert('Error', error?.message || 'Failed to revoke session');
@@ -538,6 +565,7 @@ export default function AccountScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Account Settings</Text>
         <TouchableOpacity
+          testID="account-save-button"
           onPress={handleSave}
           style={[styles.saveButton, isAccountUpdating && styles.saveButtonDisabled]}
           disabled={isAccountUpdating}
@@ -549,112 +577,28 @@ export default function AccountScreen() {
       </View>
 
       <ScrollView
+        testID="account-scroll-view"
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
       >
-        {/* Profile Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Profile Information</Text>
-
-          <View style={styles.profileImageContainer}>
-            <TouchableOpacity
-              style={styles.profileImageWrapper}
-              onPress={handlePickImage}
-              disabled={isUploadingImage}
-            >
-              {isUploadingImage ? (
-                <View style={styles.defaultProfileImage}>
-                  <ActivityIndicator size="large" color={COLORS.solana} />
-                </View>
-              ) : profile?.profileImage ? (
-                <Image source={{ uri: profile.profileImage }} style={styles.profileImage} />
-              ) : (
-                <View style={styles.defaultProfileImage}>
-                  <Text style={styles.profileImageText}>
-                    {profile?.username?.charAt(0).toUpperCase() || 'U'}
-                  </Text>
-                </View>
-              )}
-              <View style={styles.cameraButton}>
-                <Camera size={16} color={COLORS.textPrimary} />
-              </View>
-            </TouchableOpacity>
-            <Text style={styles.profileImageLabel}>Tap to change</Text>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>First Name</Text>
-            <View style={styles.inputContainer}>
-              <User size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter first name"
-                placeholderTextColor={COLORS.textSecondary}
-                value={firstName}
-                onChangeText={setFirstName}
-              />
-            </View>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Last Name</Text>
-            <View style={styles.inputContainer}>
-              <User size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter last name"
-                placeholderTextColor={COLORS.textSecondary}
-                value={lastName}
-                onChangeText={setLastName}
-              />
-            </View>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Email</Text>
-            <View style={styles.inputContainer}>
-              <Mail size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter email address"
-                placeholderTextColor={COLORS.textSecondary}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Phone Number</Text>
-            <View style={styles.inputContainer}>
-              <Phone size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter phone number"
-                placeholderTextColor={COLORS.textSecondary}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-              />
-            </View>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Date of Birth</Text>
-            <View style={styles.inputContainer}>
-              <Calendar size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="MM/DD/YYYY"
-                placeholderTextColor={COLORS.textSecondary}
-                value={dateOfBirth}
-                onChangeText={setDateOfBirth}
-              />
-            </View>
-          </View>
-        </View>
+        <ProfileForm
+          styles={styles}
+          profile={profile}
+          isLoading={isLoading}
+          isUploadingImage={isUploadingImage}
+          isProcessingImage={isProcessingImage}
+          onPickImage={handlePickImage}
+          firstName={firstName}
+          lastName={lastName}
+          email={email}
+          phone={phone}
+          dateOfBirth={dateOfBirth}
+          setFirstName={setFirstName}
+          setLastName={setLastName}
+          setEmail={setEmail}
+          setPhone={setPhone}
+          setDateOfBirth={setDateOfBirth}
+        />
 
 
 
@@ -662,26 +606,49 @@ export default function AccountScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security & Privacy</Text>
 
-          <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
-            <View style={styles.settingLeft}>
-              <Lock size={20} color={COLORS.textSecondary} />
-              <Text style={styles.settingText}>Reset Password</Text>
-            </View>
-            <Text style={styles.settingArrow}>›</Text>
-          </TouchableOpacity>
+          {isLoading ? (
+            <>
+              <View style={styles.settingRow}>
+                <View style={styles.settingLeft}>
+                  <SkeletonLoader width={20} height={20} borderRadius={10} />
+                  <SkeletonLoader width={130} height={14} style={{ marginLeft: SPACING.m }} />
+                </View>
+                <SkeletonLoader width={20} height={14} />
+              </View>
 
-          <View style={styles.settingRow}>
-            <View style={styles.settingLeft}>
-              <ShieldCheck size={20} color={COLORS.textSecondary} />
-              <Text style={styles.settingText}>Two-Factor Authentication</Text>
-            </View>
-            <Switch
-              value={twoFactorEnabled}
-              onValueChange={handleSetupTwoFactor}
-              trackColor={{ false: COLORS.cardBackground, true: COLORS.solana + '50' }}
-              thumbColor={twoFactorEnabled ? COLORS.solana : COLORS.textSecondary}
-            />
-          </View>
+              <View style={styles.settingRow}>
+                <View style={styles.settingLeft}>
+                  <SkeletonLoader width={20} height={20} borderRadius={10} />
+                  <SkeletonLoader width={180} height={14} style={{ marginLeft: SPACING.m }} />
+                </View>
+                <SkeletonLoader width={44} height={24} borderRadius={12} />
+              </View>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
+                <View style={styles.settingLeft}>
+                  <Lock size={20} color={COLORS.textSecondary} />
+                  <Text style={styles.settingText}>Reset Password</Text>
+                </View>
+                <Text style={styles.settingArrow}>›</Text>
+              </TouchableOpacity>
+
+              <View style={styles.settingRow}>
+                <View style={styles.settingLeft}>
+                  <ShieldCheck size={20} color={COLORS.textSecondary} />
+                  <Text style={styles.settingText}>Two-Factor Authentication</Text>
+                </View>
+                <Switch
+                  testID="account-twofactor-switch"
+                  value={twoFactorEnabled}
+                  onValueChange={(value) => handleSetupTwoFactor(value)}
+                  trackColor={{ false: COLORS.cardBackground, true: COLORS.solana + '50' }}
+                  thumbColor={twoFactorEnabled ? COLORS.solana : COLORS.textSecondary}
+                />
+              </View>
+            </>
+          )}
         </View>
 
         {/* App Settings */}
@@ -726,41 +693,54 @@ export default function AccountScreen() {
             Manage devices where you're currently logged in
           </Text>
 
-          {sessionsQuery.isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={COLORS.solana} />
-              <Text style={styles.loadingText}>Loading sessions...</Text>
-            </View>
-          ) : sessionsQuery.data?.sessions && sessionsQuery.data.sessions.length > 0 ? (
-            sessionsQuery.data.sessions.map((session: { id: string; ipAddress: string | null; userAgent: string | null; createdAt: Date; lastActivityAt: Date; current: boolean }) => (
-              <View key={session.id} style={styles.sessionItem}>
-                <View style={styles.sessionInfo}>
-                  <View style={styles.sessionHeader}>
-                    <Smartphone size={18} color={COLORS.textSecondary} />
-                    <Text style={styles.sessionDevice}>
-                      {formatSessionInfo(session.userAgent)}
-                    </Text>
-                    {session.current && (
-                      <View style={styles.currentBadge}>
-                        <Text style={styles.currentBadgeText}>Current</Text>
-                      </View>
-                    )}
+          {isLoading || sessionsQuery.isLoading ? (
+            <>
+              {[1, 2, 3].map((i) => (
+                <View key={i} style={styles.sessionItem}>
+                  <View style={styles.sessionInfo}>
+                    <View style={styles.sessionHeader}>
+                      <SkeletonLoader width={18} height={18} borderRadius={9} />
+                      <SkeletonLoader width={120} height={14} style={{ marginLeft: SPACING.s }} />
+                    </View>
+                    <SkeletonLoader width="85%" height={12} style={{ marginTop: SPACING.xs }} />
                   </View>
-                  <Text style={styles.sessionDetails}>
-                    {session.ipAddress || 'Unknown IP'} • Last active: {formatDate(session.lastActivityAt)}
-                  </Text>
+                  <SkeletonLoader width={64} height={30} borderRadius={BORDER_RADIUS.small} />
                 </View>
-                {!session.current && (
-                  <TouchableOpacity
-                    style={styles.revokeButton}
-                    onPress={() => handleRevokeSession(session.id)}
-                    disabled={revokeSessionMutation.isPending}
-                  >
-                    <Text style={styles.revokeButtonText}>Revoke</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))
+              ))}
+            </>
+          ) : sessionsQuery.data?.sessions && sessionsQuery.data.sessions.length > 0 ? (
+            <View testID="session-list">
+              {sessionsQuery.data.sessions.map((session: { id: string; ipAddress: string | null; userAgent: string | null; createdAt: Date; lastActivityAt: Date; current: boolean }) => (
+                <View key={session.id} style={styles.sessionItem}>
+                  <View style={styles.sessionInfo}>
+                    <View style={styles.sessionHeader}>
+                      <Smartphone size={18} color={COLORS.textSecondary} />
+                      <Text style={styles.sessionDevice}>
+                        {formatSessionInfo(session.userAgent)}
+                      </Text>
+                      {session.current && (
+                        <View style={styles.currentBadge}>
+                          <Text style={styles.currentBadgeText}>Current</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.sessionDetails}>
+                      {session.ipAddress || 'Unknown IP'} • Last active: {formatDate(session.lastActivityAt)}
+                    </Text>
+                  </View>
+                  {!session.current && (
+                    <TouchableOpacity
+                      testID="revoke-session-button"
+                      style={styles.revokeButton}
+                      onPress={() => handleRevokeSession(session.id)}
+                      disabled={revokeSessionMutation.isPending}
+                    >
+                      <Text style={styles.revokeButtonText}>Revoke</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </View>
           ) : (
             <Text style={styles.noSessionsText}>No active sessions found</Text>
           )}
@@ -783,7 +763,7 @@ export default function AccountScreen() {
         <View style={[styles.section, styles.dangerSection]}>
           <Text style={[styles.sectionTitle, { color: COLORS.error }]}>Danger Zone</Text>
 
-          <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+          <TouchableOpacity testID="account-delete-account-open-button" style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
             <Trash2 size={20} color={COLORS.error} />
             <Text style={styles.deleteAccountText}>Delete Account</Text>
           </TouchableOpacity>
@@ -794,304 +774,118 @@ export default function AccountScreen() {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+      <SecurityModal
+        styles={styles}
+        showPasswordResetModal={showPasswordResetModal}
+        setShowPasswordResetModal={setShowPasswordResetModal}
+        passwordResetStep={passwordResetStep}
+        resetContactMethod={resetContactMethod}
+        setResetContactMethod={setResetContactMethod}
+        resetContactValue={resetContactValue}
+        setResetContactValue={setResetContactValue}
+        resetOtp={resetOtp}
+        setResetOtp={setResetOtp}
+        newPassword={newPassword}
+        setNewPassword={setNewPassword}
+        confirmPassword={confirmPassword}
+        setConfirmPassword={setConfirmPassword}
+        isPasswordResetLoading={isPasswordResetLoading}
+        handlePasswordResetBack={handlePasswordResetBack}
+        handlePasswordResetNext={handlePasswordResetNext}
+        showTwoFactorModal={showTwoFactorModal}
+        setShowTwoFactorModal={setShowTwoFactorModal}
+        twoFactorStep={twoFactorStep}
+        totpPassword={totpPassword}
+        setTotpPassword={setTotpPassword}
+        totpQrCode={totpQrCode}
+        totpBackupCodes={totpBackupCodes}
+        totpVerifyCode={totpVerifyCode}
+        setTotpVerifyCode={setTotpVerifyCode}
+        isTwoFactorLoading={isTwoFactorLoading}
+        handleTwoFactorBack={handleTwoFactorBack}
+        handleTwoFactorNext={handleTwoFactorNext}
+      />
 
-      {/* Password Reset Modal */}
       <Modal
-        visible={showPasswordResetModal}
+        visible={showDisableTwoFactorModal}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowPasswordResetModal(false)}
+        onRequestClose={() => setShowDisableTwoFactorModal(false)}
       >
         <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowPasswordResetModal(false)}>
-              <X size={24} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Reset Password</Text>
-            <View style={{ width: 24 }} />
-          </View>
-
-          <View style={styles.modalContent}>
-            {passwordResetStep === 1 && (
-              <>
-                <Text style={styles.modalDescription}>
-                  Enter your email or mobile number to receive a verification code
-                </Text>
-
-                <View style={styles.methodSelector}>
-                  <TouchableOpacity
-                    style={[styles.methodButton, resetContactMethod === 'email' && styles.methodButtonActive]}
-                    onPress={() => setResetContactMethod('email')}
-                  >
-                    <Mail size={20} color={resetContactMethod === 'email' ? COLORS.textPrimary : COLORS.textSecondary} />
-                    <Text style={[styles.methodText, resetContactMethod === 'email' && styles.methodTextActive]}>Email</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.methodButton, resetContactMethod === 'phone' && styles.methodButtonActive]}
-                    onPress={() => setResetContactMethod('phone')}
-                  >
-                    <Phone size={20} color={resetContactMethod === 'phone' ? COLORS.textPrimary : COLORS.textSecondary} />
-                    <Text style={[styles.methodText, resetContactMethod === 'phone' && styles.methodTextActive]}>Phone</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
-                    {resetContactMethod === 'email' ? 'Email Address' : 'Phone Number'}
-                  </Text>
-                  <View style={styles.inputContainer}>
-                    {resetContactMethod === 'email' ? (
-                      <Mail size={20} color={COLORS.textSecondary} />
-                    ) : (
-                      <Phone size={20} color={COLORS.textSecondary} />
-                    )}
-                    <TextInput
-                      style={styles.input}
-                      value={resetContactValue}
-                      onChangeText={setResetContactValue}
-                      placeholder={resetContactMethod === 'email' ? 'Enter your email' : 'Enter your phone number'}
-                      placeholderTextColor={COLORS.textSecondary}
-                      keyboardType={resetContactMethod === 'email' ? 'email-address' : 'phone-pad'}
-                      autoCapitalize="none"
-                    />
-                  </View>
-                </View>
-              </>
-            )}
-
-            {passwordResetStep === 2 && (
-              <>
-                <Text style={styles.modalDescription}>
-                  Enter the 6-digit verification code sent to your {resetContactMethod}
-                </Text>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Verification Code</Text>
-                  <View style={styles.inputContainer}>
-                    <Lock size={20} color={COLORS.textSecondary} />
-                    <TextInput
-                      style={styles.input}
-                      value={resetOtp}
-                      onChangeText={setResetOtp}
-                      placeholder="Enter 6-digit code"
-                      placeholderTextColor={COLORS.textSecondary}
-                      keyboardType="number-pad"
-                      maxLength={6}
-                    />
-                  </View>
-                </View>
-              </>
-            )}
-
-            {passwordResetStep === 3 && (
-              <>
-                <Text style={styles.modalDescription}>
-                  Create a new password for your account
-                </Text>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>New Password</Text>
-                  <View style={styles.inputContainer}>
-                    <Lock size={20} color={COLORS.textSecondary} />
-                    <TextInput
-                      style={styles.input}
-                      value={newPassword}
-                      onChangeText={setNewPassword}
-                      placeholder="Enter new password"
-                      placeholderTextColor={COLORS.textSecondary}
-                      secureTextEntry
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Confirm Password</Text>
-                  <View style={styles.inputContainer}>
-                    <Lock size={20} color={COLORS.textSecondary} />
-                    <TextInput
-                      style={styles.input}
-                      value={confirmPassword}
-                      onChangeText={setConfirmPassword}
-                      placeholder="Confirm new password"
-                      placeholderTextColor={COLORS.textSecondary}
-                      secureTextEntry
-                    />
-                  </View>
-                </View>
-              </>
-            )}
-          </View>
-
-          <View style={styles.modalFooter}>
-            {passwordResetStep > 1 && !isPasswordResetLoading && (
-              <TouchableOpacity style={styles.backButton} onPress={handlePasswordResetBack}>
-                <Text style={styles.backButtonText}>Back</Text>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 48 : 0}
+          >
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setShowDisableTwoFactorModal(false)}>
+                <X size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
-            )}
+              <Text style={styles.modalTitle}>Disable Two-Factor Authentication</Text>
+              <View style={{ width: 24 }} />
+            </View>
 
-            <TouchableOpacity
-              style={[styles.nextButton, isPasswordResetLoading && styles.nextButtonDisabled]}
-              onPress={handlePasswordResetNext}
-              disabled={isPasswordResetLoading}
-            >
-              <Text style={styles.nextButtonText}>
-                {isPasswordResetLoading
-                  ? 'Please wait...'
-                  : passwordResetStep === 1
-                    ? 'Send Code'
-                    : passwordResetStep === 2
-                      ? 'Verify'
-                      : 'Reset Password'}
+            <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalDescription}>
+                Enter your password and a code from your authenticator app to disable 2FA.
               </Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </Modal>
 
-      {/* Two-Factor Authentication Modal (TOTP) */}
-      <Modal
-        visible={showTwoFactorModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowTwoFactorModal(false)}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowTwoFactorModal(false)}>
-              <X size={24} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Setup Authenticator App</Text>
-            <View style={{ width: 24 }} />
-          </View>
-
-          <ScrollView style={styles.modalContent}>
-            {twoFactorStep === 1 && (
-              <>
-                <Text style={styles.modalDescription}>
-                  Enter your password to begin setting up two-factor authentication with an authenticator app.
-                </Text>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Password</Text>
-                  <View style={styles.inputContainer}>
-                    <Lock size={20} color={COLORS.textSecondary} />
-                    <TextInput
-                      style={styles.input}
-                      value={totpPassword}
-                      onChangeText={setTotpPassword}
-                      placeholder="Enter your password"
-                      placeholderTextColor={COLORS.textSecondary}
-                      secureTextEntry
-                    />
-                  </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Password</Text>
+                <View style={styles.inputContainer}>
+                  <Lock size={20} color={COLORS.textSecondary} />
+                  <TextInput
+                    testID="totp-disable-password-input"
+                    style={styles.input}
+                    value={disableTotpPassword}
+                    onChangeText={setDisableTotpPassword}
+                    placeholder="Enter your password"
+                    placeholderTextColor={COLORS.textSecondary}
+                    secureTextEntry
+                  />
                 </View>
-              </>
-            )}
+              </View>
 
-            {twoFactorStep === 2 && (
-              <>
-                <Text style={styles.modalDescription}>
-                  Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
-                </Text>
-
-                {totpQrCode ? (
-                  <View style={styles.qrCodeContainer}>
-                    <Image
-                      source={{ uri: totpQrCode }}
-                      style={styles.qrCode}
-                      resizeMode="contain"
-                    />
-                  </View>
-                ) : (
-                  <View style={styles.qrCodeContainer}>
-                    <Text style={styles.qrCodePlaceholder}>Loading QR Code...</Text>
-                  </View>
-                )}
-
-                <Text style={[styles.modalDescription, { marginTop: SPACING.m }]}>
-                  After scanning, tap "Next" to verify the setup.
-                </Text>
-              </>
-            )}
-
-            {twoFactorStep === 3 && (
-              <>
-                <Text style={styles.modalDescription}>
-                  Enter the 6-digit code from your authenticator app to verify the setup.
-                </Text>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Verification Code</Text>
-                  <View style={styles.inputContainer}>
-                    <ShieldCheck size={20} color={COLORS.textSecondary} />
-                    <TextInput
-                      style={styles.input}
-                      value={totpVerifyCode}
-                      onChangeText={setTotpVerifyCode}
-                      placeholder="Enter 6-digit code"
-                      placeholderTextColor={COLORS.textSecondary}
-                      keyboardType="number-pad"
-                      maxLength={6}
-                    />
-                  </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Verification Code</Text>
+                <View style={styles.inputContainer}>
+                  <ShieldCheck size={20} color={COLORS.textSecondary} />
+                  <TextInput
+                    testID="totp-disable-code-input"
+                    style={styles.input}
+                    value={disableTotpCode}
+                    onChangeText={setDisableTotpCode}
+                    placeholder="Enter 6-digit code"
+                    placeholderTextColor={COLORS.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                  />
                 </View>
-              </>
-            )}
+              </View>
+            </ScrollView>
 
-            {twoFactorStep === 4 && (
-              <>
-                <View style={styles.successMessage}>
-                  <Check size={24} color={COLORS.solana} />
-                  <Text style={styles.successText}>
-                    2FA is now enabled!
-                  </Text>
-                </View>
-
-                <Text style={styles.modalDescription}>
-                  Save these backup codes in a safe place. You can use them to access your account if you lose your authenticator device.
-                </Text>
-
-                <View style={styles.backupCodesContainer}>
-                  {totpBackupCodes.map((code, index) => (
-                    <View key={index} style={styles.backupCodeItem}>
-                      <Text style={styles.backupCodeText}>{code}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <Text style={[styles.modalDescription, { color: COLORS.error, marginTop: SPACING.m }]}>
-                  ⚠️ These codes will only be shown once. Save them now!
-                </Text>
-              </>
-            )}
-          </ScrollView>
-
-          <View style={styles.modalFooter}>
-            {twoFactorStep > 1 && twoFactorStep < 4 && !isTwoFactorLoading && (
-              <TouchableOpacity style={styles.backButton} onPress={handleTwoFactorBack}>
-                <Text style={styles.backButtonText}>Back</Text>
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => setShowDisableTwoFactorModal(false)}
+                disabled={isDisablingTwoFactor}
+              >
+                <Text style={styles.backButtonText}>Cancel</Text>
               </TouchableOpacity>
-            )}
 
-            <TouchableOpacity
-              style={[styles.nextButton, isTwoFactorLoading && styles.nextButtonDisabled]}
-              onPress={handleTwoFactorNext}
-              disabled={isTwoFactorLoading}
-            >
-              <Text style={styles.nextButtonText}>
-                {isTwoFactorLoading
-                  ? 'Please wait...'
-                  : twoFactorStep === 1
-                    ? 'Continue'
-                    : twoFactorStep === 2
-                      ? 'Next'
-                      : twoFactorStep === 3
-                        ? 'Verify & Enable'
-                        : 'Done'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                testID="totp-disable-confirm-button"
+                style={[styles.deleteButton, isDisablingTwoFactor && styles.nextButtonDisabled]}
+                onPress={handleConfirmDisableTwoFactor}
+                disabled={isDisablingTwoFactor}
+              >
+                <Text style={styles.deleteButtonText}>
+                  {isDisablingTwoFactor ? 'Disabling...' : 'Disable 2FA'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
 
@@ -1103,71 +897,80 @@ export default function AccountScreen() {
         onRequestClose={() => setShowDeleteAccountModal(false)}
       >
         <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowDeleteAccountModal(false)}>
-              <X size={24} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Delete Account</Text>
-            <View style={{ width: 24 }} />
-          </View>
-
-          <View style={styles.modalContent}>
-            <View style={styles.dangerWarning}>
-              <Trash2 size={32} color={COLORS.error} />
-              <Text style={styles.dangerWarningTitle}>This action is permanent</Text>
-              <Text style={styles.dangerWarningText}>
-                Deleting your account will permanently remove all your data, including your wallet, transaction history, and settings. This cannot be undone.
-              </Text>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 48 : 0}
+          >
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setShowDeleteAccountModal(false)}>
+                <X size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Delete Account</Text>
+              <View style={{ width: 24 }} />
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
-              <View style={styles.inputContainer}>
-                <Lock size={20} color={COLORS.textSecondary} />
-                <TextInput
-                  style={styles.input}
-                  value={deletePassword}
-                  onChangeText={setDeletePassword}
-                  placeholder="Enter your password"
-                  placeholderTextColor={COLORS.textSecondary}
-                  secureTextEntry
-                />
+            <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <View style={styles.dangerWarning}>
+                <Trash2 size={32} color={COLORS.error} />
+                <Text style={styles.dangerWarningTitle}>This action is permanent</Text>
+                <Text style={styles.dangerWarningText}>
+                  Deleting your account will permanently remove all your data, including your wallet, transaction history, and settings. This cannot be undone.
+                </Text>
               </View>
-            </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Type "DELETE MY ACCOUNT" to confirm</Text>
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.input}
-                  value={deleteConfirmText}
-                  onChangeText={setDeleteConfirmText}
-                  placeholder="DELETE MY ACCOUNT"
-                  placeholderTextColor={COLORS.textSecondary}
-                  autoCapitalize="characters"
-                />
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Password</Text>
+                <View style={styles.inputContainer}>
+                  <Lock size={20} color={COLORS.textSecondary} />
+                  <TextInput
+                    testID="delete-password-input"
+                    style={styles.input}
+                    value={deletePassword}
+                    onChangeText={setDeletePassword}
+                    placeholder="Enter your password"
+                    placeholderTextColor={COLORS.textSecondary}
+                    secureTextEntry
+                  />
+                </View>
               </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Type "DELETE MY ACCOUNT" to confirm</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    testID="delete-confirm-input"
+                    style={styles.input}
+                    value={deleteConfirmText}
+                    onChangeText={setDeleteConfirmText}
+                    placeholder="DELETE MY ACCOUNT"
+                    placeholderTextColor={COLORS.textSecondary}
+                    autoCapitalize="characters"
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => setShowDeleteAccountModal(false)}
+              >
+                <Text style={styles.backButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                testID="delete-account-confirm-button"
+                style={[styles.deleteButton, isDeleting && styles.nextButtonDisabled]}
+                onPress={handleConfirmDeleteAccount}
+                disabled={isDeleting}
+              >
+                <Text style={styles.deleteButtonText}>
+                  {isDeleting ? 'Deleting...' : 'Delete Account'}
+                </Text>
+              </TouchableOpacity>
             </View>
-          </View>
-
-          <View style={styles.modalFooter}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => setShowDeleteAccountModal(false)}
-            >
-              <Text style={styles.backButtonText}>Cancel</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.deleteButton, isDeleting && styles.nextButtonDisabled]}
-              onPress={handleConfirmDeleteAccount}
-              disabled={isDeleting}
-            >
-              <Text style={styles.deleteButtonText}>
-                {isDeleting ? 'Deleting...' : 'Delete Account'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
