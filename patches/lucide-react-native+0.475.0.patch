@@ -18,3 +18,16 @@ index fb6267d..fdf0851 100644
 -export { Infinity as default };
 +export { InfinityIcon as default };
  //# sourceMappingURL=infinity.js.map
+diff --git a/node_modules/lucide-react-native/dist/esm/lucide-react-native.js b/node_modules/lucide-react-native/dist/esm/lucide-react-native.js
+index dbdb3e1..72433ec 100644
+--- a/node_modules/lucide-react-native/dist/esm/lucide-react-native.js
++++ b/node_modules/lucide-react-native/dist/esm/lucide-react-native.js
+@@ -886,7 +886,7 @@ export { default as Images, default as ImagesIcon, default as LucideImages } fro
+ export { default as Import, default as ImportIcon, default as LucideImport } from './icons/import.js';
+ export { default as Inbox, default as InboxIcon, default as LucideInbox } from './icons/inbox.js';
+ export { default as IndianRupee, default as IndianRupeeIcon, default as LucideIndianRupee } from './icons/indian-rupee.js';
+-export { default as Infinity, default as InfinityIcon, default as LucideInfinity } from './icons/infinity.js';
++// Patched: export { default as Infinity, default as InfinityIcon, default as LucideInfinity } from './icons/infinity.js';
+ export { default as Info, default as InfoIcon, default as LucideInfo } from './icons/info.js';
+ export { default as InspectionPanel, default as InspectionPanelIcon, default as LucideInspectionPanel } from './icons/inspection-panel.js';
+ export { default as Instagram, default as InstagramIcon, default as LucideInstagram } from './icons/instagram.js';
