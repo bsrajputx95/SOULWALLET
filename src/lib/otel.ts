@@ -13,7 +13,6 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
-import { Resource } from '@opentelemetry/resources';
 import { DiagConsoleLogger, DiagLogLevel, diag, trace, context, SpanStatusCode } from '@opentelemetry/api';
 
 // Enable OpenTelemetry debug logging in development
@@ -58,14 +57,10 @@ export function initializeOpenTelemetry(): void {
         });
 
         // Create SDK with auto-instrumentation
-        // Using string literals for resource attributes to avoid package version conflicts
+        // Note: Using resourceAttributes option instead of Resource class to avoid version conflicts
         sdk = new NodeSDK({
-            resource: new Resource({
-                'service.name': serviceName,
-                'service.version': serviceVersion,
-                'deployment.environment': environment,
-                'service.instance.id': process.env.HOSTNAME || `instance-${process.pid}`,
-            }) as any,
+            // Pass resource attributes directly - NodeSDK will create the Resource internally
+            serviceName: serviceName,
             traceExporter: jaegerExporter,
             instrumentations: [
                 getNodeAutoInstrumentations({
