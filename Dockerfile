@@ -102,4 +102,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 
 # Run migrations and start application
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && exec dumb-init node dist/server/fastify.js"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && exec dumb-init node dist/src/server/fastify.js"]
