@@ -32,11 +32,13 @@ config.resolver = {
     ...config.resolver,
     // Only include necessary file extensions
     sourceExts: ['jsx', 'js', 'ts', 'tsx', 'json', 'cjs', 'mjs'],
-    // Exclude test files from bundle
+    // Exclude test files and problematic modules from bundle
     blockList: [
         /.*\/__tests__\/.*/,
         /.*\.test\.(js|ts|tsx)$/,
         /.*\.spec\.(js|ts|tsx)$/,
+        // Exclude lucide infinity icon that conflicts with global Infinity constant
+        /node_modules\/lucide-react-native\/dist\/esm\/icons\/infinity\.js$/,
     ],
 };
 
@@ -52,7 +54,6 @@ config.serializer = {
                 '@react-native',
                 'react-native',
                 'expo',
-                'expo-image',
                 '@solana',
                 '@trpc',
                 'superjson',
