@@ -264,6 +264,7 @@
     "stream-browserify": "^3.0.0",
     "string_decoder": "^1.3.0",
     "superjson": "^2.2.3",
+    "tsconfig-paths": "^4.2.0",
     "tsx": "^4.20.6",
     "tsyringe": "^4.10.0",
     "tweetnacl": "^1.0.3",
