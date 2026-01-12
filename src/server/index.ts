@@ -514,6 +514,9 @@ const validateProduction = async () => {
     logger.info('✅ HashiCorp Vault provider configured', {
       addr: process.env.VAULT_ADDR,
     });
+  } else if (kmsProvider === 'env' && process.env.ALLOW_ENV_KMS_IN_PROD === 'true') {
+    // env provider is allowed for beta testing when explicitly enabled
+    logger.info('✅ Env-based KMS provider configured (beta testing only)');
   } else {
     throw new Error(`Unknown KMS_PROVIDER: ${kmsProvider}. Use 'aws' or 'vault'.`);
   }
