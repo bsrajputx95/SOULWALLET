@@ -475,16 +475,21 @@ const validateProduction = async () => {
   let solanaAvailable = false;
 
   // 0. KMS Provider Validation (Comment 2 fix - CRITICAL for production security)
+  // Allow override for testing deployments via ALLOW_ENV_KMS_IN_PROD=true
   const kmsProvider = (process.env.KMS_PROVIDER || 'env').toLowerCase();
   if (kmsProvider === 'env') {
-    throw new Error(
-      '🚨 SECURITY ERROR: KMS_PROVIDER=env is NOT allowed in production!\n\n' +
-      'Environment-based encryption keys are insecure for production use.\n' +
-      'Configure one of the following:\n' +
-      '  - KMS_PROVIDER=aws with AWS_REGION and AWS_KMS_KEY_ID\n' +
-      '  - KMS_PROVIDER=vault with VAULT_ADDR and VAULT_TOKEN\n\n' +
-      'See docs/KEY_MANAGEMENT.md for configuration details.'
-    );
+    if (process.env.ALLOW_ENV_KMS_IN_PROD !== 'true') {
+      throw new Error(
+        '🚨 SECURITY ERROR: KMS_PROVIDER=env is NOT allowed in production!\n\n' +
+        'Environment-based encryption keys are insecure for production use.\n' +
+        'Configure one of the following:\n' +
+        '  - KMS_PROVIDER=aws with AWS_REGION and AWS_KMS_KEY_ID\n' +
+        '  - KMS_PROVIDER=vault with VAULT_ADDR and VAULT_TOKEN\n\n' +
+        'For testing ONLY, set ALLOW_ENV_KMS_IN_PROD=true (NOT for production with real user data).\n' +
+        'See docs/KEY_MANAGEMENT.md for configuration details.'
+      );
+    }
+    logger.warn('⚠️ WARNING: Using env-based KMS provider in production. This is insecure for real user data!');
   }
 
   // Validate KMS-specific configuration
