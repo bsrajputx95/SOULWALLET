@@ -334,9 +334,8 @@ if (isReactNative || !pino) {
   }
 
   // Add Logstash TCP transport for ELK stack
-  // Enabled in production OR when LOGSTASH_ENABLED=true
-  const logstashEnabled = process.env.LOGSTASH_ENABLED === 'true' ||
-    (isProduction && process.env.LOGSTASH_ENABLED !== 'false');
+  // Only enabled when LOGSTASH_ENABLED=true (opt-in, not auto-enabled in production)
+  const logstashEnabled = process.env.LOGSTASH_ENABLED === 'true';
 
   if (logstashEnabled) {
     const logstashHost = process.env.LOGSTASH_HOST || 'logstash';
