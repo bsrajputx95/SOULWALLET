@@ -396,12 +396,17 @@ export function getKeyManagementService(): KeyManagementService {
   const provider = getKmsProviderName()
 
   // Comment 2 fix: Block startup if env provider is used in production
+  // Allow override for testing deployments via ALLOW_ENV_KMS_IN_PROD=true
   if (provider === 'env' && process.env.NODE_ENV === 'production') {
-    const errorMsg = `SECURITY ERROR: KMS_PROVIDER=env is not allowed in production. ` +
-      `Set KMS_PROVIDER to 'aws' or 'vault' and configure the appropriate credentials. ` +
-      `Using environment-based encryption in production is a critical security vulnerability.`;
-    logger.error(errorMsg);
-    throw new Error(errorMsg);
+    if (process.env.ALLOW_ENV_KMS_IN_PROD !== 'true') {
+      const errorMsg = `SECURITY ERROR: KMS_PROVIDER=env is not allowed in production. ` +
+        `Set KMS_PROVIDER to 'aws' or 'vault' and configure the appropriate credentials. ` +
+        `Using environment-based encryption in production is a critical security vulnerability. ` +
+        `For testing ONLY, set ALLOW_ENV_KMS_IN_PROD=true (NOT for production with real user data).`;
+      logger.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    logger.warn('⚠️ WARNING: Using env-based KMS provider in production. This is insecure for real user data!');
   }
 
   if (provider === 'aws') {
