@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+﻿import type { FastifyInstance } from 'fastify';
 import Fastify from 'fastify';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import cors from '@fastify/cors';
@@ -38,7 +38,7 @@ function initializeBackendSentry() {
   const dsn = process.env.SENTRY_BACKEND_DSN || process.env.EXPO_PUBLIC_SENTRY_DSN;
 
   if (!dsn || dsn === 'your-sentry-dsn-here' || dsn === 'disabled') {
-    logger.info('ℹ️  Backend Sentry not initialized (DSN not configured)');
+    logger.info('â„¹ï¸  Backend Sentry not initialized (DSN not configured)');
     return;
   }
 
@@ -76,7 +76,7 @@ function initializeBackendSentry() {
     });
 
     sentryInitialized = true;
-    logger.info('✅ Backend Sentry initialized successfully');
+    logger.info('âœ… Backend Sentry initialized successfully');
   } catch (error) {
     logger.error('Failed to initialize backend Sentry:', error);
   }
@@ -1695,87 +1695,6 @@ export async function createServer(): Promise<FastifyInstance> {
     };
   });
 
-  // API documentation endpoint (basic)
-  server.get('/api/docs', async (_request, reply) => {
-    const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>SoulWallet API Documentation</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .endpoint { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
-        .method { font-weight: bold; color: #007acc; }
-        .path { font-family: monospace; background: #f5f5f5; padding: 2px 5px; }
-        .description { margin-top: 10px; color: #666; }
-      </style>
-    </head>
-    <body>
-      <h1>SoulWallet API Documentation</h1>
-      <p>Welcome to the SoulWallet API. This API provides authentication and user management services.</p>
-      
-      <h2>Authentication Endpoints</h2>
-      
-      <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.signup</span></div>
-        <div class="description">Register a new user account</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.login</span></div>
-        <div class="description">Login with email and password</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.logout</span></div>
-        <div class="description">Logout and invalidate session</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.requestPasswordReset</span></div>
-        <div class="description">Request password reset via email OTP</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.resetPassword</span></div>
-        <div class="description">Reset password using OTP</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.verifyOTP</span></div>
-        <div class="description">Verify OTP code</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">GET</span> <span class="path">/api/v1/trpc/auth.getCurrentUser</span></div>
-        <div class="description">Get current authenticated user</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">POST</span> <span class="path">/api/v1/trpc/auth.refreshToken</span></div>
-        <div class="description">Refresh JWT access token</div>
-      </div>
-      
-      <h2>Utility Endpoints</h2>
-      
-      <div class="endpoint">
-        <div><span class="method">GET</span> <span class="path">/health</span></div>
-        <div class="description">Server health check</div>
-      </div>
-      
-      <div class="endpoint">
-        <div><span class="method">GET</span> <span class="path">/api</span></div>
-        <div class="description">API information</div>
-      </div>
-      
-      <p><strong>Note:</strong> All tRPC endpoints use POST method for mutations and GET for queries. 
-      The actual HTTP method may vary based on the tRPC adapter configuration.</p>
-    </body>
-    </html>
-    `;
-
-    reply.type('text/html').send(html);
-  });
 
   // CSRF token endpoint for native clients
   // Security Rationale: Native mobile apps cannot use cookies the same way as web browsers,
@@ -1879,9 +1798,9 @@ export async function startServer(port = 3001, host = '0.0.0.0'): Promise<Fastif
       process.send('ready');
     }
 
-    server.log.info(`🚀 Server running at http://${host}:${port}`);
-    server.log.info(`📚 API docs available at http://${host}:${port}/api/docs`);
-    server.log.info(`🔍 Health check at http://${host}:${port}/health`);
+    server.log.info(`ðŸš€ Server running at http://${host}:${port}`);
+    server.log.info(`ðŸ“š API docs available at http://${host}:${port}/api/docs`);
+    server.log.info(`ðŸ” Health check at http://${host}:${port}/health`);
 
     // Initialize performance snapshot cron job (daily at midnight UTC)
     if (process.env.NODE_ENV === 'production' || process.env.ENABLE_PERFORMANCE_SNAPSHOTS === 'true') {
@@ -1894,9 +1813,9 @@ export async function startServer(port = 3001, host = '0.0.0.0'): Promise<Fastif
           server.log.info('Running daily performance snapshot creation...');
           try {
             await PerformanceSnapshotService.createDailySnapshots();
-            server.log.info('✅ Daily performance snapshots created successfully');
+            server.log.info('âœ… Daily performance snapshots created successfully');
           } catch (error) {
-            server.log.error({ error }, '❌ Failed to create daily performance snapshots');
+            server.log.error({ error }, 'âŒ Failed to create daily performance snapshots');
             // Audit Issue #18: Report cron job errors to Sentry
             if (sentryInitialized) {
               Sentry.captureException(error, {
@@ -1907,9 +1826,9 @@ export async function startServer(port = 3001, host = '0.0.0.0'): Promise<Fastif
           }
         });
 
-        server.log.info('✅ Performance snapshot cron job initialized');
+        server.log.info('âœ… Performance snapshot cron job initialized');
       } catch (error) {
-        server.log.warn({ error }, '⚠️  Failed to initialize performance snapshot cron job');
+        server.log.warn({ error }, 'âš ï¸  Failed to initialize performance snapshot cron job');
       }
     }
 
@@ -1930,7 +1849,7 @@ export async function startServer(port = 3001, host = '0.0.0.0'): Promise<Fastif
 
     return server;
   } catch (error: any) {
-    logger.error('❌ Failed to start server:', error?.message || error);
+    logger.error('âŒ Failed to start server:', error?.message || error);
     console.error('STARTUP ERROR:', error);
     process.exit(1);
   }
