@@ -79,7 +79,6 @@ COPY --from=dependencies --chown=soulwallet:nodejs /app/node_modules ./node_modu
 COPY --from=builder --chown=soulwallet:nodejs /app/dist ./dist
 COPY --from=builder --chown=soulwallet:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=soulwallet:nodejs /app/package*.json ./
-COPY --from=builder --chown=soulwallet:nodejs /app/tsconfig.server.json ./tsconfig.json
 
 # Set proper working directory permissions
 RUN chown -R soulwallet:nodejs /app
@@ -103,4 +102,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 
 # Run migrations and start application
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && exec dumb-init node -r tsconfig-paths/register dist/src/server/fastify.js"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && exec dumb-init node dist/src/server/fastify.js"]
