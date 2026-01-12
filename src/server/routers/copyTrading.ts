@@ -17,10 +17,31 @@ import type { JupiterSwap } from '../../lib/services/jupiterSwap'
 import { redisCache } from '../../lib/redis'
 import { container } from '../../lib/di/container';
 
-// Resolve services from DI container
-const custodialWalletService = container.resolve<CustodialWalletService>('CustodialWallet');
-const rpcManager = container.resolve<RpcManager>('RpcManager');
-const jupiterSwap = container.resolve<JupiterSwap>('JupiterSwap');
+// Lazy resolve services from DI container (resolved when first called, after setupContainer)
+let _custodialWalletService: CustodialWalletService | null = null;
+let _rpcManager: RpcManager | null = null;
+let _jupiterSwap: JupiterSwap | null = null;
+
+function getCustodialWalletService(): CustodialWalletService {
+  if (!_custodialWalletService) {
+    _custodialWalletService = container.resolve<CustodialWalletService>('CustodialWallet');
+  }
+  return _custodialWalletService;
+}
+
+function getRpcManager(): RpcManager {
+  if (!_rpcManager) {
+    _rpcManager = container.resolve<RpcManager>('RpcManager');
+  }
+  return _rpcManager;
+}
+
+function getJupiterSwap(): JupiterSwap {
+  if (!_jupiterSwap) {
+    _jupiterSwap = container.resolve<JupiterSwap>('JupiterSwap');
+  }
+  return _jupiterSwap;
+}
 
 // USDC mint address on Solana mainnet
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -40,7 +61,7 @@ async function fetchCurrentPrices(tokenMints: string[]): Promise<Record<string, 
   if (tokenMints.length === 0) return {};
 
   try {
-    return await jupiterSwap.getPrices(tokenMints)
+    return await getJupiterSwap().getPrices(tokenMints)
   } catch (error) {
     logger.error('Error fetching prices from Jupiter', error);
     return {};
@@ -58,7 +79,7 @@ export const copyTradingRouter = router({
 
       try {
         // Create or get existing custodial wallet
-        const publicKey = await custodialWalletService.getOrCreateWallet(userId);
+        const publicKey = await getCustodialWalletService().getOrCreateWallet(userId);
 
         logger.info(`Custodial wallet setup for user ${userId}: ${publicKey}`);
 
@@ -85,7 +106,7 @@ export const copyTradingRouter = router({
 
       try {
         // Check if user has a custodial wallet
-        const publicKey = await custodialWalletService.getPublicKey(userId);
+        const publicKey = await getCustodialWalletService().getPublicKey(userId);
 
         if (!publicKey) {
           return {
@@ -97,12 +118,12 @@ export const copyTradingRouter = router({
         }
 
         // Get SOL balance
-        const solBalance = await custodialWalletService.getBalance(userId);
+        const solBalance = await getCustodialWalletService().getBalance(userId);
 
         // Get USDC balance
         let usdcBalance = 0;
         try {
-          const connection = await rpcManager.getConnection();
+          const connection = await getRpcManager().getConnection();
 
           const walletPubkey = new PublicKey(publicKey);
           const usdcMint = new PublicKey(USDC_MINT);
@@ -283,7 +304,7 @@ export const copyTradingRouter = router({
       }
 
       // Validate budget limits
-      const budgetValidation = custodialWalletService.validateCopyTradeBudget(
+      const budgetValidation = getCustodialWalletService().validateCopyTradeBudget(
         input.totalBudget,
         input.amountPerTrade
       );
@@ -305,7 +326,7 @@ export const copyTradingRouter = router({
       }
 
       // Check if user has custodial wallet with sufficient balance
-      const hasWallet = await custodialWalletService.hasWallet(userId);
+      const hasWallet = await getCustodialWalletService().hasWallet(userId);
       if (!hasWallet) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -505,7 +526,7 @@ export const copyTradingRouter = router({
           })
         }
 
-        const budgetValidation = custodialWalletService.validateCopyTradeBudget(
+        const budgetValidation = getCustodialWalletService().validateCopyTradeBudget(
           nextTotalBudget,
           nextAmountPerTrade
         )
