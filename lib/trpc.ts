@@ -37,7 +37,7 @@ export const trpcClient = trpc.createClient({
     httpLink({
       // CRITICAL: In tRPC v11, transformer MUST be passed to httpLink, not createClient
       transformer: superjson,
-      url: `${getBaseUrl()}/api/trpc`,
+      url: `${getBaseUrl()}/api/v1/trpc`,
       headers: async () => {
         const token = await SecureStorage.getToken();
         const headers: Record<string, string> = {};
@@ -85,7 +85,7 @@ export const trpcClient = trpc.createClient({
         const refreshClient = trpc.createClient({
           links: [
             httpLink({
-              url: `${getBaseUrl()}/api/trpc`,
+              url: `${getBaseUrl()}/api/v1/trpc`,
               transformer: superjson,
             } as any),
           ],
