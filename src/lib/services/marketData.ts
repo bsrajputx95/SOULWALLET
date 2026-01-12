@@ -149,16 +149,16 @@ class MarketDataService {
       '9iLH8T7zoWhY7sBmj1WK9ENbWdS1nL8n9wAxaeRitTa6', // USH
       'EjmyN6qEC1Tf1JxiG1ae7UTJhUxSwk1TCCb39Aq1Ci1D', // USDH (Hubble)
     ];
-    
+
     const isStablecoinByName = (name: string): boolean => {
       const lowerName = name.toLowerCase();
-      return lowerName.includes('usd') || 
-             lowerName.includes('dollar') || 
-             lowerName.includes('stablecoin') ||
-             lowerName.includes('stable') ||
-             lowerName.includes('tether') ||
-             lowerName.includes('dai ') ||
-             lowerName === 'dai';
+      return lowerName.includes('usd') ||
+        lowerName.includes('dollar') ||
+        lowerName.includes('stablecoin') ||
+        lowerName.includes('stable') ||
+        lowerName.includes('tether') ||
+        lowerName.includes('dai ') ||
+        lowerName === 'dai';
     };
 
     return this.trendingBreaker.exec(
@@ -259,7 +259,7 @@ class MarketDataService {
           const verifiedA = a.info?.verified ? 1 : 0;
           const verifiedB = b.info?.verified ? 1 : 0;
           if (verifiedB !== verifiedA) return verifiedB - verifiedA;
-          
+
           // Secondary sort: volume DESC
           const volumeA = parseFloat(a.volume?.h24 || '0');
           const volumeB = parseFloat(b.volume?.h24 || '0');
@@ -316,27 +316,22 @@ class MarketDataService {
       '9iLH8T7zoWhY7sBmj1WK9ENbWdS1nL8n9wAxaeRitTa6', // USH
       'EjmyN6qEC1Tf1JxiG1ae7UTJhUxSwk1TCCb39Aq1Ci1D', // USDH (Hubble)
     ];
-    
+
     const isStablecoinByName = (name: string): boolean => {
       const lowerName = name.toLowerCase();
-      return lowerName.includes('usd') || 
-             lowerName.includes('dollar') || 
-             lowerName.includes('stablecoin') ||
-             lowerName.includes('stable') ||
-             lowerName.includes('tether') ||
-             lowerName.includes('dai ') ||
-             lowerName === 'dai';
+      return lowerName.includes('usd') ||
+        lowerName.includes('dollar') ||
+        lowerName.includes('stablecoin') ||
+        lowerName.includes('stable') ||
+        lowerName.includes('tether') ||
+        lowerName.includes('dai ') ||
+        lowerName === 'dai';
     };
-
-    // Age filter constants
-    const now = Date.now();
-    const MIN_PAIR_AGE_HOURS = 4;
-    const MIN_PAIR_AGE_MS = MIN_PAIR_AGE_HOURS * 60 * 60 * 1000;
 
     return this.trendingBreaker.exec(
       async () => {
         // Search for popular trending Solana meme/utility tokens (NO stablecoins)
-        const trendingTokens = ['BONK', 'WIF', 'POPCAT', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY', 'ORCA', 'PENGU', 'AI16Z', 'GOAT', 'FARTCOIN'];
+        const trendingTokens = ['BONK', 'WIF', 'POPCAT', 'JUP', 'PYTH', 'JTO', 'RNDR', 'RAY', 'ORCA', 'PENGU', 'AI16Z', 'GOAT', 'FARTCOIN', 'SOL', 'MEW', 'BOME', 'SLERF'];
 
         const results = await Promise.all(
           trendingTokens.map(async (token) => {
@@ -351,7 +346,7 @@ class MarketDataService {
         // Combine all pairs
         const allPairs = results.flatMap(r => r.pairs || []);
 
-        // Apply BEAST quality filters
+        // Simple filters - only exclude stablecoins and require basic validity
         const filteredPairs = allPairs.filter((pair: any) => {
           // Must be Solana chain
           if (pair.chainId !== 'solana') return false;
@@ -364,57 +359,24 @@ class MarketDataService {
           // Filter out stablecoins by address
           const address = pair.baseToken?.address || '';
           if (STABLECOIN_ADDRESSES.includes(address)) return false;
-          
+
           // Filter out stablecoins by name
           const name = pair.baseToken?.name || '';
           if (isStablecoinByName(name)) return false;
 
-          // BEAST Filter 1: Minimum liquidity $500,000
-          const liquidity = parseFloat(pair.liquidity?.usd || '0');
-          if (liquidity < 500000) return false;
-
-          // BEAST Filter 2: Minimum 24h volume $1,000,000
-          const volume24h = parseFloat(pair.volume?.h24 || '0');
-          if (volume24h < 1000000) return false;
-
-          // Filter 3: Minimum pair age 4 hours
-          const pairCreatedAt = pair.pairCreatedAt;
-          if (pairCreatedAt) {
-            const pairAge = now - pairCreatedAt;
-            if (pairAge < MIN_PAIR_AGE_MS) return false;
-          }
-
-          // BEAST Filter 4: Minimum 24h transactions 500
-          const buys24h = pair.txns?.h24?.buys || 0;
-          const sells24h = pair.txns?.h24?.sells || 0;
-          const txns24h = buys24h + sells24h;
-          if (txns24h < 500) return false;
-
-          // BEAST Filter 5: Buy ratio > 60%
-          if (txns24h > 0) {
-            const buyRatio = buys24h / txns24h;
-            if (buyRatio < 0.6) return false;
-          }
-
-          // BEAST Filter 6: Absolute price change > 5%
-          const priceChange = Math.abs(parseFloat(pair.priceChange?.h24 || '0'));
-          if (priceChange < 5) return false;
-
-          // Must have valid price
+          // Must have valid price (basic quality check)
           const price = parseFloat(pair.priceUsd || '0');
           if (price <= 0) return false;
+
+          // Must have some liquidity (very low threshold)
+          const liquidity = parseFloat(pair.liquidity?.usd || '0');
+          if (liquidity < 1000) return false;
 
           return true;
         });
 
-        // Sort by verified first, then volume DESC
+        // Sort by volume DESC
         const sortedByTrending = filteredPairs.sort((a: any, b: any) => {
-          // Primary sort: verified pairs first
-          const verifiedA = a.info?.verified ? 1 : 0;
-          const verifiedB = b.info?.verified ? 1 : 0;
-          if (verifiedB !== verifiedA) return verifiedB - verifiedA;
-          
-          // Secondary sort: volume DESC
           const volumeA = parseFloat(a.volume?.h24 || '0');
           const volumeB = parseFloat(b.volume?.h24 || '0');
           return volumeB - volumeA;
@@ -426,7 +388,7 @@ class MarketDataService {
         );
 
         const trending = { pairs: uniquePairs.slice(0, 20) };
-        await redisCache.set(key, trending, 120); // Cache for 2 minutes for fresher data
+        await redisCache.set(key, trending, 120); // Cache for 2 minutes
         return trending;
       },
       () => {
@@ -506,16 +468,16 @@ export const marketData = new MarketDataService();
 export async function warmMarketCache(): Promise<void> {
   logger.info('Warming market cache...');
   const startTime = Date.now();
-  
+
   try {
     // Prefetch SoulMarket (top 50 tokens)
     await marketData.getSoulMarket();
     logger.info('SoulMarket cache warmed');
-    
+
     // Prefetch trending tokens
     await marketData.trending();
     logger.info('Trending cache warmed');
-    
+
     // Prefetch popular token prices (SOL, BONK, WIF, JUP)
     const popularTokens = [
       'So11111111111111111111111111111111111111112', // SOL
@@ -523,10 +485,10 @@ export async function warmMarketCache(): Promise<void> {
       'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', // WIF
       'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',  // JUP
     ];
-    
+
     await Promise.all(popularTokens.map(addr => marketData.getToken(addr)));
     logger.info('Popular token prices cached');
-    
+
     const duration = Date.now() - startTime;
     logger.info(`Market cache warmed successfully in ${duration}ms`);
   } catch (error) {
