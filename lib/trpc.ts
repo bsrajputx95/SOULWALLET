@@ -5,6 +5,7 @@ import { SecureStorage } from './secure-storage';
 import Constants from 'expo-constants';
 import type { AppRouter } from '../src/server/types';
 import { Platform } from 'react-native';
+import { isAuthHydrated } from '../hooks/auth-store';
 
 export const trpc = createTRPCReact<AppRouter>();
 
@@ -79,6 +80,11 @@ export const trpcClient = trpc.createClient({
         const res = await fetch(input, init);
         if (res.status !== 401) return res;
 
+        // Don't attempt refresh if auth hydration is still in progress
+        if (!isAuthHydrated()) {
+          return res;
+        }
+
         const refreshToken = await SecureStorage.getRefreshToken();
         if (!refreshToken) return res;
 
@@ -99,8 +105,15 @@ export const trpcClient = trpc.createClient({
           const headers = new Headers(init?.headers || {});
           headers.set('authorization', `Bearer ${refreshed.accessToken}`);
           return await fetch(input, { ...init, headers });
-        } catch {
-          await SecureStorage.clearAll();
+        } catch (refreshError: any) {
+          // Only clear auth if refresh explicitly fails with invalid/expired token
+          const errorMessage = refreshError?.message?.toLowerCase() || '';
+          const isInvalidToken = errorMessage.includes('invalid') || 
+                                 errorMessage.includes('expired') || 
+                                 errorMessage.includes('unauthorized');
+          if (isInvalidToken) {
+            await SecureStorage.clearAll();
+          }
           return res;
         }
       }) as any,

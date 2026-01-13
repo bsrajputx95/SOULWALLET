@@ -61,12 +61,13 @@ export default function HomeScreen() {
     enabled: isAuthenticated,
   });
 
-  // ✅ Fetch trending coins from market
+  // ✅ Fetch trending coins from market - daily snapshot at 15:00 UTC
   const { data: trendingData, isLoading: trendingLoading } = trpc.market.trending.useQuery(undefined, {
     enabled: isAuthenticated,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
+    staleTime: Infinity, // Treat as daily snapshot - don't refetch automatically
     refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   // Transform trending data to displayable format

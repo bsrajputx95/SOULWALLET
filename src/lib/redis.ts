@@ -13,6 +13,8 @@ export type CacheKey =
   | `search:${string}`
   | `pair:${string}:${string}`
   | 'trending'
+  | 'trending:24h'
+  | 'trending:daily'
   | 'soulmarket'
   | 'featureFlags'
   | `ohlcv:${string}:${string}`

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, Image } from 'react-native';
 import { router } from 'expo-router';
 import { COLORS } from '../constants/colors';
@@ -17,6 +17,14 @@ interface TokenCardProps {
   onPress?: () => void;
 }
 
+// Validate logo URL - must be https and non-empty
+const isValidLogoUrl = (url?: string): boolean => {
+  if (!url || url.trim() === '') return false;
+  // Only allow https URLs
+  if (!url.startsWith('https://')) return false;
+  return true;
+};
+
 export const TokenCard: React.FC<TokenCardProps> = ({
   symbol,
   name,
@@ -28,6 +36,11 @@ export const TokenCard: React.FC<TokenCardProps> = ({
   logo,
   onPress,
 }) => {
+  // Track if image failed to load
+  const [imageError, setImageError] = useState(false);
+  
+  // Determine if we should show the image or letter avatar
+  const showImage = isValidLogoUrl(logo) && !imageError;
   const formatPrice = (price: number) => {
     if (price < 0.000001) return price.toExponential(2);
     if (price < 0.01) return price.toFixed(6);
@@ -71,8 +84,12 @@ export const TokenCard: React.FC<TokenCardProps> = ({
         <View style={styles.content}>
           <View style={styles.leftContent}>
             <View style={styles.symbolContainer}>
-              {logo ? (
-                <Image source={{ uri: logo }} style={styles.tokenLogo} />
+              {showImage ? (
+                <Image 
+                  source={{ uri: logo }} 
+                  style={styles.tokenLogo}
+                  onError={() => setImageError(true)}
+                />
               ) : (
                 <View style={[styles.tokenLogoPlaceholder, { backgroundColor: getTokenColor(symbol)[0] + '30' }]}>
                   <Text style={styles.tokenLogoText}>{symbol.charAt(0)}</Text>

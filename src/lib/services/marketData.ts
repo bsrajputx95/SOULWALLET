@@ -151,7 +151,10 @@ class MarketDataService {
               },
               chainId: 'solana',
               url: token.url,
-              icon: token.icon ? `https://cdn.dexscreener.com/icons/${token.icon}` : undefined,
+              // Standardize logo: use info.imageUrl for consistency with frontend
+              info: {
+                imageUrl: token.icon ? `https://cdn.dexscreener.com/icons/${token.icon}` : undefined,
+              },
               header: token.header,
               links: token.links || [],
               boostAmount: token.totalAmount,
@@ -174,20 +177,19 @@ class MarketDataService {
   }
 
   /**
-   * Get trending tokens from DexScreener's boosted tokens API
-   * Simple: Just return top 10 Solana trending tokens from DexScreener
-   * No complex filters - show what DexScreener considers trending
+   * Get daily trending tokens from DexScreener
+   * Cached until next 15:00 UTC (daily snapshot)
    */
   async trending() {
-    const key = 'trending' as const;
+    const key = 'trending:daily' as const;
     const cached = await redisCache.get<any>(key);
     if (cached) return cached;
 
     return this.trendingBreaker.exec(
       async () => {
         try {
-          // Use DexScreener's boosted tokens API - these are the trending/promoted tokens
-          const { data } = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
+          // Use DexScreener's token profiles for Solana - shows trending
+          const { data } = await axios.get('https://api.dexscreener.com/token-profiles/latest/v1', {
             timeout: EXTERNAL_CALL_TIMEOUT,
             headers: {
               'Accept': 'application/json',
@@ -195,12 +197,11 @@ class MarketDataService {
             }
           });
 
-          // Filter for Solana chain only, take top 10
+          // Filter for Solana chain, take top 10 by boost amount
           const solanaTokens = (data || [])
             .filter((token: any) => token.chainId === 'solana')
             .slice(0, 10)
             .map((token: any) => ({
-              // Format to match expected structure
               baseToken: {
                 address: token.tokenAddress,
                 symbol: token.description?.split(' ')[0] || 'TOKEN',
@@ -208,14 +209,29 @@ class MarketDataService {
               },
               chainId: 'solana',
               url: token.url,
-              icon: token.icon ? `https://cdn.dexscreener.com/icons/${token.icon}` : undefined,
+              // Standardize logo: prefer imageUrl, fallback to CDN icon
+              info: {
+                imageUrl: token.icon ? `https://cdn.dexscreener.com/icons/${token.icon}` : undefined,
+              },
               header: token.header,
               links: token.links || [],
               boostAmount: token.totalAmount,
             }));
 
           const trending = { pairs: solanaTokens };
-          await redisCache.set(key, trending, 300); // Cache for 5 minutes
+
+          // Calculate seconds until next 15:00 UTC
+          const now = new Date();
+          const next1500UTC = new Date(now);
+          next1500UTC.setUTCHours(15, 0, 0, 0);
+          // If we're past 15:00 UTC today, target tomorrow's 15:00 UTC
+          if (now >= next1500UTC) {
+            next1500UTC.setUTCDate(next1500UTC.getUTCDate() + 1);
+          }
+          const ttlSeconds = Math.max(60, Math.floor((next1500UTC.getTime() - now.getTime()) / 1000));
+
+          await redisCache.set(key, trending, ttlSeconds);
+          logger.info(`Trending cached for ${Math.floor(ttlSeconds / 3600)}h until 15:00 UTC`);
           return trending;
         } catch (error) {
           logger.error('Failed to fetch trending tokens:', error);

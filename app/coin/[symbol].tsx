@@ -111,7 +111,16 @@ export default function CoinDetailsScreen() {
   const passedPairAddress = params.pairAddress || undefined;
   const passedName = params.name || undefined;
 
-  // Fetch real token data from API
+  // Helper to format display name when symbol is missing/unknown
+  const getDisplaySymbol = () => {
+    if (symbol && symbol.toUpperCase() !== 'UNKNOWN') return symbol.toUpperCase();
+    if (passedName) return passedName.slice(0, 8).toUpperCase();
+    if (passedContractAddress) return passedContractAddress.slice(0, 6) + '...';
+    return 'TOKEN';
+  };
+
+  // Fetch real token data from API - use symbol if valid, otherwise skip
+  const shouldFetchBySymbol = !!symbol && symbol.toUpperCase() !== 'UNKNOWN';
   const {
     data: apiData,
     isLoading: isLoadingApi,
@@ -120,13 +129,14 @@ export default function CoinDetailsScreen() {
   } = trpc.market.getTokenDetails.useQuery(
     { symbol: symbol?.toUpperCase() || '' },
     {
-      enabled: !!symbol,
+      enabled: shouldFetchBySymbol,
       refetchInterval: 30000, // Refresh every 30 seconds
       retry: 2,
     }
   );
 
   // Transform API data to CoinData format - prefer passed params for consistency
+  // CRITICAL: Create fallback coinData from passed params even if API fails
   const coinData: CoinData | null = useMemo(() => {
     if (apiData) {
       return {
@@ -155,6 +165,35 @@ export default function CoinDetailsScreen() {
         txns24h: apiData.txns24h,
       };
     }
+    
+    // Fallback: Create coinData from passed params if we have pairAddress or contractAddress
+    // This ensures TokenInfo always loads if DexScreener data was passed
+    if (passedPairAddress || passedContractAddress) {
+      return {
+        symbol: getDisplaySymbol(),
+        name: passedName || 'Unknown Token',
+        price: passedPrice ?? 0,
+        change24h: passedChange ?? 0,
+        priceChange1h: undefined,
+        priceChange7d: undefined,
+        marketCap: 0,
+        fdv: undefined,
+        volume24h: 0,
+        liquidity: 0,
+        holders: 0,
+        contractAddress: passedContractAddress || passedPairAddress || '',
+        verified: false,
+        age: 'Unknown',
+        pairAge: null,
+        logo: passedLogo || null,
+        description: null,
+        website: null,
+        twitter: null,
+        telegram: null,
+        txns24h: undefined,
+      };
+    }
+    
     if (symbol?.toUpperCase() === 'SOL') {
       return {
         symbol: 'SOL',
@@ -181,7 +220,7 @@ export default function CoinDetailsScreen() {
       };
     }
     return null;
-  }, [apiData, symbol]);
+  }, [apiData, symbol, passedPrice, passedChange, passedLogo, passedContractAddress, passedPairAddress, passedName]);
 
   // Removed: transactions and topTraders state - tabs now show "Coming Soon"
   const [activeTab, setActiveTab] = useState<'chart' | 'trades' | 'holders'>('chart');
@@ -192,8 +231,8 @@ export default function CoinDetailsScreen() {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 640;
 
-  // Fetch price history for chart
-  const pairAddress = apiData?.pairAddress || '';
+  // Fetch price history for chart - use passed pairAddress or from API
+  const pairAddress = passedPairAddress || apiData?.pairAddress || '';
   const {
     data: priceHistoryData,
     isLoading: isLoadingChart,
@@ -418,23 +457,23 @@ export default function CoinDetailsScreen() {
     return date.toLocaleDateString();
   };
 
-  // Loading state
-  if (isLoadingApi) {
+  // Loading state - only show if we're fetching by symbol AND don't have fallback data
+  if (isLoadingApi && shouldFetchBySymbol && !passedPairAddress && !passedContractAddress) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.solana} />
-        <Text style={styles.loadingText}>Loading {symbol?.toUpperCase()}...</Text>
+        <Text style={styles.loadingText}>Loading {getDisplaySymbol()}...</Text>
       </View>
     );
   }
 
-  // Error state
+  // Error state - only show if we have NO data at all (no API data AND no passed params)
   if (!coinData) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.errorTitle}>Token Not Found</Text>
         <Text style={styles.errorText}>
-          {`Could not find data for ${symbol?.toUpperCase()}`}
+          {`Could not find data for ${getDisplaySymbol()}`}
         </Text>
         <NeonButton
           title="Go Back"
@@ -858,6 +897,20 @@ export default function CoinDetailsScreen() {
             style={styles.actionButtonSecondary}
           />
         </View>
+
+        {/* About / Description */}
+        {coinData.description && (
+          <NeonCard style={styles.aboutCard}>
+            <Text style={styles.sectionTitle}>About</Text>
+            <Text 
+              style={styles.aboutText}
+              numberOfLines={3}
+              ellipsizeMode="tail"
+            >
+              {coinData.description}
+            </Text>
+          </NeonCard>
+        )}
 
         {/* Links */}
         {(coinData.website || coinData.twitter || coinData.telegram) && (
@@ -1573,6 +1626,16 @@ const styles = StyleSheet.create({
     margin: SPACING.m,
     marginTop: 0,
     marginBottom: SPACING.xl,
+  },
+  aboutCard: {
+    margin: SPACING.m,
+    marginTop: 0,
+  },
+  aboutText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
   },
   linksContainer: {
     flexDirection: 'row',

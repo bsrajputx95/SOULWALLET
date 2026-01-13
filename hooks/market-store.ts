@@ -26,6 +26,8 @@ export interface Token {
   logo?: string;
   verified?: boolean;
   pairToken?: string;
+  contractAddress?: string; // Token mint/contract address
+  pairAddress?: string; // DexScreener pair address
 }
 
 // QuickFilterType is used for backward compatibility with activeFilters
@@ -33,9 +35,12 @@ export interface Token {
 const PAGE_SIZE = 20;
 
 export const [MarketProvider, useMarket] = createContextHook(() => {
-  // ✅ Fetch real SoulMarket tokens from backend
+  // ✅ Fetch real SoulMarket tokens from backend - hourly snapshot
   const { data: soulMarketData, isLoading: isLoadingMarket, refetch: refetchMarket } = trpc.market.soulMarket.useQuery(undefined, {
-    refetchInterval: 300000, // Refresh every 5 minutes
+    staleTime: Infinity, // Treat as hourly snapshot - don't refetch automatically
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   // Filter state
@@ -172,6 +177,8 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
         logo: pair.info?.imageUrl,
         verified: pair.info?.verified || false,
         pairToken: pair.quoteToken?.symbol,
+        contractAddress: pair.baseToken?.address || '',
+        pairAddress: pair.pairAddress || '',
       };
     });
   }, [soulMarketData]);

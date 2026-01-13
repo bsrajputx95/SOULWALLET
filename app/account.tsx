@@ -59,14 +59,15 @@ export default function AccountScreen() {
   const revokeSessionMutation = trpc.auth.revokeSession.useMutation();
   const deleteAccountMutation = trpc.account.deleteAccount.useMutation();
 
-  const [firstName, setFirstName] = useState(profile?.firstName || '');
-  const [lastName, setLastName] = useState(profile?.lastName || '');
-  const [email, setEmail] = useState(profile?.email || '');
-  const [phone, setPhone] = useState(profile?.phone || '');
-  const [dateOfBirth, setDateOfBirth] = useState(profile?.dateOfBirth || '');
-  const [defaultCurrency, setDefaultCurrency] = useState(profile?.defaultCurrency || 'USD');
-  const [language, setLanguage] = useState(profile?.language || 'English');
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(profile?.twoFactorEnabled || false);
+  // Initialize form fields with empty strings - useEffect will populate when profile loads
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [defaultCurrency, setDefaultCurrency] = useState('USD');
+  const [language, setLanguage] = useState('English');
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
   // Password Reset Modal States
   const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
@@ -560,6 +561,53 @@ export default function AccountScreen() {
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Render guard: Show loading state until profile is available
+  if (isLoading || profile === null) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Account Settings</Text>
+          <View style={[styles.saveButton, styles.saveButtonDisabled]}>
+            <Text style={styles.saveButtonText}>Save</Text>
+          </View>
+        </View>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          {/* Profile Section Skeleton */}
+          <View style={styles.section}>
+            <View style={styles.profileImageContainer}>
+              <SkeletonLoader width={80} height={80} borderRadius={40} />
+              <SkeletonLoader width={100} height={14} style={{ marginTop: SPACING.s }} />
+            </View>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <View key={i} style={styles.inputGroup}>
+                <SkeletonLoader width={100} height={14} style={{ marginBottom: SPACING.s }} />
+                <SkeletonLoader width="100%" height={48} borderRadius={BORDER_RADIUS.medium} />
+              </View>
+            ))}
+          </View>
+          {/* Security Section Skeleton */}
+          <View style={styles.section}>
+            <SkeletonLoader width={150} height={18} style={{ marginBottom: SPACING.s }} />
+            <View style={styles.settingRow}>
+              <View style={styles.settingLeft}>
+                <SkeletonLoader width={20} height={20} borderRadius={10} />
+                <SkeletonLoader width={130} height={14} style={{ marginLeft: SPACING.m }} />
+              </View>
+              <SkeletonLoader width={20} height={14} />
+            </View>
+            <View style={styles.settingRow}>
+              <View style={styles.settingLeft}>
+                <SkeletonLoader width={20} height={20} borderRadius={10} />
+                <SkeletonLoader width={180} height={14} style={{ marginLeft: SPACING.m }} />
+              </View>
+              <SkeletonLoader width={44} height={24} borderRadius={12} />
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -584,7 +632,7 @@ export default function AccountScreen() {
         <ProfileForm
           styles={styles}
           profile={profile}
-          isLoading={isLoading}
+          isLoading={false}
           isUploadingImage={isUploadingImage}
           isProcessingImage={isProcessingImage}
           onPickImage={handlePickImage}
@@ -606,49 +654,27 @@ export default function AccountScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security & Privacy</Text>
 
-          {isLoading ? (
-            <>
-              <View style={styles.settingRow}>
-                <View style={styles.settingLeft}>
-                  <SkeletonLoader width={20} height={20} borderRadius={10} />
-                  <SkeletonLoader width={130} height={14} style={{ marginLeft: SPACING.m }} />
-                </View>
-                <SkeletonLoader width={20} height={14} />
-              </View>
+          <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
+            <View style={styles.settingLeft}>
+              <Lock size={20} color={COLORS.textSecondary} />
+              <Text style={styles.settingText}>Reset Password</Text>
+            </View>
+            <Text style={styles.settingArrow}>›</Text>
+          </TouchableOpacity>
 
-              <View style={styles.settingRow}>
-                <View style={styles.settingLeft}>
-                  <SkeletonLoader width={20} height={20} borderRadius={10} />
-                  <SkeletonLoader width={180} height={14} style={{ marginLeft: SPACING.m }} />
-                </View>
-                <SkeletonLoader width={44} height={24} borderRadius={12} />
-              </View>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
-                <View style={styles.settingLeft}>
-                  <Lock size={20} color={COLORS.textSecondary} />
-                  <Text style={styles.settingText}>Reset Password</Text>
-                </View>
-                <Text style={styles.settingArrow}>›</Text>
-              </TouchableOpacity>
-
-              <View style={styles.settingRow}>
-                <View style={styles.settingLeft}>
-                  <ShieldCheck size={20} color={COLORS.textSecondary} />
-                  <Text style={styles.settingText}>Two-Factor Authentication</Text>
-                </View>
-                <Switch
-                  testID="account-twofactor-switch"
-                  value={twoFactorEnabled}
-                  onValueChange={(value) => handleSetupTwoFactor(value)}
-                  trackColor={{ false: COLORS.cardBackground, true: COLORS.solana + '50' }}
-                  thumbColor={twoFactorEnabled ? COLORS.solana : COLORS.textSecondary}
-                />
-              </View>
-            </>
-          )}
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <ShieldCheck size={20} color={COLORS.textSecondary} />
+              <Text style={styles.settingText}>Two-Factor Authentication</Text>
+            </View>
+            <Switch
+              testID="account-twofactor-switch"
+              value={twoFactorEnabled}
+              onValueChange={(value) => handleSetupTwoFactor(value)}
+              trackColor={{ false: COLORS.cardBackground, true: COLORS.solana + '50' }}
+              thumbColor={twoFactorEnabled ? COLORS.solana : COLORS.textSecondary}
+            />
+          </View>
         </View>
 
         {/* App Settings */}
@@ -693,7 +719,7 @@ export default function AccountScreen() {
             Manage devices where you're currently logged in
           </Text>
 
-          {isLoading || sessionsQuery.isLoading ? (
+          {sessionsQuery.isLoading ? (
             <>
               {[1, 2, 3].map((i) => (
                 <View key={i} style={styles.sessionItem}>

@@ -15,7 +15,7 @@ import { COLORS } from "../constants/colors";
 import { trpc, trpcClient } from "../lib/trpc";
 
 // Providers
-import { AuthProvider } from "../hooks/auth-store";
+import { AuthProvider, useAuth } from "../hooks/auth-store";
 import { WalletProvider } from "../hooks/wallet-store";
 import { SocialProvider } from "../hooks/social-store";
 import { SolanaWalletProvider } from "../hooks/solana-wallet-store";
@@ -73,6 +73,18 @@ function RootLayoutNav() {
       <Stack.Screen name="+not-found" />
     </Stack>
   );
+}
+
+// Auth hydration guard - prevents rendering until auth state is restored
+function AuthHydrationGuard({ children }: { children: React.ReactNode }) {
+  const { isLoading } = useAuth();
+  
+  if (isLoading) {
+    // Return null to keep splash screen visible during auth hydration
+    return null;
+  }
+  
+  return <>{children}</>;
 }
 
 export default function RootLayout() {
@@ -136,25 +148,27 @@ export default function RootLayout() {
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
-            <WalletProvider>
-              <SolanaWalletProvider>
-                <SocialProvider>
-                  <AccountProvider>
-                    <MarketProvider>
-                      <NotificationBadgeProvider>
-                        <GestureHandlerRootView style={{ flex: 1 }}>
-                          <View style={styles.container}>
-                            {/* Web Preview Banner - shows only on web platform */}
-                            <WebPreviewBanner />
-                            <RootLayoutNav />
-                          </View>
-                        </GestureHandlerRootView>
-                      </NotificationBadgeProvider>
-                    </MarketProvider>
-                  </AccountProvider>
-                </SocialProvider>
-              </SolanaWalletProvider>
-            </WalletProvider>
+            <AuthHydrationGuard>
+              <WalletProvider>
+                <SolanaWalletProvider>
+                  <SocialProvider>
+                    <AccountProvider>
+                      <MarketProvider>
+                        <NotificationBadgeProvider>
+                          <GestureHandlerRootView style={{ flex: 1 }}>
+                            <View style={styles.container}>
+                              {/* Web Preview Banner - shows only on web platform */}
+                              <WebPreviewBanner />
+                              <RootLayoutNav />
+                            </View>
+                          </GestureHandlerRootView>
+                        </NotificationBadgeProvider>
+                      </MarketProvider>
+                    </AccountProvider>
+                  </SocialProvider>
+                </SolanaWalletProvider>
+              </WalletProvider>
+            </AuthHydrationGuard>
           </AuthProvider>
         </QueryClientProvider>
         {/* @ts-ignore */}

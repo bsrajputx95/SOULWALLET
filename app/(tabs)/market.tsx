@@ -209,7 +209,7 @@ export default function MarketScreen() {
                     {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
                     {...(token.logo ? { logo: token.logo } : {})}
                     onPress={() => {
-                      // Navigate to coin details page
+                      // Navigate to coin details page with all available data
                       router.push({
                         pathname: `/coin/${token.symbol.toLowerCase()}`,
                         params: {
@@ -218,6 +218,8 @@ export default function MarketScreen() {
                           price: token.price.toString(),
                           change: token.change24h.toString(),
                           logo: token.logo || '',
+                          contractAddress: token.contractAddress || '',
+                          pairAddress: token.pairAddress || '',
                         }
                       });
                     }}

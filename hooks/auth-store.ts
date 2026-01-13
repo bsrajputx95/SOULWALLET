@@ -26,9 +26,13 @@ export interface User {
   } | undefined;
 }
 
+// Track hydration state globally so trpc can check it
+let authHydrationComplete = false;
+export const isAuthHydrated = () => authHydrationComplete;
+
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false); // Changed from true to false
+  const [isLoading, setIsLoading] = useState<boolean>(true); // Start true - hydration in progress
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,7 +41,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const loadUser = async () => {
     try {
-      // Don't set isLoading during silent restoration
       const token = await SecureStorage.getToken();
       const storedUser = await SecureStorage.getUserData();
 
@@ -52,17 +55,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         // Set Sentry user context for restored session
         setSentryUser({ id: restoredUser.id, username: restoredUser.username, email: restoredUser.email });
         addBreadcrumb('Session restored', { userId: restoredUser.id });
-      } else {
-        // Clear any partial data if token or user is missing
-        await SecureStorage.clearAll();
-        clearSentryUser();
       }
+      // Don't clear auth data during hydration - only clear on explicit logout or refresh failure
     } catch (err) {
       setError('Failed to load user data');
       logger.error('Failed to load user:', err);
       captureException(err instanceof Error ? err : new Error('Failed to load user'), { context: 'loadUser' });
+    } finally {
+      // Mark hydration complete and stop loading
+      authHydrationComplete = true;
+      setIsLoading(false);
     }
-    // No finally block setting isLoading to false - keep it false
   };
 
   const login = async (identifier: string, password: string, rememberMe: boolean = false) => {
