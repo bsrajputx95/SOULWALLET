@@ -427,17 +427,16 @@ export default function HomeScreen() {
       return;
     }
 
-    // Close modal and navigate to full swap screen with params
+    // Trade now done via Market tab WebView
     setShowSwapModal(false);
-    router.push({
-      pathname: '/swap',
-      params: {
-        fromSymbol: fromToken,
-        toSymbol: toToken,
-        amount: swapAmount,
-        slippage: slippage.toString(),
-      }
-    });
+    Alert.alert(
+      'Trade via Market Tab',
+      `To swap ${fromToken} to ${toToken}, go to Market tab and use DexScreener or Raydium.`,
+      [
+        { text: 'Go to Market', onPress: () => router.push('/(tabs)/market') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const handleBuy = () => {
@@ -472,17 +471,7 @@ export default function HomeScreen() {
     return (val > 0 ? val : 0).toFixed(4);
   }, [estimatedOutput, slippage]);
 
-  // Comment 3: Filter chips state for Coins tab
-  const [activeQuickFilters, setActiveQuickFilters] = React.useState<string[]>([]);
-  const quickFilterOptions = ['Volume', 'Liquidity', 'Change', 'Age', 'Verified'];
 
-  const toggleQuickFilter = (filter: string) => {
-    setActiveQuickFilters(prev => 
-      prev.includes(filter) 
-        ? prev.filter(f => f !== filter)
-        : [...prev, filter]
-    );
-  };
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -520,33 +509,7 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {/* Comment 3: Filter Chips with active count badge */}
-              <View style={styles.filterChipsContainer}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsScroll}>
-                  {quickFilterOptions.map((filter) => (
-                    <TouchableOpacity
-                      key={filter}
-                      style={[
-                        styles.filterChip,
-                        activeQuickFilters.includes(filter) && styles.filterChipActive
-                      ]}
-                      onPress={() => toggleQuickFilter(filter)}
-                    >
-                      <Text style={[
-                        styles.filterChipText,
-                        activeQuickFilters.includes(filter) && styles.filterChipTextActive
-                      ]}>
-                        {filter}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {activeQuickFilters.length > 0 && (
-                    <View style={styles.filterCountBadge}>
-                      <Text style={styles.filterCountText}>{activeQuickFilters.length}</Text>
-                    </View>
-                  )}
-                </ScrollView>
-              </View>
+
 
               {/* Comment 3: Display skeleton list while loading instead of spinner */}
               {isLoadingCoins ? (
@@ -708,110 +671,110 @@ export default function HomeScreen() {
                   Follow top traders and automatically copy their trades in real-time.
                 </Text>
 
-              {/* Copy Trading Stats */}
-              <View style={styles.statsContainer}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{stats.activeCopies}</Text>
-                  <Text style={styles.statLabel}>Active Copies</Text>
+                {/* Copy Trading Stats */}
+                <View style={styles.statsContainer}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>{stats.activeCopies}</Text>
+                    <Text style={styles.statLabel}>Active Copies</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>{stats.totalTrades}</Text>
+                    <Text style={styles.statLabel}>Total Trades</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statValue, { color: stats.profitLoss >= 0 ? COLORS.success : COLORS.error }]}>
+                      {stats.profitLossPercentage >= 0 ? '+' : ''}{stats.profitLossPercentage.toFixed(1)}%
+                    </Text>
+                    <Text style={styles.statLabel}>P&L</Text>
+                  </View>
                 </View>
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{stats.totalTrades}</Text>
-                  <Text style={styles.statLabel}>Total Trades</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Text style={[styles.statValue, { color: stats.profitLoss >= 0 ? COLORS.success : COLORS.error }]}>
-                    {stats.profitLossPercentage >= 0 ? '+' : ''}{stats.profitLossPercentage.toFixed(1)}%
-                  </Text>
-                  <Text style={styles.statLabel}>P&L</Text>
-                </View>
-              </View>
 
-              {/* Active Copy Settings */}
-              {copyTradeSettings.length > 0 && (
-                <View style={styles.activeCopiesContainer}>
-                  <Text style={styles.activeCopiesTitle}>Active Copy Trades</Text>
-                  {copyTradeSettings.map((setting: any) => (
-                    <View key={setting.id} style={styles.activeCopyItem}>
-                      <View style={styles.activeCopyInfo}>
-                        <Text style={styles.activeCopyWallet}>
-                          {setting.trader?.username || `${setting.trader?.walletAddress.slice(0, 8)}...${setting.trader?.walletAddress.slice(-8)}`}
-                        </Text>
-                        <Text style={styles.activeCopyAmount}>${setting.amountPerTrade}/trade</Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.stopCopyButton}
-                        onPress={() => stopCopyTrade(setting.id)}
-                      >
-                        <Text style={styles.stopCopyText}>Stop</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Manual Copy Setup */}
-              <View style={styles.copyTradeForm}>
-                <Text style={styles.formLabel}>Quick Setup</Text>
-                <TouchableOpacity
-                  style={styles.quickSetupButton}
-                  onPress={() => {
-                    setSelectedTrader('Manual Setup');
-                    setSelectedTraderWallet('');
-                    setShowCopyModal(true);
-                  }}
-                >
-                  <Text style={styles.quickSetupText}>Set Up Copy Trading</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Recent Copy Trades */}
-              {copyTrades.length > 0 && (
-                <View style={styles.recentTradesContainer}>
-                  <Text style={styles.recentTradesTitle}>Recent Copy Trades</Text>
-                  {copyTrades.slice(0, 5).map((position: any) => (
-                    <View key={position.id} style={styles.recentTradeItem}>
-                      <View style={styles.recentTradeInfo}>
-                        <Text style={styles.recentTradeTokens}>
-                          {position.tokenSymbol} • ${position.entryValue.toFixed(2)}
-                        </Text>
-                        <Text style={styles.recentTradeTime}>
-                          {new Date(position.entryTimestamp).toLocaleString()}
-                        </Text>
-                        {position.exitTimestamp && (
-                          <Text style={[styles.recentTradePnL, {
-                            color: position.profitLoss >= 0 ? COLORS.success : COLORS.error
-                          }]}>
-                            {position.profitLoss >= 0 ? '+' : ''}{position.profitLoss.toFixed(2)} ({position.roi.toFixed(1)}%)
+                {/* Active Copy Settings */}
+                {copyTradeSettings.length > 0 && (
+                  <View style={styles.activeCopiesContainer}>
+                    <Text style={styles.activeCopiesTitle}>Active Copy Trades</Text>
+                    {copyTradeSettings.map((setting: any) => (
+                      <View key={setting.id} style={styles.activeCopyItem}>
+                        <View style={styles.activeCopyInfo}>
+                          <Text style={styles.activeCopyWallet}>
+                            {setting.trader?.username || `${setting.trader?.walletAddress.slice(0, 8)}...${setting.trader?.walletAddress.slice(-8)}`}
                           </Text>
-                        )}
+                          <Text style={styles.activeCopyAmount}>${setting.amountPerTrade}/trade</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.stopCopyButton}
+                          onPress={() => stopCopyTrade(setting.id)}
+                        >
+                          <Text style={styles.stopCopyText}>Stop</Text>
+                        </TouchableOpacity>
                       </View>
-                      <View style={[
-                        styles.recentTradeStatus,
-                        {
-                          backgroundColor:
-                            position.status === 'CLOSED' ? COLORS.success + '20' :
-                              position.status === 'OPEN' ? COLORS.primary + '20' :
-                                COLORS.error + '20'
-                        }
-                      ]}>
-                        <Text style={[
-                          styles.recentTradeStatusText,
+                    ))}
+                  </View>
+                )}
+
+                {/* Manual Copy Setup */}
+                <View style={styles.copyTradeForm}>
+                  <Text style={styles.formLabel}>Quick Setup</Text>
+                  <TouchableOpacity
+                    style={styles.quickSetupButton}
+                    onPress={() => {
+                      setSelectedTrader('Manual Setup');
+                      setSelectedTraderWallet('');
+                      setShowCopyModal(true);
+                    }}
+                  >
+                    <Text style={styles.quickSetupText}>Set Up Copy Trading</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Recent Copy Trades */}
+                {copyTrades.length > 0 && (
+                  <View style={styles.recentTradesContainer}>
+                    <Text style={styles.recentTradesTitle}>Recent Copy Trades</Text>
+                    {copyTrades.slice(0, 5).map((position: any) => (
+                      <View key={position.id} style={styles.recentTradeItem}>
+                        <View style={styles.recentTradeInfo}>
+                          <Text style={styles.recentTradeTokens}>
+                            {position.tokenSymbol} • ${position.entryValue.toFixed(2)}
+                          </Text>
+                          <Text style={styles.recentTradeTime}>
+                            {new Date(position.entryTimestamp).toLocaleString()}
+                          </Text>
+                          {position.exitTimestamp && (
+                            <Text style={[styles.recentTradePnL, {
+                              color: position.profitLoss >= 0 ? COLORS.success : COLORS.error
+                            }]}>
+                              {position.profitLoss >= 0 ? '+' : ''}{position.profitLoss.toFixed(2)} ({position.roi.toFixed(1)}%)
+                            </Text>
+                          )}
+                        </View>
+                        <View style={[
+                          styles.recentTradeStatus,
                           {
-                            color:
-                              position.status === 'CLOSED' ? COLORS.success :
-                                position.status === 'OPEN' ? COLORS.primary :
-                                  COLORS.error
+                            backgroundColor:
+                              position.status === 'CLOSED' ? COLORS.success + '20' :
+                                position.status === 'OPEN' ? COLORS.primary + '20' :
+                                  COLORS.error + '20'
                           }
                         ]}>
-                          {position.status}
-                        </Text>
+                          <Text style={[
+                            styles.recentTradeStatusText,
+                            {
+                              color:
+                                position.status === 'CLOSED' ? COLORS.success :
+                                  position.status === 'OPEN' ? COLORS.primary :
+                                    COLORS.error
+                            }
+                          ]}>
+                            {position.status}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          </ErrorBoundary>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </ErrorBoundary>
           );
         }
       default:
@@ -2449,49 +2412,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     fontSize: 14,
-  },
-  // Comment 3: Filter chip styles
-  filterChipsContainer: {
-    marginBottom: SPACING.s,
-  },
-  filterChipsScroll: {
-    paddingHorizontal: SPACING.m,
-    gap: SPACING.xs,
-  },
-  filterChip: {
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.small,
-    backgroundColor: COLORS.cardBackground,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    marginRight: SPACING.xs,
-  },
-  filterChipActive: {
-    backgroundColor: COLORS.solana + '20',
-    borderColor: COLORS.solana + '40',
-  },
-  filterChipText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-  },
-  filterChipTextActive: {
-    color: COLORS.solana,
-  },
-  filterCountBadge: {
-    backgroundColor: COLORS.solana,
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: SPACING.xs,
-  },
-  filterCountText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 10,
   },
   // Comment 3: Skeleton loading styles
   skeletonContainer: {

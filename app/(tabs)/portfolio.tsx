@@ -667,22 +667,19 @@ export default function PortfolioScreen() {
                           setTradeError('Enter a valid amount');
                           return;
                         }
-                        // Navigate to swap screen with token pre-selected
-                        const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-                        const tokenMint = selectedToken?.id || '';
-
+                        // Trade now done via Market tab WebView
                         setSelectedToken(null);
                         setTradeMode(null);
                         setTradeAmount('');
 
-                        router.push({
-                          pathname: '/swap',
-                          params: {
-                            inputMint: tradeMode === 'buy' ? usdcMint : tokenMint,
-                            outputMint: tradeMode === 'buy' ? tokenMint : usdcMint,
-                            amount: tradeAmount,
-                          },
-                        });
+                        Alert.alert(
+                          'Trade via Market Tab',
+                          `To ${tradeMode === 'buy' ? 'buy' : 'sell'} ${selectedToken?.symbol || 'this token'}, go to Market tab and use DexScreener.`,
+                          [
+                            { text: 'Go to Market', onPress: () => router.push('/(tabs)/market') },
+                            { text: 'Cancel', style: 'cancel' },
+                          ]
+                        );
                       }}
                       style={{ flex: 1, marginLeft: SPACING.m }}
                     />

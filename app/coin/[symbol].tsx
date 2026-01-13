@@ -361,36 +361,17 @@ export default function CoinDetailsScreen() {
       return;
     }
 
-    // Close modal and navigate to swap screen with token pre-selected
+    // Close modal - trade now done via Market tab WebView
     setTradeModalVisible(false);
 
-    // Guard against null coinData
-    if (!coinData) return;
-
-    // Navigate to swap screen with token param
-    // For BUY: set token as output (buying this token with SOL)
-    // For SELL: set fromSymbol to this token (selling this token for SOL)
-    if (tradeMode === 'buy') {
-      router.push({
-        pathname: '/swap',
-        params: {
-          token: coinData.contractAddress, // Pre-fill as output token
-          amount: tradeAmount,
-          slippage: tradeSlippage,
-        },
-      });
-    } else {
-      // For sell, use fromSymbol to set as input token
-      router.push({
-        pathname: '/swap',
-        params: {
-          fromSymbol: coinData.symbol,
-          toSymbol: 'SOL',
-          amount: tradeAmount,
-          slippage: tradeSlippage,
-        },
-      });
-    }
+    Alert.alert(
+      'Trade via Market Tab',
+      `To ${tradeMode === 'buy' ? 'buy' : 'sell'} ${coinData?.symbol || 'this token'}, go to the Market tab and find the token on DexScreener. Tap on it, then use the "Buy Token" button.`,
+      [
+        { text: 'Go to Market', onPress: () => router.push('/(tabs)/market') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   // Mock data loading removed - Trades and Holders tabs now show "Coming Soon"

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Soul Wallet V4",
-    "slug": "soul-wallet-te2xtspjaxxw-qdkxbvq",
+    "name": "Soul Wallet",
+    "slug": "soulwallet2",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -51,12 +51,6 @@
         {
           "iCloudContainerEnvironment": "Production"
         }
-      ],
-      [
-        "expo-image",
-        {
-          "cachePolicy": "disk"
-        }
       ]
     ],
     "experiments": {
@@ -67,9 +61,9 @@
         "origin": "https://rork.com/"
       },
       "eas": {
-        "projectId": "77b67c38-e4ad-4d1e-9efb-963daaf1e4dd"
+        "projectId": "12a94060-924c-4280-a06f-a522cf7ed700"
       }
     },
-    "owner": "bhavanisinghx95"
+    "owner": "bhavanisinghx17"
   }
 }

@@ -209,13 +209,15 @@ export default function MarketScreen() {
                     {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
                     {...(token.logo ? { logo: token.logo } : {})}
                     onPress={() => {
-                      // Navigate to swap with token pre-filled as the "to" token
+                      // Navigate to coin details page
                       router.push({
-                        pathname: '/swap',
+                        pathname: `/coin/${token.symbol.toLowerCase()}`,
                         params: {
-                          toSymbol: token.symbol,
-                          tokenName: token.name,
-                          tokenLogo: token.logo || '',
+                          symbol: token.symbol,
+                          name: token.name,
+                          price: token.price.toString(),
+                          change: token.change24h.toString(),
+                          logo: token.logo || '',
                         }
                       });
                     }}

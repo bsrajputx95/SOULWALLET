@@ -986,7 +986,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.l,
+    paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.m,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.cardBackground,
@@ -1021,7 +1021,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   section: {
-    paddingHorizontal: SPACING.l,
+    paddingHorizontal: SPACING.m,
     paddingVertical: SPACING.l,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.cardBackground,

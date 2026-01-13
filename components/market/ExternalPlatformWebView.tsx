@@ -29,6 +29,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { useSolanaWallet } from '../../hooks/solana-wallet-store';
 import { NeonButton } from '../NeonButton';
 import { logger } from '../../lib/client-logger';
+import { BuyTokenModal } from '../BuyTokenModal';
 
 // Check if running in Expo Go (WebView doesn't work in Expo Go)
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -183,23 +184,21 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
   const [error, setError] = useState<string | null>(null);
   const [currentTokenMint, setCurrentTokenMint] = useState<string | null>(null);
   const [lastKnownUrl, setLastKnownUrl] = useState<string>('');
+  const [showBuyModal, setShowBuyModal] = useState(false);
   const webViewRef = useRef<WebView>(null);
 
   const platformUrl = PLATFORM_URLS[platform] || '';
   const platformName = PLATFORM_NAMES[platform] || platform;
 
-  // Navigate to native swap screen with optional token pre-fill
+  // Open buy modal popup (no navigation needed)
   const handleTradeInApp = useCallback(() => {
     if (currentTokenMint) {
-      // Token-aware routing: Pass extracted token to swap screen
-      router.push({
-        pathname: '/swap',
-        params: { token: currentTokenMint }
-      });
+      setShowBuyModal(true);
     } else {
-      router.push('/swap');
+      // No token detected - show alert
+      if (__DEV__) logger.warn('No token detected for buy modal');
     }
-  }, [router, currentTokenMint]);
+  }, [currentTokenMint]);
 
   // Handle WebView navigation state changes to extract token from URL
   const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
@@ -220,7 +219,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
   const handleWebViewMessage = useCallback((event: WebViewMessageEvent) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      
+
       switch (data.type) {
         case 'WALLET_CONNECT_REQUEST':
           // User requested wallet connection from WebView
@@ -241,12 +240,12 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             `);
           }
           break;
-          
+
         case 'SIGN_TRANSACTION_REQUEST':
           // Transaction signing not supported in WebView - redirect to native swap
           handleTradeInApp();
           break;
-          
+
         case 'SIGN_MESSAGE_REQUEST':
           // Message signing not supported in WebView
           webViewRef.current?.injectJavaScript(`
@@ -256,7 +255,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             true;
           `);
           break;
-          
+
         default:
           if (__DEV__) {
             logger.warn('Unknown WebView message type:', data.type);
@@ -299,23 +298,23 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
   if (error) {
     // Try to extract token from last known URL for smart fallback
     const fallbackToken = lastKnownUrl ? extractTokenFromUrl(lastKnownUrl) : currentTokenMint;
-    
+
     return (
       <View style={styles.container}>
         <View style={styles.errorContainer}>
           <AlertTriangle size={48} color={COLORS.error} />
           <Text style={styles.errorTitle}>Platform Unavailable</Text>
           <Text style={styles.errorText}>{error}</Text>
-          
+
           {/* Retry button */}
           <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
             <RefreshCw size={16} color={COLORS.textPrimary} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
-          
+
           {/* Jupiter fallback button with token-aware routing */}
-          <TouchableOpacity 
-            style={styles.jupiterFallbackButton} 
+          <TouchableOpacity
+            style={styles.jupiterFallbackButton}
             onPress={() => {
               if (fallbackToken) {
                 router.push({
@@ -330,9 +329,9 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             <ArrowUpDown size={18} color={COLORS.textPrimary} />
             <Text style={styles.jupiterFallbackText}>Trade on Jupiter (In-App)</Text>
           </TouchableOpacity>
-          
+
           <Text style={styles.fallbackHint}>
-            {fallbackToken 
+            {fallbackToken
               ? `Token detected: ${fallbackToken.slice(0, 8)}...${fallbackToken.slice(-4)}`
               : 'Use our native swap powered by Jupiter aggregator'
             }
@@ -502,18 +501,18 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         incognito={false}
       />
 
-      {/* Floating "Trade in App" button with token context */}
-      <TouchableOpacity
-        style={styles.floatingTradeButton}
-        onPress={handleTradeInApp}
-        activeOpacity={0.8}
-      >
-        <ArrowUpDown size={16} color={COLORS.textPrimary} />
-        <Text style={styles.floatingTradeText}>
-          {currentTokenMint ? 'Trade This Token' : 'Trade in App'}
-        </Text>
-      </TouchableOpacity>
-      
+      {/* Floating "Buy" button - only shows when token is detected */}
+      {currentTokenMint && (
+        <TouchableOpacity
+          style={styles.floatingTradeButton}
+          onPress={handleTradeInApp}
+          activeOpacity={0.8}
+        >
+          <ArrowUpDown size={16} color={COLORS.textPrimary} />
+          <Text style={styles.floatingTradeText}>Buy Token</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Token detected indicator */}
       {currentTokenMint && (
         <View style={styles.tokenDetectedBadge}>
@@ -522,6 +521,13 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
           </Text>
         </View>
       )}
+
+      {/* Buy Token Modal */}
+      <BuyTokenModal
+        visible={showBuyModal}
+        onClose={() => setShowBuyModal(false)}
+        tokenMint={currentTokenMint}
+      />
     </View>
   );
 };

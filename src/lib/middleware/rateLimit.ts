@@ -33,17 +33,17 @@ export interface RateLimitOptions {
  * Rate limiter configurations for different endpoints
  */
 export const RATE_LIMIT_CONFIGS = {
-  // Authentication endpoints - stricter limits
+  // Authentication endpoints - balanced limits for security + usability
   login: {
-    points: 3, // 3 attempts
-    duration: 3600, // per hour
-    blockDuration: 1800, // block for 30 minutes (escalated)
+    points: 10, // 10 attempts (was 3 - too strict for real usage!)
+    duration: 900, // per 15 minutes (was 3600)
+    blockDuration: 300, // block for 5 minutes (was 1800)
     keyPrefix: 'login',
   },
   signup: {
-    points: 2, // Comment 4: 2 attempts per hour (stricter)
+    points: 5, // 5 attempts (was 2 - too strict)
     duration: 3600, // per hour
-    blockDuration: 7200, // block for 2 hours (escalated)
+    blockDuration: 1800, // block for 30 minutes (was 7200)
     keyPrefix: 'signup',
   },
   passwordReset: {

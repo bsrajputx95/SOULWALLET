@@ -140,7 +140,7 @@ export default function SosioScreen() {
   // ✅ Notifications query
   const notificationsQuery = trpc.social.getNotifications.useQuery(
     { limit: 20 },
-    { 
+    {
       enabled: activeTab === 'notifications',
       refetchInterval: 30000,
     }
@@ -510,82 +510,111 @@ export default function SosioScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item: post }: { item: any }) => (
-            <SocialPost
-              key={post.id}
-              id={post.id}
-              username={post.username || post.user?.username}
-              profileImage={post.profileImage || post.user?.profileImage}
-              content={post.content}
-              images={post.images || []}
-              comments={post.comments || post._count?.comments || 0}
-              reposts={post.reposts || post._count?.reposts || 0}
-              likes={post.likes || post._count?.likes || 0}
-              timestamp={post.timestamp || post.createdAt}
-              mentionedToken={post.mentionedToken || post.mentionedTokenName}
-              mentionedTokenMint={post.mentionedTokenMint}
-              walletAddress={post.walletAddress || post.user?.walletAddress}
-              isVerified={post.isVerified || post.user?.isVerified}
-              onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
-              onCopyPress={() => {
-                const walletAddr = post.walletAddress || post.user?.walletAddress;
-                if (walletAddr) {
-                  setSelectedTrader({
-                    username: post.username || post.user?.username,
-                    walletAddress: walletAddr,
-                    profileImage: post.profileImage || post.user?.profileImage,
-                  });
-                  setShowCopyTradingModal(true);
-                } else {
-                  router.push(`/profile/${post.username || post.user?.username}`);
+          renderItem={({ item: post }: { item: any }) => {
+            // Format timestamp - handle Date objects, strings, or ISO strings
+            let formattedTimestamp = '';
+            try {
+              const timestampValue = post.timestamp || post.createdAt;
+              if (timestampValue) {
+                const date = timestampValue instanceof Date
+                  ? timestampValue
+                  : new Date(timestampValue);
+                if (!isNaN(date.getTime())) {
+                  // Format as relative time
+                  const now = new Date();
+                  const diffMs = now.getTime() - date.getTime();
+                  const diffMins = Math.floor(diffMs / 60000);
+                  const diffHours = Math.floor(diffMs / 3600000);
+                  const diffDays = Math.floor(diffMs / 86400000);
+
+                  if (diffMins < 1) formattedTimestamp = 'Just now';
+                  else if (diffMins < 60) formattedTimestamp = `${diffMins}m ago`;
+                  else if (diffHours < 24) formattedTimestamp = `${diffHours}h ago`;
+                  else if (diffDays < 7) formattedTimestamp = `${diffDays}d ago`;
+                  else formattedTimestamp = date.toLocaleDateString();
                 }
-              }}
-              onBuyPress={async () => {
-                const tokenMint = post.mentionedTokenMint;
-                if (!tokenMint) return;
+              }
+            } catch (e) {
+              formattedTimestamp = '';
+            }
 
-                if (!publicKey) {
-                  Alert.alert('Connect Wallet', 'Please connect your wallet to use iBuy.', [{ text: 'OK' }]);
-                  return;
-                }
-
-                const buyAmount = ibuySettingsQuery.data?.buyAmount || 10;
-
-                if ((balance || 0) < 0.01) {
-                  Alert.alert('Low SOL Balance', 'You need at least 0.01 SOL for transaction fees.', [{ text: 'OK' }]);
-                  return;
-                }
-
-                const usdcToken = tokenBalances?.find((t: { symbol: string }) => t.symbol === 'USDC');
-                const usdcBalance = usdcToken?.uiAmount || 0;
-                if (usdcBalance < buyAmount) {
-                  Alert.alert('Insufficient USDC', `Your USDC balance (${usdcBalance.toFixed(2)}) is less than your iBuy amount (${buyAmount} USDC).`, [{ text: 'OK' }]);
-                  return;
-                }
-
-                try {
-                  const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint });
-                  const swapResult = await executeSwap(res.swapTransaction);
-                  if (swapResult?.signature) {
-                    await recordPurchaseMutation.mutateAsync({
-                      postId: post.id,
-                      tokenMint,
-                      tokenSymbol: post.mentionedToken || post.mentionedTokenName,
-                      tokenName: post.mentionedToken || post.mentionedTokenName,
-                      amountBought: swapResult.outputAmount || 0,
-                      priceInUsdc: buyAmount,
-                      transactionSig: swapResult.signature,
+            return (
+              <SocialPost
+                key={post.id}
+                id={post.id}
+                username={post.username || post.user?.username}
+                profileImage={post.profileImage || post.user?.profileImage}
+                content={post.content}
+                images={post.images || []}
+                comments={post.comments || post._count?.comments || 0}
+                reposts={post.reposts || post._count?.reposts || 0}
+                likes={post.likes || post._count?.likes || 0}
+                timestamp={formattedTimestamp}
+                mentionedToken={post.mentionedToken || post.mentionedTokenName}
+                mentionedTokenMint={post.mentionedTokenMint}
+                walletAddress={post.walletAddress || post.user?.walletAddress}
+                isVerified={post.isVerified || post.user?.isVerified}
+                onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
+                onCopyPress={() => {
+                  const walletAddr = post.walletAddress || post.user?.walletAddress;
+                  if (walletAddr) {
+                    setSelectedTrader({
+                      username: post.username || post.user?.username,
+                      walletAddress: walletAddr,
+                      profileImage: post.profileImage || post.user?.profileImage,
                     });
-                    const amountText = swapResult.outputAmount ? ` (${swapResult.outputAmount.toFixed(4)} tokens)` : '';
-                    Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || post.mentionedTokenName || 'token'}!${amountText}`);
+                    setShowCopyTradingModal(true);
+                  } else {
+                    router.push(`/profile/${post.username || post.user?.username}`);
                   }
-                } catch (e: any) {
-                  console.error('iBuy error:', e);
-                  Alert.alert('iBuy Failed', e.message || 'Failed to complete purchase');
-                }
-              }}
-            />
-          )}
+                }}
+                onBuyPress={async () => {
+                  const tokenMint = post.mentionedTokenMint;
+                  if (!tokenMint) return;
+
+                  if (!publicKey) {
+                    Alert.alert('Connect Wallet', 'Please connect your wallet to use iBuy.', [{ text: 'OK' }]);
+                    return;
+                  }
+
+                  const buyAmount = ibuySettingsQuery.data?.buyAmount || 10;
+
+                  if ((balance || 0) < 0.01) {
+                    Alert.alert('Low SOL Balance', 'You need at least 0.01 SOL for transaction fees.', [{ text: 'OK' }]);
+                    return;
+                  }
+
+                  const usdcToken = tokenBalances?.find((t: { symbol: string }) => t.symbol === 'USDC');
+                  const usdcBalance = usdcToken?.uiAmount || 0;
+                  if (usdcBalance < buyAmount) {
+                    Alert.alert('Insufficient USDC', `Your USDC balance (${usdcBalance.toFixed(2)}) is less than your iBuy amount (${buyAmount} USDC).`, [{ text: 'OK' }]);
+                    return;
+                  }
+
+                  try {
+                    const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint });
+                    const swapResult = await executeSwap(res.swapTransaction);
+                    if (swapResult?.signature) {
+                      await recordPurchaseMutation.mutateAsync({
+                        postId: post.id,
+                        tokenMint,
+                        tokenSymbol: post.mentionedToken || post.mentionedTokenName,
+                        tokenName: post.mentionedToken || post.mentionedTokenName,
+                        amountBought: swapResult.outputAmount || 0,
+                        priceInUsdc: buyAmount,
+                        transactionSig: swapResult.signature,
+                      });
+                      const amountText = swapResult.outputAmount ? ` (${swapResult.outputAmount.toFixed(4)} tokens)` : '';
+                      Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || post.mentionedTokenName || 'token'}!${amountText}`);
+                    }
+                  } catch (e: any) {
+                    console.error('iBuy error:', e);
+                    Alert.alert('iBuy Failed', e.message || 'Failed to complete purchase');
+                  }
+                }}
+              />
+            );
+          }}
           ListEmptyComponent={
             feedQuery.isLoading ? (
               <View style={styles.skeletonContainer}>

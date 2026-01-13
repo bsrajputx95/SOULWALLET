@@ -389,10 +389,10 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Privacy & Data</Text>
           <TouchableOpacity
             style={styles.supportItem}
-            onPress={() => router.push('/(tabs)/settings/privacy')}
+            onPress={() => router.push('/account')}
           >
             <Shield size={20} color={COLORS.textSecondary} />
-            <Text style={styles.supportText}>Privacy & Data</Text>
+            <Text style={styles.supportText}>Account & Privacy Settings</Text>
             <ExternalLink size={16} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    paddingHorizontal: SPACING.l,
+    paddingHorizontal: SPACING.m,
     paddingBottom: 20,
   },
   userCard: {

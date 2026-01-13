@@ -21,6 +21,11 @@ if (isDev) {
       module: 'commonjs',
     },
   });
+  // Register path aliases (e.g. @/constants -> ./constants)
+  require('tsconfig-paths').register({
+    baseUrl: '.',
+    paths: { '@/*': ['./*'] },
+  });
   try {
     const { startDevServer } = require('./src/server/fastify.ts');
     startDevServer();

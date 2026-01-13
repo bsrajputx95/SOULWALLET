@@ -217,8 +217,8 @@ export class AuthService {
     }
   }
 
-  private static readonly JWT_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_EXPIRES_IN || '1h');
-  private static readonly JWT_REFRESH_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
+  private static readonly JWT_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_EXPIRES_IN || '7d');
+  private static readonly JWT_REFRESH_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '365d');
   private static readonly OTP_EXPIRES_IN = 10 * 60 * 1000; // 10 minutes in milliseconds
   private static readonly MAX_LOGIN_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5');
   private static readonly ACCOUNT_LOCKOUT_DURATION_MINUTES = parseInt(process.env.ACCOUNT_LOCKOUT_DURATION_MINUTES || '30');
@@ -700,7 +700,7 @@ export class AuthService {
         data: {
           userId: user.id,
           token: placeholderToken,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year (persistent login)
           ipAddress: fingerprint?.ipAddress ?? null,
           userAgent: fingerprint?.userAgent ?? null,
           lastActivityAt: new Date(),
@@ -919,7 +919,7 @@ export class AuthService {
         data: {
           userId: user.id,
           token: placeholderToken,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year (persistent login)
           ipAddress: fingerprint?.ipAddress ?? null,
           userAgent: fingerprint?.userAgent ?? null,
           lastActivityAt: new Date(),
