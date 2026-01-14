@@ -179,10 +179,13 @@ export const marketRouter = router({
   trending: publicProcedure
     .query(async () => {
       try {
-        const cached = await redisCache.get<any>('trending');
+        // Check cache first (key must match marketData.trending() which uses 'trending:daily')
+        const cached = await redisCache.get<any>('trending:daily');
         if (cached) return cached;
-        void marketData.trending().catch(() => void 0);
-        return { pairs: [] };
+        
+        // Fetch trending data synchronously to ensure we return data
+        const data = await marketData.trending();
+        return data;
       } catch (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch trending tokens' });
       }
