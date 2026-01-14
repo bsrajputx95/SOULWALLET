@@ -7,7 +7,6 @@ import { ApiKeyScope } from '@prisma/client'
 import prisma from '../prisma';
 import { logger } from '../logger';
 import { verifyCaptcha } from '../services/captcha'
-import { TwoFactorService } from '../services/twoFactor'
 import { ApiKeyService } from '../services/apiKey'
 
 function shouldLogApiRequestActivity(): boolean {
@@ -315,29 +314,7 @@ export async function verifyCaptchaMiddleware(captchaToken: string, ipAddress: s
   }
 }
 
-export async function verifyTotpForUser(userId: string, totpCode: string): Promise<void> {
-  const settings = await prisma.userSettings.findUnique({
-    where: { userId },
-    select: { security: true },
-  })
-  const security = settings?.security as any
-  const secretEnc = security?.totpSecret as string | undefined
-  const enabled = security?.totpEnabled || security?.twoFactorEnabled
-  if (!enabled || !secretEnc) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: '2FA is required for this operation. Please enable 2FA in your account settings.',
-    })
-  }
-  const secret = TwoFactorService.decryptSecret(secretEnc)
-  const ok = TwoFactorService.verifyToken(secret, totpCode)
-  if (!ok) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: 'Invalid 2FA code',
-    })
-  }
-}
+
 
 /**
  * Fastify-specific authentication plugin with fingerprinting

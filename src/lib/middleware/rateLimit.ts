@@ -6,14 +6,7 @@ import { logger } from '../logger';
 // Comment 3: Import trusted IPs service for bypass
 import { trustedIpsService } from '../services/trustedIps';
 
-let adaptiveRateLimiterSingleton: (typeof import('./adaptiveRateLimiter'))['adaptiveRateLimiter'] | null = null;
 
-async function getAdaptiveRateLimiter() {
-  if (adaptiveRateLimiterSingleton) return adaptiveRateLimiterSingleton;
-  const mod = await import('./adaptiveRateLimiter');
-  adaptiveRateLimiterSingleton = mod.adaptiveRateLimiter;
-  return adaptiveRateLimiterSingleton;
-}
 
 export interface RateLimitConfig {
   points: number; // Number of requests
@@ -242,23 +235,11 @@ export class RateLimitService {
 
     const config = RATE_LIMIT_CONFIGS[endpoint];
 
-    const adaptiveRateLimiter = await getAdaptiveRateLimiter();
-
-    // Comment 2: Track request for adaptive rate limiting
-    adaptiveRateLimiter.trackRequest(endpoint);
-
-    // Comment 2: Get adapted points (may be reduced during attack)
-    const adaptedPoints = adaptiveRateLimiter.getAdaptedPoints(endpoint);
-    const effectiveLimit = Math.min(config.points, adaptedPoints);
-
     // Consume IP-based rate limit first
     const ipKey = `ip:${context.ip}`;
     try {
       await limiter.consume(ipKey);
     } catch (rateLimiterRes: any) {
-      // Comment 2: Track violation for adaptive rate limiting
-      adaptiveRateLimiter.trackViolation(endpoint, { ip: context.ip, userId: context.userId });
-
       if (rateLimiterRes && typeof rateLimiterRes.msBeforeNext === 'number') {
         const resetTime = new Date(Date.now() + rateLimiterRes.msBeforeNext);
         throw new TRPCError({
@@ -266,11 +247,10 @@ export class RateLimitService {
           message: `Too many ${endpoint} attempts from this IP. Try again after ${resetTime.toISOString()}`,
           cause: {
             retryAfter: Math.round(rateLimiterRes.msBeforeNext / 1000),
-            limit: effectiveLimit,
+            limit: config.points,
             remaining: 0,
             resetTime: resetTime.toISOString(),
             limitType: 'IP',
-            adapted: adaptedPoints < config.points,
           },
         });
       }
@@ -284,9 +264,6 @@ export class RateLimitService {
       try {
         await limiter.consume(userKey);
       } catch (rateLimiterRes: any) {
-        // Comment 2: Track violation for adaptive rate limiting
-        adaptiveRateLimiter.trackViolation(endpoint, { ip: context.ip, userId: context.userId });
-
         if (rateLimiterRes && typeof rateLimiterRes.msBeforeNext === 'number') {
           const resetTime = new Date(Date.now() + rateLimiterRes.msBeforeNext);
           throw new TRPCError({
@@ -294,11 +271,10 @@ export class RateLimitService {
             message: `Too many ${endpoint} attempts for this user. Try again after ${resetTime.toISOString()}`,
             cause: {
               retryAfter: Math.round(rateLimiterRes.msBeforeNext / 1000),
-              limit: effectiveLimit,
+              limit: config.points,
               remaining: 0,
               resetTime: resetTime.toISOString(),
               limitType: 'USER',
-              adapted: adaptedPoints < config.points,
             },
           });
         }

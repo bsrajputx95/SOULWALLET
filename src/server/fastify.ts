@@ -16,7 +16,6 @@ import { logger } from '../lib/logger';
 import { fastifyRequestIdPlugin } from '../lib/middleware/requestId';
 import { apiLoggingPlugin } from '../lib/middleware/apiLogging';
 import { getRequestId } from '../lib/middleware/requestId';
-import { geoBlockMiddleware } from '../lib/middleware/geoBlock';
 import Redis from 'ioredis';
 import { collectDefaultMetrics, Gauge, Histogram, Registry } from 'prom-client';
 // Comment 2: Import request size limits for enforcing body size

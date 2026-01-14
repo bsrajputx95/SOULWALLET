@@ -8,10 +8,7 @@ import { profitSharing } from './profitSharing';
 import { custodialWalletService } from './custodialWallet';
 import { rpcManager } from './rpcManager';
 import { MAX_SLIPPAGE_BPS, MAX_SLIPPAGE_PERCENT } from '../validation';
-// Comment 2: Import transaction security middleware
-import { transactionSecurityMiddleware } from '../middleware/transactionSecurity';
 import { auditLogService } from './auditLog'
-import { amlService } from './kyc'
 import { LockService } from './lockService'
 import { priceMonitor } from './priceMonitor'
 import { jitoService } from './jitoService'
@@ -269,14 +266,7 @@ class ExecutionQueue {
         userAgent: 'executionQueue',
       })
 
-      try {
-        await amlService.monitorTransaction(userId, created.id, signature, amount, 'SOL', {
-          type: isReceive ? 'RECEIVE' : 'SEND',
-          status: tx.meta?.err ? 'FAILED' : 'CONFIRMED',
-        })
-      } catch (error) {
-        logger.warn('AML monitoring failed for monitored transaction', { userId, transactionId: created.id, error })
-      }
+
 
       return { success: true, transactionId: created.id }
     } finally {
@@ -612,28 +602,7 @@ class ExecutionQueue {
         const slippagePercent = Math.min(copyTrading?.maxSlippage || 1, MAX_SLIPPAGE_PERCENT);
         const slippageBps = Math.min(Math.round(slippagePercent * 100), MAX_SLIPPAGE_BPS);
 
-        // Comment 2: Run pre-flight check before execution
-        const preFlightResult = await transactionSecurityMiddleware.preFlightCheck(
-          {
-            type: 'COPY_TRADE_BUY',
-            userId,
-            wallet: userWallet,
-            inputMint: USDC_MINT,
-            amountUsd: amount,
-          },
-          {
-            maxSlippage: slippagePercent,
-            useMevProtection: true,
-          }
-        );
 
-        if (!preFlightResult.passed) {
-          await prisma.executionQueue.updateMany({
-            where: { userId, copyTradingId, tokenMint, status: 'PENDING' },
-            data: { status: 'FAILED', lastError: preFlightResult.error || 'Pre-flight check failed', attempts: { increment: 1 } },
-          });
-          return { success: false, error: preFlightResult.error || 'Pre-flight check failed' };
-        }
 
         const amountValidation = await custodialWalletService.validateCopyTradeExecutionAmount(amount, userId);
         if (!amountValidation.valid) {
@@ -668,48 +637,20 @@ class ExecutionQueue {
           return { success: false, error: simulation.error || 'Simulation failed' };
         }
 
-        // Comment 2: Wrap execution with security middleware for timeout/MEV logging
-        // Comment 1: Use Jito MEV protection for high-value trades (built into JupiterSwap)
+        // Use Jito MEV protection for high-value trades
         const useJitoMev = jitoService.isEnabled() && amount >= JITO_HIGH_VALUE_THRESHOLD;
 
         if (useJitoMev) {
           logger.info(`[Jito] MEV protection enabled for high-value BUY: $${amount}`);
         }
 
-        const executionResult = await transactionSecurityMiddleware.execute(
-          {
-            type: 'COPY_TRADE_BUY',
-            userId,
-            wallet: userWallet,
-            inputMint: USDC_MINT,
-            outputMint: tokenMint,
-            amountUsd: amount,
-          },
-          async () => {
-            // JupiterSwap.executeSwap handles MEV protection internally via sendTransactionWithMevProtection
-            // when useMevProtection=true. It calculates tip based on tradeValueUsd.
-            return jupiterSwap.executeSwap({
-              wallet: userWallet,
-              quoteResponse: quote,
-              useMevProtection: useJitoMev, // Only use Jito for high-value trades
-              tradeValueUsd: amount, // Used for tip calculation
-            });
-          },
-          {
-            useMevProtection: useJitoMev,
-            maxSlippage: slippagePercent,
-          }
-        );
-
-        if (!executionResult.success) {
-          await prisma.executionQueue.updateMany({
-            where: { userId, copyTradingId, tokenMint, status: 'PENDING' },
-            data: { status: 'FAILED', lastError: executionResult.error || 'Execution failed', attempts: { increment: 1 } },
-          });
-          return { success: false, error: executionResult.error || 'Execution failed' };
-        }
-
-        const txHash = executionResult.data!;
+        // Execute swap directly with MEV protection
+        const txHash = await jupiterSwap.executeSwap({
+          wallet: userWallet,
+          quoteResponse: quote,
+          useMevProtection: useJitoMev,
+          tradeValueUsd: amount,
+        });
 
         // Create position record
         const position = await prisma.position.create({
@@ -744,15 +685,7 @@ class ExecutionQueue {
           userAgent: 'executionQueue',
         })
 
-        try {
-          await amlService.monitorTransaction(userId, position.id, txHash, amount, 'USDC', {
-            copyTradingId,
-            tokenMint,
-            type: 'BUY',
-          })
-        } catch (error) {
-          logger.warn('AML monitoring failed for BUY', { userId, positionId: position.id, error })
-        }
+
 
         // Update stats
         await prisma.copyTrading.update({
@@ -765,7 +698,7 @@ class ExecutionQueue {
           data: { status: 'SUCCESS', txHash, executedAt: new Date() },
         });
 
-        logger.info(`✅ BUY executed: Position ${position.id}, Tx ${txHash}, Duration: ${executionResult.durationMs}ms`);
+        logger.info(`✅ BUY executed: Position ${position.id}, Tx ${txHash}`);
         return { success: true, positionId: position.id, txHash };
       } catch (error) {
         logger.error(`Failed BUY order:`, error);
@@ -844,8 +777,7 @@ class ExecutionQueue {
           return { success: false, error: simulation.error || 'Simulation failed' };
         }
 
-        // Comment 2: Wrap execution with security middleware for timeout/MEV logging
-        // Comment 1: Use Jito MEV protection for high-value sells
+        // Use Jito MEV protection for high-value sells
         const sellValueUsd = position.entryValue;
         const useJitoMevSell = jitoService.isEnabled() && sellValueUsd >= JITO_HIGH_VALUE_THRESHOLD;
 
@@ -853,39 +785,13 @@ class ExecutionQueue {
           logger.info(`[Jito] MEV protection enabled for high-value SELL: $${sellValueUsd}`);
         }
 
-        const executionResult = await transactionSecurityMiddleware.execute(
-          {
-            type: 'COPY_TRADE_SELL',
-            userId,
-            wallet: userWallet,
-            inputMint: tokenMint,
-            outputMint: USDC_MINT,
-            amountUsd: sellValueUsd,
-          },
-          async () => {
-            // JupiterSwap.executeSwap handles MEV protection internally
-            return jupiterSwap.executeSwap({
-              wallet: userWallet,
-              quoteResponse: quote,
-              useMevProtection: useJitoMevSell, // Only use Jito for high-value sells
-              tradeValueUsd: sellValueUsd,
-            });
-          },
-          {
-            useMevProtection: useJitoMevSell,
-            maxSlippage: slippagePercent,
-          }
-        );
-
-        if (!executionResult.success) {
-          await prisma.executionQueue.updateMany({
-            where: { userId, positionId, status: 'PENDING' },
-            data: { status: 'FAILED', lastError: executionResult.error || 'Execution failed', attempts: { increment: 1 } },
-          });
-          return { success: false, error: executionResult.error || 'Execution failed' };
-        }
-
-        const txHash = executionResult.data!;
+        // Execute swap directly with MEV protection
+        const txHash = await jupiterSwap.executeSwap({
+          wallet: userWallet,
+          quoteResponse: quote,
+          useMevProtection: useJitoMevSell,
+          tradeValueUsd: sellValueUsd,
+        });
 
         // Calculate profit/loss
         const exitValue = parseFloat(quote.outAmount) / Math.pow(10, USDC_DECIMALS);
@@ -939,18 +845,7 @@ class ExecutionQueue {
           userAgent: 'executionQueue',
         })
 
-        try {
-          await amlService.monitorTransaction(userId, positionId, txHash, exitValue, 'USDC', {
-            copyTradingId,
-            tokenMint,
-            type: 'SELL',
-            reason,
-            profitLoss,
-            profitLossPercent,
-          })
-        } catch (error) {
-          logger.warn('AML monitoring failed for SELL', { userId, positionId, error })
-        }
+
 
         // Process profit sharing if profit > 0
         if (profitLoss > 0) {
@@ -962,7 +857,7 @@ class ExecutionQueue {
           })
         }
 
-        logger.info(`✅ SELL executed: Position ${positionId}, P&L: ${profitLoss.toFixed(2)}, Tx ${txHash}, Duration: ${executionResult.durationMs}ms`);
+        logger.info(`✅ SELL executed: Position ${positionId}, P&L: ${profitLoss.toFixed(2)}, Tx ${txHash}`);
         return { success: true, positionId, txHash, profitLoss };
       } catch (error) {
         logger.error(`Failed SELL order:`, error);
@@ -1038,9 +933,9 @@ class ExecutionQueue {
       logger.error(`IBUY job ${job.id} failed:`, err)
       // Cache failure for status polling
       const cacheKey: CacheKey = `ibuy:job:${job.id}`
-      await redisCache.set(cacheKey, { 
-        status: 'failed', 
-        error: err instanceof Error ? err.message : String(err) 
+      await redisCache.set(cacheKey, {
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err)
       }, 300)
       const maxAttempts = typeof job.opts?.attempts === 'number' ? job.opts.attempts : 1
       if (job.attemptsMade >= maxAttempts) {
@@ -1116,17 +1011,17 @@ class ExecutionQueue {
    */
   async addIBuyOrder(data: IBuyOrderData, options?: { priority?: number }): Promise<string> {
     const priority = options?.priority ?? PRIORITY.STANDARD
-    const job = await this.ibuyQueue.add(data, { 
-      priority, 
+    const job = await this.ibuyQueue.add(data, {
+      priority,
       delay: 0,
       jobId: `ibuy:${data.userId}:${data.postId}:${Date.now()}`,
     })
     logger.info(`[iBuy Queue] Added order: ${job.id}, priority: ${priority}`)
-    
+
     // Cache initial status
     const cacheKey: CacheKey = `ibuy:job:${job.id}`
     await redisCache.set(cacheKey, { status: 'pending' }, 300)
-    
+
     return String(job.id)
   }
 

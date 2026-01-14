@@ -9,8 +9,6 @@ import prisma, { checkDatabaseHealth } from '../../lib/prisma';
 import { recordAuthAttempt, activeSessionsGauge } from '../../lib/metrics';
 
 import { applyRateLimit } from '../../lib/middleware/rateLimit';
-import { verifyCaptchaMiddleware } from '../../lib/middleware/auth'
-import { geoBlockMiddleware } from '../../lib/middleware/geoBlock'
 import {
   signupSchema,
   loginSchema,
@@ -20,8 +18,6 @@ import {
   changePasswordSchema,
   refreshTokenSchema,
   unlockAccountSchema,
-  paginationSchema,
-  sessionActivityFilterSchema,
 } from '../../lib/validations/auth';
 
 // Initialize email service
@@ -38,14 +34,6 @@ export const authRouter = router({
       try {
         // Apply rate limiting
         await applyRateLimit('signup', ctx.rateLimitContext);
-        await geoBlockMiddleware(ctx.rateLimitContext.ip)
-
-        if (process.env.CAPTCHA_ENABLED === 'true') {
-          if (!input.captchaToken) {
-            throw new TRPCError({ code: 'BAD_REQUEST', message: 'CAPTCHA token is required' })
-          }
-          await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
-        }
 
         // Create user account with fingerprint
         const result = await AuthService.signup(input, ctx.fingerprint);
@@ -91,27 +79,6 @@ export const authRouter = router({
       try {
         // Apply rate limiting
         await applyRateLimit('login', ctx.rateLimitContext);
-        await geoBlockMiddleware(ctx.rateLimitContext.ip)
-
-        if (process.env.CAPTCHA_ENABLED === 'true') {
-          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-          const failedCount = await prisma.loginAttempt.count({
-            where: {
-              identifier: input.identifier.toLowerCase(),
-              successful: false,
-              createdAt: { gte: oneHourAgo },
-            },
-          })
-
-          if (failedCount >= 2) {
-            if (!input.captchaToken) {
-              throw new TRPCError({ code: 'BAD_REQUEST', message: 'CAPTCHA token is required' })
-            }
-            await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
-          } else if (input.captchaToken) {
-            await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
-          }
-        }
 
         // Authenticate user with fingerprint
         const result = await AuthService.login(input, ctx.fingerprint);
@@ -182,13 +149,6 @@ export const authRouter = router({
       try {
         // Apply rate limiting
         await applyRateLimit('passwordReset', ctx.rateLimitContext);
-
-        if (process.env.CAPTCHA_ENABLED === 'true') {
-          if (!input.captchaToken) {
-            throw new TRPCError({ code: 'BAD_REQUEST', message: 'CAPTCHA token is required' })
-          }
-          await verifyCaptchaMiddleware(input.captchaToken, ctx.rateLimitContext.ip)
-        }
 
         // Request password reset
         const result = await AuthService.requestPasswordReset(input);
@@ -341,187 +301,6 @@ export const authRouter = router({
         throw new TRPCError({
           code: 'UNAUTHORIZED',
           message: 'Failed to refresh token',
-        });
-      }
-    }),
-
-  /**
-   * Get user sessions with enhanced details
-   */
-  getSessions: protectedProcedure
-    .query(async ({ ctx }) => {
-      try {
-        const sessions = await prisma.session.findMany({
-          where: { userId: ctx.user.id },
-          select: {
-            id: true,
-            ipAddress: true,
-            userAgent: true,
-            createdAt: true,
-            lastActivityAt: true,
-          },
-          orderBy: { lastActivityAt: 'desc' },
-        });
-
-        return {
-          success: true,
-          sessions: sessions.map(session => ({
-            ...session,
-            current: session.id === ctx.session.id,
-          })),
-        };
-      } catch (error) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to get sessions',
-        });
-      }
-    }),
-
-  /**
-   * Revoke session with activity logging
-   */
-  revokeSession: protectedProcedure
-    .input(z.object({
-      sessionId: z.string().uuid(),
-    }))
-    .mutation(async ({ input, ctx }) => {
-      try {
-        // Prevent users from revoking their current session via this endpoint
-        if (input.sessionId === ctx.session.id) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Cannot revoke current session. Use logout instead.',
-          });
-        }
-
-        // Verify the session belongs to the user
-        const session = await prisma.session.findFirst({
-          where: {
-            id: input.sessionId,
-            userId: ctx.user.id,
-          },
-        });
-
-        if (!session) {
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message: 'Session not found',
-          });
-        }
-
-        await AuthService.logout(input.sessionId);
-
-        return {
-          success: true,
-          message: 'Session revoked successfully',
-        };
-      } catch (error) {
-        if (error instanceof TRPCError) {
-          throw error;
-        }
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to revoke session',
-        });
-      }
-    }),
-
-  /**
-   * Get session activity logs
-   */
-  getSessionActivity: protectedProcedure
-    .input(paginationSchema.merge(sessionActivityFilterSchema))
-    .query(async ({ input, ctx }) => {
-      try {
-        const { page = 1, limit = 20, action, suspiciousOnly } = input;
-        const offset = (page - 1) * limit;
-
-        const where: any = { userId: ctx.user.id };
-        if (action) where.action = action;
-        if (suspiciousOnly !== undefined) where.suspicious = suspiciousOnly;
-
-        const [activities, total] = await Promise.all([
-          prisma.sessionActivity.findMany({
-            where,
-            select: {
-              id: true,
-              sessionId: true,
-              action: true,
-              ipAddress: true,
-              userAgent: true,
-              metadata: true,
-              suspicious: true,
-              createdAt: true,
-            },
-            orderBy: { createdAt: 'desc' },
-            skip: offset,
-            take: limit,
-          }),
-          prisma.sessionActivity.count({ where }),
-        ]);
-
-        return {
-          success: true,
-          activities,
-          pagination: {
-            page,
-            limit,
-            total,
-            pages: Math.ceil(total / limit),
-          },
-        };
-      } catch (error) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to get session activity',
-        });
-      }
-    }),
-
-  /**
-   * Get login attempts (for security monitoring)
-   */
-  getLoginAttempts: protectedProcedure
-    .input(paginationSchema)
-    .query(async ({ input, ctx }) => {
-      try {
-        const { page = 1, limit = 20 } = input;
-        const offset = (page - 1) * limit;
-
-        const [attempts, total] = await Promise.all([
-          prisma.loginAttempt.findMany({
-            where: { identifier: ctx.user.email },
-            select: {
-              id: true,
-              identifier: true,
-              ipAddress: true,
-              userAgent: true,
-              successful: true,
-              failureReason: true,
-              createdAt: true,
-            },
-            orderBy: { createdAt: 'desc' },
-            skip: offset,
-            take: limit,
-          }),
-          prisma.loginAttempt.count({ where: { identifier: ctx.user.email } }),
-        ]);
-
-        return {
-          success: true,
-          attempts,
-          pagination: {
-            page,
-            limit,
-            total,
-            pages: Math.ceil(total / limit),
-          },
-        };
-      } catch (error) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to get login attempts',
         });
       }
     }),

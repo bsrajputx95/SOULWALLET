@@ -34,7 +34,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [maxSlippage, setMaxSlippage] = useState('0.5');
     const [exitWithTrader, setExitWithTrader] = useState(false);
     const [minProfitForSharing, setMinProfitForSharing] = useState('0');
-    const [totpCode, setTotpCode] = useState('');
 
     const startCopyingMutation = trpc.copyTrading.startCopying.useMutation({
         onSuccess: () => {
@@ -43,7 +42,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
             resetForm();
         },
         onError: (error: any) => {
-            Alert.alert('Error', error.message || 'Failed to start copy trading. Please check your 2FA code and try again.');
+            Alert.alert('Error', error.message || 'Failed to start copy trading. Please try again.');
         },
     });
 
@@ -55,7 +54,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
         setMaxSlippage('0.5');
         setExitWithTrader(false);
         setMinProfitForSharing('0');
-        setTotpCode('');
     };
 
     const handleStartCopying = async () => {
@@ -82,7 +80,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                 maxSlippage: maxSlippage ? Math.abs(parseFloat(maxSlippage)) : 0.5,
                 exitWithTrader,
                 minProfitForSharing: minProfitForSharing ? Math.abs(parseFloat(minProfitForSharing)) : 0,
-                totpCode,
             });
         } catch (error: any) {
             console.error('[CopyTradingModal] Error:', error);
@@ -237,28 +234,14 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                             <Text style={styles.inputHint}>Fee only applied on profits above this amount</Text>
                         </View>
 
-                        {/* 2FA Code Input */}
-                        <View style={styles.inputSection}>
-                            <Text style={styles.inputLabel}>2FA Code (Required)</Text>
-                            <View style={styles.inputContainer}>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="Enter 6-digit code"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                    value={totpCode}
-                                    onChangeText={setTotpCode}
-                                    keyboardType="numeric"
-                                    maxLength={6}
-                                />
-                            </View>
-                        </View>
+
 
                         <TouchableOpacity
                             style={[
                                 styles.startCopyButton,
-                                (startCopyingMutation.isPending || totpCode.length !== 6) && styles.startCopyButtonDisabled
+                                startCopyingMutation.isPending && styles.startCopyButtonDisabled
                             ]}
-                            disabled={startCopyingMutation.isPending || totpCode.length !== 6}
+                            disabled={startCopyingMutation.isPending}
                             onPress={handleStartCopying}
                         >
                             <Text style={styles.startCopyText}>
@@ -268,7 +251,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                     </ScrollView>
                 </View>
             </View>
-        </Modal>
+        </Modal >
     );
 }
 

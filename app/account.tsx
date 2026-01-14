@@ -30,7 +30,6 @@ import {
   DollarSign,
   X,
   Check,
-  Smartphone,
   Trash2,
 } from 'lucide-react-native';
 
@@ -41,7 +40,6 @@ import { trpc } from '../lib/trpc';
 import { useAccount } from '../hooks/account-store';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ProfileForm } from '../components/account/ProfileForm';
-import { SecurityModal } from '../components/account/SecurityModal';
 
 export default function AccountScreen() {
   const {
@@ -54,9 +52,6 @@ export default function AccountScreen() {
     isUploadingImage,
   } = useAccount();
 
-  // Session management
-  const sessionsQuery = trpc.auth.getSessions.useQuery();
-  const revokeSessionMutation = trpc.auth.revokeSession.useMutation();
   const deleteAccountMutation = trpc.account.deleteAccount.useMutation();
 
   // Initialize form fields with empty strings - useEffect will populate when profile loads
@@ -67,41 +62,7 @@ export default function AccountScreen() {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [defaultCurrency, setDefaultCurrency] = useState('USD');
   const [language, setLanguage] = useState('English');
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
-  // Password Reset Modal States
-  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
-  const [passwordResetStep, setPasswordResetStep] = useState(1); // 1: email/phone, 2: OTP, 3: new password
-  const [resetContactMethod, setResetContactMethod] = useState('email'); // 'email' or 'phone'
-  const [resetContactValue, setResetContactValue] = useState('');
-  const [resetOtp, setResetOtp] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [isPasswordResetLoading, setIsPasswordResetLoading] = useState(false);
-
-  // Password Reset Mutations
-  const requestPasswordResetMutation = trpc.auth.requestPasswordReset.useMutation();
-  const verifyOtpMutation = trpc.auth.verifyOtp.useMutation();
-  const resetPasswordMutation = trpc.auth.resetPassword.useMutation();
-
-  // 2FA TOTP Mutations
-  const setupTOTPMutation = trpc.account.setupTOTP.useMutation();
-  const enableTOTPMutation = trpc.account.enableTOTP.useMutation();
-  const disableTOTPMutation = trpc.account.disableTOTP.useMutation();
-
-  // Two-Factor Authentication Modal States
-  const [showTwoFactorModal, setShowTwoFactorModal] = useState(false);
-  const [twoFactorStep, setTwoFactorStep] = useState(1); // 1: password, 2: QR code, 3: verify code, 4: backup codes
-  const [totpPassword, setTotpPassword] = useState('');
-  const [totpQrCode, setTotpQrCode] = useState('');
-  const [totpBackupCodes, setTotpBackupCodes] = useState<string[]>([]);
-  const [totpVerifyCode, setTotpVerifyCode] = useState('');
-  const [isTwoFactorLoading, setIsTwoFactorLoading] = useState(false);
-
-  const [showDisableTwoFactorModal, setShowDisableTwoFactorModal] = useState(false);
-  const [disableTotpPassword, setDisableTotpPassword] = useState('');
-  const [disableTotpCode, setDisableTotpCode] = useState('');
-  const [isDisablingTwoFactor, setIsDisablingTwoFactor] = useState(false);
 
   // Delete Account Modal States
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
@@ -120,7 +81,6 @@ export default function AccountScreen() {
       setDateOfBirth(profile.dateOfBirth || '');
       setDefaultCurrency(profile.defaultCurrency || 'USD');
       setLanguage(profile.language || 'English');
-      setTwoFactorEnabled(profile.twoFactorEnabled || false);
     }
   }, [profile]);
 
@@ -232,12 +192,7 @@ export default function AccountScreen() {
         language,
       });
 
-      // Update security settings if 2FA changed
-      if (twoFactorEnabled !== profile?.twoFactorEnabled) {
-        await updateSecurity({
-          twoFactorEnabled,
-        });
-      }
+
 
       // IBuy settings would be updated here if implemented
 
@@ -288,226 +243,17 @@ export default function AccountScreen() {
     setConfirmPassword('');
   };
 
+
+
+
+
+
   const handleInviteFriends = () => {
     Alert.alert(
       'Invite Friends',
       'Share your referral code: GHOST2024',
       [
         { text: 'OK' },
-      ]
-    );
-  };
-
-  const handleSetupTwoFactor = async (nextValue: boolean) => {
-    if (!nextValue && twoFactorEnabled) {
-      setShowDisableTwoFactorModal(true);
-      setDisableTotpPassword('');
-      setDisableTotpCode('');
-      return;
-    }
-
-    if (nextValue && !twoFactorEnabled) {
-      setShowTwoFactorModal(true);
-      setTwoFactorStep(1);
-      setTotpPassword('');
-      setTotpQrCode('');
-      setTotpBackupCodes([]);
-      setTotpVerifyCode('');
-    }
-  };
-
-
-
-  // Password Reset Modal Handlers
-  const handlePasswordResetNext = async () => {
-    if (passwordResetStep === 1) {
-      if (!resetContactValue.trim()) {
-        Alert.alert('Error', `Please enter your ${resetContactMethod}`);
-        return;
-      }
-
-      // Only email is supported for now
-      if (resetContactMethod === 'phone') {
-        Alert.alert('Not Available', 'Phone verification is not yet available. Please use email.');
-        return;
-      }
-
-      try {
-        setIsPasswordResetLoading(true);
-        await requestPasswordResetMutation.mutateAsync({ email: resetContactValue.trim().toLowerCase() });
-        Alert.alert('OTP Sent', 'A verification code has been sent to your email');
-        setPasswordResetStep(2);
-      } catch (error: any) {
-        Alert.alert('Error', error?.message || 'Failed to send verification code');
-      } finally {
-        setIsPasswordResetLoading(false);
-      }
-    } else if (passwordResetStep === 2) {
-      if (!resetOtp.trim() || resetOtp.length !== 6) {
-        Alert.alert('Error', 'Please enter a valid 6-digit OTP');
-        return;
-      }
-
-      try {
-        setIsPasswordResetLoading(true);
-        const result = await verifyOtpMutation.mutateAsync({
-          email: resetContactValue.trim().toLowerCase(),
-          otp: resetOtp.trim()
-        });
-        if (result.isValid) {
-          setPasswordResetStep(3);
-        } else {
-          Alert.alert('Error', 'Invalid verification code');
-        }
-      } catch (error: any) {
-        Alert.alert('Error', error?.message || 'Invalid or expired verification code');
-      } finally {
-        setIsPasswordResetLoading(false);
-      }
-    } else if (passwordResetStep === 3) {
-      if (!newPassword.trim() || newPassword.length < 8) {
-        Alert.alert('Error', 'Password must be at least 8 characters');
-        return;
-      }
-      if (newPassword !== confirmPassword) {
-        Alert.alert('Error', 'Passwords do not match');
-        return;
-      }
-
-      try {
-        setIsPasswordResetLoading(true);
-        await resetPasswordMutation.mutateAsync({
-          email: resetContactValue.trim().toLowerCase(),
-          otp: resetOtp.trim(),
-          newPassword: newPassword,
-          confirmPassword: confirmPassword,
-        });
-        Alert.alert('Success', 'Password reset successfully! Please log in with your new password.');
-        setShowPasswordResetModal(false);
-        // Reset form state
-        setPasswordResetStep(1);
-        setResetContactValue('');
-        setResetOtp('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } catch (error: any) {
-        Alert.alert('Error', error?.message || 'Failed to reset password');
-      } finally {
-        setIsPasswordResetLoading(false);
-      }
-    }
-  };
-
-  const handlePasswordResetBack = () => {
-    if (passwordResetStep > 1) {
-      setPasswordResetStep(passwordResetStep - 1);
-    }
-  };
-
-  // Two-Factor Authentication Modal Handlers (TOTP)
-  const handleTwoFactorNext = async () => {
-    if (twoFactorStep === 1) {
-      // Step 1: Verify password and get QR code
-      if (!totpPassword.trim()) {
-        Alert.alert('Error', 'Please enter your password');
-        return;
-      }
-
-      try {
-        setIsTwoFactorLoading(true);
-        const result = await setupTOTPMutation.mutateAsync({ password: totpPassword });
-        setTotpQrCode(result.qrCodeUrl);
-        setTotpBackupCodes(result.backupCodes);
-        setTwoFactorStep(2);
-      } catch (error: any) {
-        Alert.alert('Error', error?.message || 'Failed to setup 2FA');
-      } finally {
-        setIsTwoFactorLoading(false);
-      }
-    } else if (twoFactorStep === 2) {
-      // Step 2: User has scanned QR code, move to verification
-      setTwoFactorStep(3);
-    } else if (twoFactorStep === 3) {
-      // Step 3: Verify the TOTP code
-      if (!totpVerifyCode.trim() || totpVerifyCode.length !== 6) {
-        Alert.alert('Error', 'Please enter a valid 6-digit code from your authenticator app');
-        return;
-      }
-
-      try {
-        setIsTwoFactorLoading(true);
-        await enableTOTPMutation.mutateAsync({ code: totpVerifyCode });
-        setTwoFactorStep(4);
-      } catch (error: any) {
-        Alert.alert('Error', error?.message || 'Invalid verification code');
-      } finally {
-        setIsTwoFactorLoading(false);
-      }
-    } else if (twoFactorStep === 4) {
-      // Step 4: Show backup codes and finish
-      setTwoFactorEnabled(true);
-      setShowTwoFactorModal(false);
-      Alert.alert('Success', 'Two-Factor Authentication is now enabled!');
-      // Reset state
-      setTotpPassword('');
-      setTotpQrCode('');
-      setTotpBackupCodes([]);
-      setTotpVerifyCode('');
-      setTwoFactorStep(1);
-    }
-  };
-
-  const handleTwoFactorBack = () => {
-    if (twoFactorStep > 1 && twoFactorStep < 4) {
-      setTwoFactorStep(twoFactorStep - 1);
-    }
-  };
-
-  const handleConfirmDisableTwoFactor = async () => {
-    if (!disableTotpPassword.trim()) {
-      Alert.alert('Error', 'Please enter your password');
-      return;
-    }
-    if (!disableTotpCode.trim() || disableTotpCode.trim().length !== 6) {
-      Alert.alert('Error', 'Please enter a valid 6-digit code');
-      return;
-    }
-
-    try {
-      setIsDisablingTwoFactor(true);
-      await disableTOTPMutation.mutateAsync({ password: disableTotpPassword.trim(), code: disableTotpCode.trim() });
-      setTwoFactorEnabled(false);
-      setShowDisableTwoFactorModal(false);
-      setDisableTotpPassword('');
-      setDisableTotpCode('');
-      Alert.alert('Success', '2FA disabled successfully!');
-    } catch (error: any) {
-      Alert.alert('Error', error?.message || 'Failed to disable 2FA.');
-    } finally {
-      setIsDisablingTwoFactor(false);
-    }
-  };
-
-  // Session Management Handlers
-  const handleRevokeSession = async (sessionId: string) => {
-    Alert.alert(
-      'Revoke Session',
-      'Are you sure you want to end this session? The device will be logged out.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Revoke',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await revokeSessionMutation.mutateAsync({ sessionId });
-              void sessionsQuery.refetch();
-              Alert.alert('Success', 'Session revoked successfully');
-            } catch (error: any) {
-              Alert.alert('Error', error?.message || 'Failed to revoke session');
-            }
-          },
-        },
       ]
     );
   };
@@ -545,21 +291,7 @@ export default function AccountScreen() {
     }
   };
 
-  // Format session info for display
-  const formatSessionInfo = (userAgent: string | null) => {
-    if (!userAgent) return 'Unknown Device';
-    if (userAgent.includes('iPhone') || userAgent.includes('iPad')) return 'iOS Device';
-    if (userAgent.includes('Android')) return 'Android Device';
-    if (userAgent.includes('Windows')) return 'Windows PC';
-    if (userAgent.includes('Mac')) return 'Mac';
-    if (userAgent.includes('Linux')) return 'Linux';
-    return 'Unknown Device';
-  };
 
-  const formatDate = (date: Date | string) => {
-    const d = new Date(date);
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
 
   // Render guard: Show loading state until profile is available
   if (isLoading || profile === null) {
@@ -654,7 +386,7 @@ export default function AccountScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security & Privacy</Text>
 
-          <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
+          <TouchableOpacity style={styles.settingRow} onPress={() => Alert.alert('Reset Password', 'This feature is coming soon!')}>
             <View style={styles.settingLeft}>
               <Lock size={20} color={COLORS.textSecondary} />
               <Text style={styles.settingText}>Reset Password</Text>
@@ -662,19 +394,7 @@ export default function AccountScreen() {
             <Text style={styles.settingArrow}>›</Text>
           </TouchableOpacity>
 
-          <View style={styles.settingRow}>
-            <View style={styles.settingLeft}>
-              <ShieldCheck size={20} color={COLORS.textSecondary} />
-              <Text style={styles.settingText}>Two-Factor Authentication</Text>
-            </View>
-            <Switch
-              testID="account-twofactor-switch"
-              value={twoFactorEnabled}
-              onValueChange={(value) => handleSetupTwoFactor(value)}
-              trackColor={{ false: COLORS.cardBackground, true: COLORS.solana + '50' }}
-              thumbColor={twoFactorEnabled ? COLORS.solana : COLORS.textSecondary}
-            />
-          </View>
+
         </View>
 
         {/* App Settings */}
@@ -712,66 +432,6 @@ export default function AccountScreen() {
 
 
 
-        {/* Active Sessions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Active Sessions</Text>
-          <Text style={styles.sectionDescription}>
-            Manage devices where you're currently logged in
-          </Text>
-
-          {sessionsQuery.isLoading ? (
-            <>
-              {[1, 2, 3].map((i) => (
-                <View key={i} style={styles.sessionItem}>
-                  <View style={styles.sessionInfo}>
-                    <View style={styles.sessionHeader}>
-                      <SkeletonLoader width={18} height={18} borderRadius={9} />
-                      <SkeletonLoader width={120} height={14} style={{ marginLeft: SPACING.s }} />
-                    </View>
-                    <SkeletonLoader width="85%" height={12} style={{ marginTop: SPACING.xs }} />
-                  </View>
-                  <SkeletonLoader width={64} height={30} borderRadius={BORDER_RADIUS.small} />
-                </View>
-              ))}
-            </>
-          ) : sessionsQuery.data?.sessions && sessionsQuery.data.sessions.length > 0 ? (
-            <View testID="session-list">
-              {sessionsQuery.data.sessions.map((session: { id: string; ipAddress: string | null; userAgent: string | null; createdAt: Date; lastActivityAt: Date; current: boolean }) => (
-                <View key={session.id} style={styles.sessionItem}>
-                  <View style={styles.sessionInfo}>
-                    <View style={styles.sessionHeader}>
-                      <Smartphone size={18} color={COLORS.textSecondary} />
-                      <Text style={styles.sessionDevice}>
-                        {formatSessionInfo(session.userAgent)}
-                      </Text>
-                      {session.current && (
-                        <View style={styles.currentBadge}>
-                          <Text style={styles.currentBadgeText}>Current</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.sessionDetails}>
-                      {session.ipAddress || 'Unknown IP'} • Last active: {formatDate(session.lastActivityAt)}
-                    </Text>
-                  </View>
-                  {!session.current && (
-                    <TouchableOpacity
-                      testID="revoke-session-button"
-                      style={styles.revokeButton}
-                      onPress={() => handleRevokeSession(session.id)}
-                      disabled={revokeSessionMutation.isPending}
-                    >
-                      <Text style={styles.revokeButtonText}>Revoke</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ))}
-            </View>
-          ) : (
-            <Text style={styles.noSessionsText}>No active sessions found</Text>
-          )}
-        </View>
-
         {/* Social */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Social</Text>
@@ -800,120 +460,7 @@ export default function AccountScreen() {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
-      <SecurityModal
-        styles={styles}
-        showPasswordResetModal={showPasswordResetModal}
-        setShowPasswordResetModal={setShowPasswordResetModal}
-        passwordResetStep={passwordResetStep}
-        resetContactMethod={resetContactMethod}
-        setResetContactMethod={setResetContactMethod}
-        resetContactValue={resetContactValue}
-        setResetContactValue={setResetContactValue}
-        resetOtp={resetOtp}
-        setResetOtp={setResetOtp}
-        newPassword={newPassword}
-        setNewPassword={setNewPassword}
-        confirmPassword={confirmPassword}
-        setConfirmPassword={setConfirmPassword}
-        isPasswordResetLoading={isPasswordResetLoading}
-        handlePasswordResetBack={handlePasswordResetBack}
-        handlePasswordResetNext={handlePasswordResetNext}
-        showTwoFactorModal={showTwoFactorModal}
-        setShowTwoFactorModal={setShowTwoFactorModal}
-        twoFactorStep={twoFactorStep}
-        totpPassword={totpPassword}
-        setTotpPassword={setTotpPassword}
-        totpQrCode={totpQrCode}
-        totpBackupCodes={totpBackupCodes}
-        totpVerifyCode={totpVerifyCode}
-        setTotpVerifyCode={setTotpVerifyCode}
-        isTwoFactorLoading={isTwoFactorLoading}
-        handleTwoFactorBack={handleTwoFactorBack}
-        handleTwoFactorNext={handleTwoFactorNext}
-      />
 
-      <Modal
-        visible={showDisableTwoFactorModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowDisableTwoFactorModal(false)}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 48 : 0}
-          >
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowDisableTwoFactorModal(false)}>
-                <X size={24} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>Disable Two-Factor Authentication</Text>
-              <View style={{ width: 24 }} />
-            </View>
-
-            <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
-              <Text style={styles.modalDescription}>
-                Enter your password and a code from your authenticator app to disable 2FA.
-              </Text>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Password</Text>
-                <View style={styles.inputContainer}>
-                  <Lock size={20} color={COLORS.textSecondary} />
-                  <TextInput
-                    testID="totp-disable-password-input"
-                    style={styles.input}
-                    value={disableTotpPassword}
-                    onChangeText={setDisableTotpPassword}
-                    placeholder="Enter your password"
-                    placeholderTextColor={COLORS.textSecondary}
-                    secureTextEntry
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Verification Code</Text>
-                <View style={styles.inputContainer}>
-                  <ShieldCheck size={20} color={COLORS.textSecondary} />
-                  <TextInput
-                    testID="totp-disable-code-input"
-                    style={styles.input}
-                    value={disableTotpCode}
-                    onChangeText={setDisableTotpCode}
-                    placeholder="Enter 6-digit code"
-                    placeholderTextColor={COLORS.textSecondary}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                  />
-                </View>
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalFooter}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => setShowDisableTwoFactorModal(false)}
-                disabled={isDisablingTwoFactor}
-              >
-                <Text style={styles.backButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                testID="totp-disable-confirm-button"
-                style={[styles.deleteButton, isDisablingTwoFactor && styles.nextButtonDisabled]}
-                onPress={handleConfirmDisableTwoFactor}
-                disabled={isDisablingTwoFactor}
-              >
-                <Text style={styles.deleteButtonText}>
-                  {isDisablingTwoFactor ? 'Disabling...' : 'Disable 2FA'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </Modal>
 
       {/* Delete Account Modal */}
       <Modal

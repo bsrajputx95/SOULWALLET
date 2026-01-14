@@ -2,11 +2,8 @@ import { z } from 'zod'
 import prisma from '../../lib/prisma'
 import { router, adminProcedureSecure } from '../trpc'
 import { trustedIpsService } from '../../lib/services/trustedIps'
-import { adaptiveRateLimiter } from '../../lib/middleware/adaptiveRateLimiter'
 import { queueManager } from '../../lib/services/queueManager'
 import { alertManager } from '../../lib/services/alertManager'
-import { amlService, kycService } from '../../lib/services/kyc'
-import { gdprService } from '../../lib/services/gdpr'
 
 export const adminRouter = router({
   // ========================================
@@ -57,40 +54,9 @@ export const adminRouter = router({
     }),
 
   // ========================================
-  // Adaptive Rate Limiting (Plan5 Step 2.3)
+  // Adaptive Rate Limiting - REMOVED
   // ========================================
-
-  getAdaptiveRateLimitStatus: adminProcedureSecure
-    .query(async () => {
-      return {
-        metrics: adaptiveRateLimiter.getMetrics(),
-        states: adaptiveRateLimiter.getAllStates(),
-        timestamp: new Date().toISOString(),
-      }
-    }),
-
-  manualAdaptRateLimit: adminProcedureSecure
-    .input(
-      z.object({
-        endpoint: z.string(),
-        factor: z.number().min(0.1).max(1).default(0.5),
-      })
-    )
-    .mutation(async ({ input }) => {
-      await adaptiveRateLimiter.manualAdapt(input.endpoint as any, input.factor)
-      return { success: true, endpoint: input.endpoint, factor: input.factor }
-    }),
-
-  manualRestoreRateLimit: adminProcedureSecure
-    .input(
-      z.object({
-        endpoint: z.string(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      await adaptiveRateLimiter.manualRestore(input.endpoint as any)
-      return { success: true, endpoint: input.endpoint }
-    }),
+  // Endpoints removed: getAdaptiveRateLimitStatus, manualAdaptRateLimit, manualRestoreRateLimit
 
   // ========================================
   // Queue Status (Plan5 Step 1)
@@ -178,235 +144,17 @@ export const adminRouter = router({
       return { success: true, user }
     }),
 
-  listKYCVerifications: adminProcedureSecure
-    .input(
-      z.object({
-        status: z.string().optional(),
-        page: z.number().int().min(1).default(1),
-        limit: z.number().int().min(1).max(200).default(50),
-      })
-    )
-    .query(async ({ input }) => {
-      const skip = (input.page - 1) * input.limit
-      const where = {
-        ...(input.status ? { status: input.status } : {}),
-      } as const
-
-      const [verifications, total] = await Promise.all([
-        prisma.kYCVerification.findMany({
-          where,
-          include: { user: { select: { id: true, email: true, username: true } } },
-          orderBy: { updatedAt: 'desc' },
-          skip,
-          take: input.limit,
-        }),
-        prisma.kYCVerification.count({ where }),
-      ])
-
-      return {
-        success: true,
-        verifications,
-        pagination: {
-          page: input.page,
-          limit: input.limit,
-          total,
-          pages: Math.ceil(total / input.limit),
-        },
-      }
-    }),
-
-  getKYCVerification: adminProcedureSecure
-    .input(
-      z
-        .object({
-          userId: z.string().optional(),
-          verificationId: z.string().optional(),
-          includeDecrypted: z.boolean().default(false),
-        })
-        .refine((v) => Boolean(v.userId || v.verificationId), {
-          message: 'userId or verificationId is required',
-        })
-    )
-    .query(async ({ input }) => {
-      const verification = input.verificationId
-        ? await prisma.kYCVerification.findUnique({
-            where: { id: input.verificationId },
-            include: { user: { select: { id: true, email: true, username: true } } },
-          })
-        : await prisma.kYCVerification.findUnique({
-            where: { userId: input.userId as string },
-            include: { user: { select: { id: true, email: true, username: true } } },
-          })
-
-      if (!verification) {
-        return { success: true, verification: null, decryptedData: null }
-      }
-
-      const decryptedData = input.includeDecrypted ? await kycService.getDecryptedKYCData(verification.userId) : null
-      return { success: true, verification, decryptedData }
-    }),
-
-  approveKYC: adminProcedureSecure
-    .input(
-      z.object({
-        verificationId: z.string().min(1),
-        tier: z.number().int().min(1).max(5).default(1),
-        riskScore: z.number().min(0).max(100).optional(),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      await kycService.approveKYC(input.verificationId, ctx.user.id, input.tier, input.riskScore)
-      return { success: true }
-    }),
-
-  rejectKYC: adminProcedureSecure
-    .input(
-      z.object({
-        verificationId: z.string().min(1),
-        reason: z.string().min(1).max(500),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      await kycService.rejectKYC(input.verificationId, ctx.user.id, input.reason)
-      return { success: true }
-    }),
-
-  getOpenAMLAlerts: adminProcedureSecure
-    .input(
-      z.object({
-        severity: z.string().optional(),
-        limit: z.number().int().min(1).max(200).default(50),
-      })
-    )
-    .query(async ({ input }) => {
-      const alerts = await amlService.getOpenAlerts({ severity: input.severity, limit: input.limit })
-      return { success: true, alerts }
-    }),
-
-  resolveAMLAlert: adminProcedureSecure
-    .input(
-      z.object({
-        alertId: z.string().min(1),
-        resolution: z.string().min(1).max(1000),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      await amlService.resolveAlert(input.alertId, ctx.user.id, input.resolution)
-      return { success: true }
-    }),
-
-  listDataDeletionRequests: adminProcedureSecure
-    .input(
-      z.object({
-        status: z.string().optional(),
-        userId: z.string().optional(),
-        page: z.number().int().min(1).default(1),
-        limit: z.number().int().min(1).max(200).default(50),
-      })
-    )
-    .query(async ({ input }) => {
-      const skip = (input.page - 1) * input.limit
-      const where = {
-        ...(input.status ? { status: input.status } : {}),
-        ...(input.userId ? { userId: input.userId } : {}),
-      } as const
-
-      const [requests, total] = await Promise.all([
-        prisma.dataDeletionRequest.findMany({
-          where,
-          include: { user: { select: { id: true, email: true, username: true } } },
-          orderBy: { createdAt: 'desc' },
-          skip,
-          take: input.limit,
-        }),
-        prisma.dataDeletionRequest.count({ where }),
-      ])
-
-      return {
-        success: true,
-        requests,
-        pagination: {
-          page: input.page,
-          limit: input.limit,
-          total,
-          pages: Math.ceil(total / input.limit),
-        },
-      }
-    }),
-
-  processDataDeletion: adminProcedureSecure
-    .input(z.object({ requestId: z.string().min(1) }))
-    .mutation(async ({ input, ctx }) => {
-      await gdprService.processDataDeletion(input.requestId, ctx.user.id)
-      return { success: true }
-    }),
+  // ========================================
+  // KYC/AML/GDPR - REMOVED
+  // ========================================
+  // Endpoints removed: listKYCVerifications, getKYCVerification, approveKYC, rejectKYC,
+  // getOpenAMLAlerts, resolveAMLAlert, listDataDeletionRequests, processDataDeletion
 
   // ========================================
-  // Security Management (Anti-Exploit)
+  // Security Management - REMOVED
   // ========================================
-
-  getBannedUsers: adminProcedureSecure
-    .query(async () => {
-      const { getBannedUsers } = await import('../../lib/services/securityMonitor')
-      return {
-        bannedUsers: getBannedUsers(),
-        timestamp: new Date().toISOString(),
-      }
-    }),
-
-  banUser: adminProcedureSecure
-    .input(
-      z.object({
-        userId: z.string().min(1),
-        reason: z.string().min(1),
-        durationHours: z.number().optional(), // null = permanent
-      })
-    )
-    .mutation(async ({ input }) => {
-      const { banUser } = await import('../../lib/services/securityMonitor')
-      const durationMs = input.durationHours ? input.durationHours * 60 * 60 * 1000 : undefined
-      banUser(input.userId, input.reason, durationMs)
-      return { success: true, userId: input.userId, reason: input.reason }
-    }),
-
-  unbanUser: adminProcedureSecure
-    .input(z.object({ userId: z.string().min(1) }))
-    .mutation(async ({ input }) => {
-      const { unbanUser } = await import('../../lib/services/securityMonitor')
-      const success = unbanUser(input.userId)
-      return { success, userId: input.userId }
-    }),
-
-  getSecurityMetrics: adminProcedureSecure
-    .query(async () => {
-      const { securityMonitor } = await import('../../lib/services/securityMonitor')
-      return {
-        metrics: securityMonitor.getMetrics(),
-        recentEvents: securityMonitor.getRecentEvents(50),
-        timestamp: new Date().toISOString(),
-      }
-    }),
-
-  getUserSecurityProfile: adminProcedureSecure
-    .input(z.object({ userId: z.string().min(1) }))
-    .query(async ({ input }) => {
-      const { securityMonitor, getUserRiskScore, isUserBanned } = await import('../../lib/services/securityMonitor')
-      return {
-        userId: input.userId,
-        riskScore: getUserRiskScore(input.userId),
-        banStatus: isUserBanned(input.userId),
-        recentEvents: securityMonitor.getUserEvents(input.userId, 20),
-        timestamp: new Date().toISOString(),
-      }
-    }),
-
-  resetUserRiskScore: adminProcedureSecure
-    .input(z.object({ userId: z.string().min(1) }))
-    .mutation(async ({ input }) => {
-      const { resetUserRiskScore } = await import('../../lib/services/securityMonitor')
-      resetUserRiskScore(input.userId)
-      return { success: true, userId: input.userId }
-    }),
+  // Endpoints removed: getBannedUsers, banUser, unbanUser, getSecurityMetrics,
+  // getUserSecurityProfile, resetUserRiskScore
 
   // Global poster management
   setGlobalPoster: adminProcedureSecure
