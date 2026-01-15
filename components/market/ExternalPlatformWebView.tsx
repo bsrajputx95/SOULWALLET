@@ -13,23 +13,17 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
-  TouchableOpacity,
-  Linking,
   Platform,
+  Text,
+  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { WebView, WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
-import { ExternalLink, RefreshCw, AlertTriangle, Globe, ArrowUpDown, Copy } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { WebView, WebViewNavigation } from 'react-native-webview';
+import { RefreshCw, AlertTriangle, Globe } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { useSolanaWallet } from '../../hooks/solana-wallet-store';
-import { NeonButton } from '../NeonButton';
-import { logger } from '../../lib/client-logger';
-import { BuyTokenModal } from '../BuyTokenModal';
 
 // Check if running in Expo Go (WebView doesn't work in Expo Go)
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -57,236 +51,23 @@ interface ExternalPlatformWebViewProps {
 }
 
 /**
- * Extract token mint address from various DEX platform URLs
- * Supports: DexScreener, Raydium, Pump.fun, and generic token/mint patterns
- */
-const extractTokenFromUrl = (url: string): string | null => {
-  try {
-    const urlObj = new URL(url);
-    const pathname = urlObj.pathname;
-    const searchParams = urlObj.searchParams;
-
-    // DexScreener: /solana/{pairAddress} - pair address is the token
-    // Example: https://dexscreener.com/solana/8xMrTgcGhKLjvYqPGmszpSBHfqHGLvU8STiLLmKNcwU2
-    const dexScreenerMatch = pathname.match(/\/solana\/([A-Za-z0-9]{32,44})/);
-    if (dexScreenerMatch) {
-      return dexScreenerMatch[1];
-    }
-
-    // Raydium: ?inputMint=xxx&outputMint=xxx - extract outputMint (token to buy)
-    // Example: https://raydium.io/swap/?inputMint=sol&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-    const outputMint = searchParams.get('outputMint');
-    if (outputMint && outputMint.length >= 32) {
-      return outputMint;
-    }
-    const inputMint = searchParams.get('inputMint');
-    if (inputMint && inputMint.length >= 32 && inputMint !== 'sol') {
-      return inputMint;
-    }
-
-    // Pump.fun: /coin/{tokenAddress} or /{tokenAddress}
-    // Example: https://pump.fun/coin/8xMrTgcGhKLjvYqPGmszpSBHfqHGLvU8STiLLmKNcwU2
-    const pumpFunMatch = pathname.match(/(?:\/coin)?\/([A-Za-z0-9]{32,44})$/);
-    if (pumpFunMatch) {
-      return pumpFunMatch[1];
-    }
-
-    // Generic fallback: Look for token/mint/pair query params or path segments
-    // Matches Solana addresses (32-44 base58 characters)
-    const genericParams = ['token', 'mint', 'pair', 'address', 'ca'];
-    for (const param of genericParams) {
-      const value = searchParams.get(param);
-      if (value && /^[A-Za-z0-9]{32,44}$/.test(value)) {
-        return value;
-      }
-    }
-
-    // Last resort: Find any Solana address in the URL path
-    const addressMatch = pathname.match(/([A-HJ-NP-Za-km-z1-9]{32,44})/);
-    if (addressMatch) {
-      return addressMatch[1];
-    }
-
-    return null;
-  } catch (error) {
-    // URL parsing failed, try regex on raw string
-    const fallbackMatch = url.match(/[A-HJ-NP-Za-km-z1-9]{32,44}/);
-    return fallbackMatch ? fallbackMatch[0] : null;
-  }
-};
-
-/**
- * Generate wallet injection JavaScript for WebView
- * Exposes window.SoulWallet object for wallet interactions
- */
-const generateWalletInjectionScript = (publicKey: string | null): string => {
-  return `
-    (function() {
-      // SoulWallet injection bridge
-      window.SoulWallet = {
-        isConnected: ${publicKey ? 'true' : 'false'},
-        publicKey: ${publicKey ? `'${publicKey}'` : 'null'},
-        
-        // Request wallet connection
-        connect: function() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'WALLET_CONNECT_REQUEST'
-          }));
-          return new Promise((resolve, reject) => {
-            window._soulWalletResolve = resolve;
-            window._soulWalletReject = reject;
-          });
-        },
-        
-        // Request transaction signing
-        signTransaction: function(transaction) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'SIGN_TRANSACTION_REQUEST',
-            payload: { transaction }
-          }));
-          return new Promise((resolve, reject) => {
-            window._soulWalletSignResolve = resolve;
-            window._soulWalletSignReject = reject;
-          });
-        },
-        
-        // Request message signing
-        signMessage: function(message) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'SIGN_MESSAGE_REQUEST',
-            payload: { message }
-          }));
-          return new Promise((resolve, reject) => {
-            window._soulWalletMsgResolve = resolve;
-            window._soulWalletMsgReject = reject;
-          });
-        }
-      };
-      
-      // Notify page that wallet is available
-      window.dispatchEvent(new Event('soulwallet:ready'));
-      
-      true; // Required for injectedJavaScript
-    })();
-  `;
-};
-
-/**
  * WebView component for external DEX platforms
  */
 export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({
   platform,
   onError,
 }) => {
-  const router = useRouter();
-  const { publicKey } = useSolanaWallet();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentTokenMint, setCurrentTokenMint] = useState<string | null>(null);
-  const [lastKnownUrl, setLastKnownUrl] = useState<string>('');
-  const [showBuyModal, setShowBuyModal] = useState(false);
   const webViewRef = useRef<WebView>(null);
 
   const platformUrl = PLATFORM_URLS[platform] || '';
   const platformName = PLATFORM_NAMES[platform] || platform;
 
-  // Open buy modal popup (no navigation needed)
-  const handleTradeInApp = useCallback(() => {
-    if (currentTokenMint) {
-      setShowBuyModal(true);
-    } else {
-      // No token detected - show alert
-      if (__DEV__) logger.warn('No token detected for buy modal');
-    }
-  }, [currentTokenMint]);
-
-  // Handle WebView navigation state changes to extract token from URL
+  // Handle WebView navigation state changes
   const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
-    const { url } = navState;
-    if (url) {
-      setLastKnownUrl(url);
-      const extractedToken = extractTokenFromUrl(url);
-      if (extractedToken && extractedToken !== currentTokenMint) {
-        setCurrentTokenMint(extractedToken);
-        if (__DEV__) {
-          logger.info('Extracted token from WebView URL:', extractedToken);
-        }
-      }
-    }
-  }, [currentTokenMint]);
-
-  // Handle messages from WebView (wallet injection bridge)
-  const handleWebViewMessage = useCallback((event: WebViewMessageEvent) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-
-      switch (data.type) {
-        case 'WALLET_CONNECT_REQUEST':
-          // User requested wallet connection from WebView
-          // For now, just show that wallet is already connected
-          if (publicKey) {
-            webViewRef.current?.injectJavaScript(`
-              if (window._soulWalletResolve) {
-                window._soulWalletResolve({ publicKey: '${publicKey}' });
-              }
-              true;
-            `);
-          } else {
-            webViewRef.current?.injectJavaScript(`
-              if (window._soulWalletReject) {
-                window._soulWalletReject(new Error('Wallet not connected'));
-              }
-              true;
-            `);
-          }
-          break;
-
-        case 'SIGN_TRANSACTION_REQUEST':
-          // Transaction signing not supported in WebView - redirect to native swap
-          handleTradeInApp();
-          break;
-
-        case 'SIGN_MESSAGE_REQUEST':
-          // Message signing not supported in WebView
-          webViewRef.current?.injectJavaScript(`
-            if (window._soulWalletMsgReject) {
-              window._soulWalletMsgReject(new Error('Please use Trade in App for transactions'));
-            }
-            true;
-          `);
-          break;
-
-        default:
-          if (__DEV__) {
-            logger.warn('Unknown WebView message type:', data.type);
-          }
-      }
-    } catch (err) {
-      // Not a JSON message, ignore
-    }
-  }, [publicKey, handleTradeInApp]);
-
-  const handleOpenInBrowser = useCallback(async () => {
-    if (!platformUrl) {
-      setError('Platform URL not configured');
-      return;
-    }
-
-    try {
-      const supported = await Linking.canOpenURL(platformUrl);
-
-      if (supported) {
-        await Linking.openURL(platformUrl);
-      } else {
-        setError(`Cannot open ${platformName}`);
-        onError?.(`Cannot open ${platformName}`);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to open link';
-      setError(message);
-      onError?.(message);
-    }
-  }, [platformUrl, platformName, onError]);
+    // Simple navigation tracking (no token detection)
+  }, []);
 
   const handleRefresh = useCallback(() => {
     setError(null);
@@ -294,11 +75,8 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     webViewRef.current?.reload();
   }, []);
 
-  // Error state with Jupiter fallback (Comment 4)
+  // Error state
   if (error) {
-    // Try to extract token from last known URL for smart fallback
-    const fallbackToken = lastKnownUrl ? extractTokenFromUrl(lastKnownUrl) : currentTokenMint;
-
     return (
       <View style={styles.container}>
         <View style={styles.errorContainer}>
@@ -311,58 +89,15 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             <RefreshCw size={16} color={COLORS.textPrimary} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
-
-          {/* Jupiter fallback button with token-aware routing */}
-          <TouchableOpacity
-            style={styles.jupiterFallbackButton}
-            onPress={() => {
-              if (fallbackToken) {
-                router.push({
-                  pathname: '/swap',
-                  params: { token: fallbackToken }
-                });
-              } else {
-                router.push('/swap');
-              }
-            }}
-          >
-            <ArrowUpDown size={18} color={COLORS.textPrimary} />
-            <Text style={styles.jupiterFallbackText}>Trade on Jupiter (In-App)</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.fallbackHint}>
-            {fallbackToken
-              ? `Token detected: ${fallbackToken.slice(0, 8)}...${fallbackToken.slice(-4)}`
-              : 'Use our native swap powered by Jupiter aggregator'
-            }
-          </Text>
         </View>
       </View>
     );
   }
 
-  // Web platform - use iframe or open in browser
+  // Web platform - use iframe
   if (Platform.OS === 'web') {
     return (
       <View style={styles.container}>
-        <View style={styles.webHeader}>
-          <View style={styles.walletStatus}>
-            <View style={[
-              styles.statusDot,
-              { backgroundColor: publicKey ? COLORS.success : COLORS.warning }
-            ]} />
-            <Text style={styles.statusText}>
-              {publicKey
-                ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
-                : 'Not connected'
-              }
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.externalButton} onPress={handleOpenInBrowser}>
-            <ExternalLink size={16} color={COLORS.solana} />
-            <Text style={styles.externalText}>Open</Text>
-          </TouchableOpacity>
-        </View>
         <View style={styles.iframeContainer}>
           <iframe
             src={platformUrl}
@@ -392,30 +127,9 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             Trade tokens directly on {platformName}
           </Text>
 
-          {/* Wallet Status */}
-          <View style={styles.walletStatus}>
-            <View style={[
-              styles.statusDot,
-              { backgroundColor: publicKey ? COLORS.success : COLORS.warning }
-            ]} />
-            <Text style={styles.statusText}>
-              {publicKey
-                ? `Wallet: ${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
-                : 'Wallet not connected'
-              }
-            </Text>
-          </View>
-
-          {/* Open in Browser Button */}
-          <NeonButton
-            title={`Open ${platformName}`}
-            onPress={handleOpenInBrowser}
-            style={styles.openButton}
-          />
-
           {/* Info Text */}
           <Text style={styles.infoText}>
-            Opens in your default browser
+            In-app browsing requires a development build
           </Text>
 
           {/* Dev Build Note */}
@@ -435,26 +149,12 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
   // Native mobile - use WebView
   return (
     <View style={styles.container}>
-      {/* Header with wallet status and actions */}
+      {/* Header with refresh action */}
       <View style={styles.webHeader}>
-        <View style={styles.walletStatus}>
-          <View style={[
-            styles.statusDot,
-            { backgroundColor: publicKey ? COLORS.success : COLORS.warning }
-          ]} />
-          <Text style={styles.statusText}>
-            {publicKey
-              ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
-              : 'Not connected'
-            }
-          </Text>
-        </View>
+        <Text style={styles.platformTitle}>{platformName}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.actionButton} onPress={handleRefresh}>
             <RefreshCw size={18} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={handleOpenInBrowser}>
-            <ExternalLink size={18} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -475,7 +175,6 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
         onNavigationStateChange={handleNavigationStateChange}
-        onMessage={handleWebViewMessage}
         onError={(syntheticEvent) => {
           const { nativeEvent } = syntheticEvent;
           setError(nativeEvent.description || 'Failed to load page');
@@ -491,42 +190,12 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         mixedContentMode="compatibility"
         originWhitelist={['*']}
         userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
-        // Wallet injection bridge
-        injectedJavaScript={generateWalletInjectionScript(publicKey)}
         // Caching for faster subsequent loads
         cacheEnabled={true}
         cacheMode="LOAD_CACHE_ELSE_NETWORK"
         thirdPartyCookiesEnabled={true}
         sharedCookiesEnabled={true}
         incognito={false}
-      />
-
-      {/* Floating "Buy" button - only shows when token is detected */}
-      {currentTokenMint && (
-        <TouchableOpacity
-          style={styles.floatingTradeButton}
-          onPress={handleTradeInApp}
-          activeOpacity={0.8}
-        >
-          <ArrowUpDown size={16} color={COLORS.textPrimary} />
-          <Text style={styles.floatingTradeText}>Buy Token</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Token detected indicator */}
-      {currentTokenMint && (
-        <View style={styles.tokenDetectedBadge}>
-          <Text style={styles.tokenDetectedText}>
-            Token: {currentTokenMint.slice(0, 6)}...
-          </Text>
-        </View>
-      )}
-
-      {/* Buy Token Modal */}
-      <BuyTokenModal
-        visible={showBuyModal}
-        onClose={() => setShowBuyModal(false)}
-        tokenMint={currentTokenMint}
       />
     </View>
   );

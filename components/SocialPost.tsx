@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { StyleSheet, Text, View, Image, Pressable, Alert } from 'react-native';
-import { MessageSquare, Repeat, Heart, Zap, Copy } from 'lucide-react-native';
+import { MessageSquare, Heart, Zap, Copy } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
@@ -15,7 +15,6 @@ interface SocialPostProps {
   content: string;
   images?: string[];
   comments: number;
-  reposts: number;
   likes: number;
   timestamp: string;
   mentionedToken?: string;
@@ -35,7 +34,6 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   content,
   images,
   comments,
-  reposts,
   likes,
   timestamp,
   mentionedToken,
@@ -48,9 +46,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
 }) => {
   const router = useRouter();
   const [isLiked, setIsLiked] = useState(false);
-  const [isReposted, setIsReposted] = useState(false);
   const [currentLikes, setCurrentLikes] = useState(likes);
-  const [currentReposts, setCurrentReposts] = useState(reposts);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -75,33 +71,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     },
   });
 
-  const createRepostMutation = trpc.social.createRepost.useMutation({
-    onSuccess: () => {
-      setIsReposted(true);
-      setCurrentReposts(currentReposts + 1);
-      if (onUpdate) onUpdate();
-    },
-    onError: (error) => {
-      console.error('[SocialPost] Repost error:', error);
-      // Revert optimistic update
-      setIsReposted(false);
-      setCurrentReposts(currentReposts - 1);
-    },
-  });
 
-  const deleteRepostMutation = trpc.social.deleteRepost.useMutation({
-    onSuccess: () => {
-      setIsReposted(false);
-      setCurrentReposts(currentReposts - 1);
-      if (onUpdate) onUpdate();
-    },
-    onError: (error) => {
-      console.error('[SocialPost] Delete repost error:', error);
-      // Revert optimistic update
-      setIsReposted(true);
-      setCurrentReposts(currentReposts + 1);
-    },
-  });
 
   const handleUsernamePress = useCallback(() => {
     router.push(`/profile/${username}`);
@@ -133,40 +103,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     toggleLikeMutation.mutate({ postId: id });
   };
 
-  const handleRepost = (e: any) => {
-    e.stopPropagation();
-    if (isProcessing || createRepostMutation.isPending || deleteRepostMutation.isPending) return;
 
-    // If already reposted, undo without confirmation
-    if (isReposted) {
-      setIsReposted(false);
-      setCurrentReposts(currentReposts - 1);
-      deleteRepostMutation.mutate({ postId: id });
-      return;
-    }
-
-    // Show confirmation dialog for new repost
-    Alert.alert(
-      'Repost',
-      `Repost this post from @${username}?`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Repost',
-          onPress: () => {
-            // Optimistic update
-            setIsReposted(true);
-            setCurrentReposts(currentReposts + 1);
-            // Call API
-            createRepostMutation.mutate({ postId: id });
-          },
-        },
-      ]
-    );
-  };
 
   const handleComment = (e: any) => {
     e.stopPropagation();
@@ -290,25 +227,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
               <Text style={styles.actionCount}>{comments}</Text>
             </Pressable>
 
-            <Pressable
-              style={styles.action}
-              onPress={handleRepost}
-              disabled={isProcessing}
-              accessibilityRole="button"
-              accessibilityLabel={`${isReposted ? 'Undo repost' : 'Repost'}: ${currentReposts} reposts`}
-              accessibilityHint="Double tap to repost this"
-            >
-              <Repeat
-                size={16}
-                color={isReposted ? COLORS.success : COLORS.textSecondary}
-              />
-              <Text style={[
-                styles.actionCount,
-                isReposted && styles.repostedText
-              ]}>
-                {currentReposts}
-              </Text>
-            </Pressable>
+
 
             <Pressable
               style={styles.action}

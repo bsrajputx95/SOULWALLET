@@ -485,10 +485,7 @@ export const copyTradingRouter = router({
       const lockKey = `copy-trade:update:${userId}`
       const { copyTradingId, ...rawUpdates } = input
 
-      if (!input.totpCode) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
-      }
-      await verifyTotpForUser(userId, input.totpCode)
+      // 2FA removed - allow updates without verification
 
       // Filter out undefined values and handle null conversion
       const updates: CopyTradingUpdateInput = {}

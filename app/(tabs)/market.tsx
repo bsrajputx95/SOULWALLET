@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -6,20 +6,14 @@ import {
   Pressable,
   ScrollView,
   RefreshControl,
-  TextInput,
   useWindowDimensions,
-  Modal,
-  Animated,
-  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Search, X, Settings, Plus } from 'lucide-react-native';
 
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { useMarket } from '../../hooks/market-store';
-import { parseFilterValue } from '../../types/market-filters';
 
 // Import TokenCard
 import { TokenCard } from '../../components/TokenCard';
@@ -36,14 +30,8 @@ export default function MarketScreen() {
   const {
     tokens,
     isLoading,
-    activeFilters,
-    toggleFilter,
     searchQuery,
-    setSearchQuery,
     refetch,
-    setAdvancedFilters,
-    clearFilters,
-    activeFilterCount,
     hasMore,
     loadMore,
     totalCount,
@@ -56,25 +44,6 @@ export default function MarketScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<MarketTab>('soulmarket');
-  const [showFilters, setShowFilters] = useState(false);
-  const [showSearchBar, setShowSearchBar] = useState(false);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
-
-  // Advanced filter states
-  const [minLiquidity, setMinLiquidity] = useState('');
-  const [maxLiquidity, setMaxLiquidity] = useState('');
-  const [minMarketCap, setMinMarketCap] = useState('');
-  const [maxMarketCap, setMaxMarketCap] = useState('');
-  const [minFDV, setMinFDV] = useState('');
-  const [maxFDV, setMaxFDV] = useState('');
-  const [pairFilter, setPairFilter] = useState('');
-  const [minAge, setMinAge] = useState('');
-  const [maxAge, setMaxAge] = useState('');
-  const [min24hTxns, setMin24hTxns] = useState('');
-  const [min24hBuys, setMin24hBuys] = useState('');
-  const [min24hSells, setMin24hSells] = useState('');
-  const [min24hVolume, setMin24hVolume] = useState('');
 
   // Loading state for skeleton - only show on initial cold start
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -88,16 +57,6 @@ export default function MarketScreen() {
     return () => clearTimeout(timer);
   }, [tokens.length]);
 
-  // Header animation constants and state
-  const HEADER_HEIGHT = 100; // Optimized height for both header and tabs
-  const SCROLL_THRESHOLD = 50; // Minimum scroll distance before hiding header
-  const SCROLL_UP_THRESHOLD = 30; // Minimum upward scroll before showing header
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const lastScrollY = useRef(0);
-  const headerTranslateY = useRef(new Animated.Value(0)).current;
-  const scrollDirection = useRef<'up' | 'down' | null>(null);
-  const headerHidden = useRef(false);
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -108,52 +67,6 @@ export default function MarketScreen() {
   // totalCount shows total filtered results, tokens shows paginated subset
   const visibleTokens = tokens;
 
-  // Handle scroll for header animation with improved behavior
-  const handleScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-    {
-      useNativeDriver: false,
-      listener: (event: any) => {
-        const currentScrollY = event.nativeEvent.contentOffset.y;
-        const scrollDiff = currentScrollY - lastScrollY.current;
-        const currentDirection = scrollDiff > 0 ? 'down' : 'up';
-
-        // Only trigger animation if scroll direction changed or significant scroll distance
-        if (currentDirection !== scrollDirection.current || Math.abs(scrollDiff) > 5) {
-          scrollDirection.current = currentDirection;
-
-          if (currentDirection === 'down' && currentScrollY > SCROLL_THRESHOLD) {
-            // Hide header when scrolling down past threshold (only if not already hidden)
-            if (!headerHidden.current) {
-              Animated.timing(headerTranslateY, {
-                toValue: -HEADER_HEIGHT,
-                duration: 220,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-              }).start(() => { headerHidden.current = true; setIsHeaderHidden(true); });
-            }
-          } else if (currentDirection === 'up' && scrollDiff < -SCROLL_UP_THRESHOLD) {
-            // Show header only when scrolling up with sufficient momentum (only if hidden)
-            if (headerHidden.current) {
-              Animated.timing(headerTranslateY, {
-                toValue: 0,
-                duration: 220,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-              }).start(() => { headerHidden.current = false; setIsHeaderHidden(false); });
-            }
-
-            // Auto-close search bar when user scrolls up to reclaim space
-            if (showSearchBar) {
-              setShowSearchBar(false);
-            }
-          }
-        }
-
-        lastScrollY.current = currentScrollY;
-      },
-    }
-  );
   const renderTabContent = () => {
     switch (activeTab) {
       case 'soulmarket':
@@ -279,26 +192,6 @@ export default function MarketScreen() {
               <Text style={styles.dropdownIcon}>▼</Text>
             </Pressable>
           </View>
-
-          <View style={styles.headerButtons}>
-            <Pressable
-              style={styles.filterButton}
-              onPress={() => setShowSearchBar(!showSearchBar)}
-            >
-              <Search size={24} color={COLORS.solana} />
-            </Pressable>
-            <Pressable
-              style={styles.filterButton}
-              onPress={() => setShowFilters(!showFilters)}
-            >
-              <Settings size={24} color={COLORS.solana} />
-              {activeFilterCount > 0 && (
-                <View style={styles.filterBadge}>
-                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-                </View>
-              )}
-            </Pressable>
-          </View>
         </View>
 
         {/* Tabs Section */}
@@ -400,173 +293,6 @@ export default function MarketScreen() {
           </ScrollView>
         </View>
       </View>
-      {showSearchBar && (
-        <View style={[
-          styles.filtersContainer,
-          {
-            paddingHorizontal: responsivePadding,
-            marginTop: SPACING.s,
-            marginBottom: SPACING.s,
-          }
-        ]}>
-          <View style={styles.searchContainer}>
-            <Search size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search tokens..."
-              placeholderTextColor={COLORS.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')}>
-                <X size={20} color={COLORS.textSecondary} />
-              </Pressable>
-            )}
-          </View>
-        </View>
-      )}
-
-      {showFilters && (
-        <View style={[styles.filtersContainer, { paddingHorizontal: responsivePadding, marginTop: SPACING.s }]}>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterChipsContainer}
-          >
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('volume') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('volume')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('volume') && styles.activeFilterChipText,
-              ]}>
-                Volume {'>'}$1M
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('liquidity') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('liquidity')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('liquidity') && styles.activeFilterChipText,
-              ]}>
-                Liquidity {'>'}$500K
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('buysRatio') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('buysRatio')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('buysRatio') && styles.activeFilterChipText,
-              ]}>
-                Buys {'>'}60%
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('txns') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('txns')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('txns') && styles.activeFilterChipText,
-              ]}>
-                Txns {'>'}500
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('priceChange') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('priceChange')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('priceChange') && styles.activeFilterChipText,
-              ]}>
-                Change {'>'}5%
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('change') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('change')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('change') && styles.activeFilterChipText,
-              ]}>
-                24h Gainers
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('age') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('age')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('age') && styles.activeFilterChipText,
-              ]}>
-                New Listings
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.filterChip,
-                activeFilters.includes('verified') && styles.activeFilterChip,
-              ]}
-              onPress={() => toggleFilter('verified')}
-            >
-              <Text style={[
-                styles.filterChipText,
-                activeFilters.includes('verified') && styles.activeFilterChipText,
-              ]}>
-                Verified Only
-              </Text>
-            </Pressable>
-
-
-
-            <Pressable
-              style={styles.addFilterChip}
-              onPress={() => setShowAdvancedFilters(true)}
-            >
-              <Plus size={16} color={COLORS.solana} />
-              <Text style={styles.addFilterText}>Advanced Filters</Text>
-            </Pressable>
-          </ScrollView>
-        </View>
-      )}
 
       <ErrorBoundary>
         <ScrollView
@@ -579,7 +305,6 @@ export default function MarketScreen() {
             }
           ]}
           showsVerticalScrollIndicator={false}
-          onScroll={handleScroll}
           scrollEventThrottle={16}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -588,231 +313,6 @@ export default function MarketScreen() {
           {renderTabContent()}
         </ScrollView>
       </ErrorBoundary>
-
-      {/* Advanced Filters Modal */}
-      <Modal
-        visible={showAdvancedFilters}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowAdvancedFilters(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContainer, { width: width * 0.95, maxWidth: 400 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Advanced Filters</Text>
-              <Pressable onPress={() => setShowAdvancedFilters(false)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </Pressable>
-            </View>
-
-            <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-              {/* Liquidity */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Liquidity</Text>
-                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Min (e.g. 500M)"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={minLiquidity}
-                    onChangeText={setMinLiquidity}
-                  />
-                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Max"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={maxLiquidity}
-                    onChangeText={setMaxLiquidity}
-                  />
-                </View>
-              </View>
-
-              {/* Market Cap */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Market Cap</Text>
-                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Min (e.g. 1B)"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={minMarketCap}
-                    onChangeText={setMinMarketCap}
-                  />
-                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Max"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={maxMarketCap}
-                    onChangeText={setMaxMarketCap}
-                  />
-                </View>
-              </View>
-
-              {/* FDV */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>FDV (Fully Diluted Valuation)</Text>
-                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Min (e.g. 100M)"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={minFDV}
-                    onChangeText={setMinFDV}
-                  />
-                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Max"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={maxFDV}
-                    onChangeText={setMaxFDV}
-                  />
-                </View>
-              </View>
-
-              {/* Pair */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Pair</Text>
-                <TextInput
-                  style={styles.fullWidthInput}
-                  placeholder="e.g. SOL, USDC, ETH"
-                  placeholderTextColor={COLORS.textSecondary}
-                  value={pairFilter}
-                  onChangeText={setPairFilter}
-                />
-              </View>
-
-              {/* Age */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Age (hours)</Text>
-                <View style={[styles.rangeInputContainer, styles.rangeInputColumn]}>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Min (e.g. 24)"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={minAge}
-                    onChangeText={setMinAge}
-                    keyboardType="numeric"
-                  />
-                  <Text style={[styles.rangeSeparator, styles.rangeSeparatorColumn]}>-</Text>
-                  <TextInput
-                    style={styles.rangeInput}
-                    placeholder="Max"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={maxAge}
-                    onChangeText={setMaxAge}
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-
-              {/* 24h Transactions */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>24h Transactions</Text>
-                <TextInput
-                  style={styles.fullWidthInput}
-                  placeholder="Min transactions (e.g. 1000)"
-                  placeholderTextColor={COLORS.textSecondary}
-                  value={min24hTxns}
-                  onChangeText={setMin24hTxns}
-                  keyboardType="numeric"
-                />
-              </View>
-
-              {/* 24h Buys */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>24h Buys</Text>
-                <TextInput
-                  style={styles.fullWidthInput}
-                  placeholder="Min buys (e.g. 500)"
-                  placeholderTextColor={COLORS.textSecondary}
-                  value={min24hBuys}
-                  onChangeText={setMin24hBuys}
-                  keyboardType="numeric"
-                />
-              </View>
-
-              {/* 24h Sells */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>24h Sells</Text>
-                <TextInput
-                  style={styles.fullWidthInput}
-                  placeholder="Min sells (e.g. 300)"
-                  placeholderTextColor={COLORS.textSecondary}
-                  value={min24hSells}
-                  onChangeText={setMin24hSells}
-                  keyboardType="numeric"
-                />
-              </View>
-
-              {/* 24h Volume */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>24h Volume</Text>
-                <TextInput
-                  style={styles.fullWidthInput}
-                  placeholder="Min volume (e.g. 1M)"
-                  placeholderTextColor={COLORS.textSecondary}
-                  value={min24hVolume}
-                  onChangeText={setMin24hVolume}
-                />
-              </View>
-
-              <View style={styles.modalButtons}>
-                <Pressable
-                  style={styles.clearButton}
-                  onPress={() => {
-                    // Clear local state
-                    setMinLiquidity('');
-                    setMaxLiquidity('');
-                    setMinMarketCap('');
-                    setMaxMarketCap('');
-                    setMinFDV('');
-                    setMaxFDV('');
-                    setPairFilter('');
-                    setMinAge('');
-                    setMaxAge('');
-                    setMin24hTxns('');
-                    setMin24hBuys('');
-                    setMin24hSells('');
-                    setMin24hVolume('');
-                    // Clear store filters
-                    clearFilters();
-                  }}
-                >
-                  <Text style={styles.clearButtonText}>Clear All</Text>
-                </Pressable>
-
-                <Pressable
-                  style={styles.applyButton}
-                  onPress={() => {
-                    // Apply advanced filters to market store
-                    setAdvancedFilters({
-                      minLiquidity: parseFilterValue(minLiquidity),
-                      maxLiquidity: parseFilterValue(maxLiquidity),
-                      minMarketCap: parseFilterValue(minMarketCap),
-                      maxMarketCap: parseFilterValue(maxMarketCap),
-                      minFDV: parseFilterValue(minFDV),
-                      maxFDV: parseFilterValue(maxFDV),
-                      minAgeHours: parseFilterValue(minAge),
-                      maxAgeHours: parseFilterValue(maxAge),
-                      min24hTxns: parseFilterValue(min24hTxns),
-                      min24hBuys: parseFilterValue(min24hBuys),
-                      min24hSells: parseFilterValue(min24hSells),
-                      minVolume24h: parseFilterValue(min24hVolume),
-                      pairToken: pairFilter.trim() || undefined,
-                    });
-                    setShowAdvancedFilters(false);
-                  }}
-                >
-                  <Text style={styles.applyButtonText}>Apply Filters</Text>
-                </Pressable>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }

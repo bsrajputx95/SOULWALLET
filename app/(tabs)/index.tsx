@@ -16,9 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, Copy, QrCode, Send, ArrowUpDown, ChevronDown, Search } from 'lucide-react-native';
+import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, ArrowUpDown, ChevronDown, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Clipboard from 'expo-clipboard';
 
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
@@ -53,7 +52,8 @@ export default function HomeScreen() {
   const {
     wallet: solanaWallet,
     publicKey: solanaPublicKey,
-    getAvailableTokens
+    getAvailableTokens,
+    executeSwap
   } = useSolanaWallet();
 
   // ✅ Fetch user profile for profile image
@@ -196,8 +196,6 @@ export default function HomeScreen() {
   const [coinsSearchQuery, setCoinsSearchQuery] = React.useState('');
   const [tradersSearchQuery, setTradersSearchQuery] = React.useState('');
   const [debouncedTradersSearch, setDebouncedTradersSearch] = React.useState('');
-  const [coinsTimeFilter, setCoinsTimeFilter] = React.useState<'1h' | '1d' | '7d' | '1m' | '1y'>('1d');
-  const [tradersTimeFilter, setTradersTimeFilter] = React.useState<'1d' | '7d' | '1m' | '1y'>('1d');
 
   // ✅ Debounced search for real-time market search
   const [debouncedCoinsSearch, setDebouncedCoinsSearch] = React.useState('');
@@ -273,16 +271,10 @@ export default function HomeScreen() {
   const [showReceiveModal, setShowReceiveModal] = React.useState(false);
   const [showSwapModal, setShowSwapModal] = React.useState(false);
 
-  // Send form state
-  const [sendAddress, setSendAddress] = React.useState('');
-  const [sendAmount, setSendAmount] = React.useState('');
-  const [selectedToken, setSelectedToken] = React.useState('SOL');
-  const [showSendTokenDropdown, setShowSendTokenDropdown] = React.useState(false);
-  const [sendTokenSearch, setSendTokenSearch] = React.useState('');
 
-  // Swap form state
-  const [fromToken, setFromToken] = React.useState('SOL');
-  const [toToken, setToToken] = React.useState('USDC');
+  // Swap form state - use mint addresses for any token
+  const [fromToken, setFromToken] = React.useState('So11111111111111111111111111111111111111112'); // SOL
+  const [toToken, setToToken] = React.useState('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'); // USDC
   const [swapAmount, setSwapAmount] = React.useState('');
   const [estimatedOutput, setEstimatedOutput] = React.useState('0.00');
   const [showFromTokenDropdown, setShowFromTokenDropdown] = React.useState(false);
@@ -290,9 +282,6 @@ export default function HomeScreen() {
   const [fromTokenSearch, setFromTokenSearch] = React.useState('');
   const [toTokenSearch, setToTokenSearch] = React.useState('');
   const [slippage, setSlippage] = React.useState(0.5);
-
-  // Use real Solana wallet address or demo address
-  const walletAddress = solanaPublicKey || user?.walletAddress || 'DemoWallet1234567890abcdef1234567890abcdef12345678';
 
   // Available tokens for dropdowns - use real Solana tokens if wallet is connected
   const availableTokens = React.useMemo(() => {
@@ -324,11 +313,6 @@ export default function HomeScreen() {
     await refetch();
     setRefreshing(false);
   }, [refetch]);
-
-  const handleCopyAddress = async () => {
-    await Clipboard.setStringAsync(walletAddress);
-    Alert.alert('Copied!', 'Wallet address copied to clipboard');
-  };
 
   // Validate Solana address
   const validateSolanaAddress = (address: string): boolean => {
@@ -383,37 +367,7 @@ export default function HomeScreen() {
     return true;
   };
 
-  const handleSend = () => {
-    const amt = parseFloat(sendAmount);
-    if (!sendAddress || !sendAmount || isNaN(amt) || amt <= 0) {
-      Alert.alert('Error', 'Enter a valid address and positive amount');
-      return;
-    }
-    if (!validateSolanaAddress(sendAddress)) {
-      Alert.alert('Invalid Address', 'Please enter a valid Solana wallet address');
-      return;
-    }
-
-    Alert.alert(
-      'Confirm Transaction',
-      `Send ${sendAmount} ${selectedToken} to ${sendAddress.slice(0, 8)}...${sendAddress.slice(-8)}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          onPress: () => {
-            if (__DEV__) console.log('Sending:', { sendAddress, sendAmount, selectedToken });
-            setShowSendModal(false);
-            setSendAddress('');
-            setSendAmount('');
-            Alert.alert('Success', 'Transaction sent successfully!');
-          }
-        }
-      ]
-    );
-  };
-
-  const handleSwap = () => {
+  const handleSwap = async () => {
     // Validate inputs
     const amount = parseFloat(swapAmount);
     if (!swapAmount || isNaN(amount) || amount <= 0) {
@@ -421,23 +375,48 @@ export default function HomeScreen() {
       return;
     }
 
-    // Check balance
-    const fromTokenData = availableTokens.find(t => t.symbol === fromToken);
-    if (fromTokenData && fromTokenData.balance < amount) {
-      Alert.alert('Insufficient Balance', `You don't have enough ${fromToken}. Balance: ${fromTokenData.balance.toFixed(6)}`);
+    // Validate token mint addresses
+    if (!fromToken || !validateSolanaAddress(fromToken)) {
+      Alert.alert('Invalid Token', 'From token address is invalid');
+      return;
+    }
+    if (!toToken || !validateSolanaAddress(toToken)) {
+      Alert.alert('Invalid Token', 'To token address is invalid');
       return;
     }
 
-    // Trade now done via Market tab WebView
-    setShowSwapModal(false);
-    Alert.alert(
-      'Trade via Market Tab',
-      `To swap ${fromToken} to ${toToken}, go to Market tab and use DexScreener or Raydium.`,
-      [
-        { text: 'Go to Market', onPress: () => router.push('/(tabs)/market') },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    // Check balance
+    const fromTokenData = availableTokens.find(t => t.mint === fromToken);
+    if (fromTokenData && fromTokenData.balance < amount) {
+      Alert.alert('Insufficient Balance', `You don't have enough. Balance: ${fromTokenData.balance.toFixed(6)}`);
+      return;
+    }
+
+    try {
+      if (!solanaWallet) {
+        Alert.alert('Error', 'Wallet not connected');
+        return;
+      }
+
+      // Get decimals for amount conversion
+      const fromDecimals = fromTokenData?.decimals || 9;
+      const amountInSmallestUnit = Math.floor(amount * Math.pow(10, fromDecimals));
+
+      // Execute real swap via Jupiter
+      const result = await executeSwap({
+        inputMint: fromToken,
+        outputMint: toToken,
+        amount: amountInSmallestUnit,
+        slippageBps: Math.round(slippage * 100), // Convert 0.5% to 50 bps
+        expectedOutputAmount: parseFloat(estimatedOutput),
+      });
+
+      Alert.alert('Swap Successful!', `Transaction: ${result.signature.slice(0, 8)}...`);
+      setShowSwapModal(false);
+      setSwapAmount('');
+    } catch (error: any) {
+      Alert.alert('Swap Failed', error.message || 'Failed to execute swap');
+    }
   };
 
   const handleBuy = () => {
@@ -493,43 +472,17 @@ export default function HomeScreen() {
                       onChangeText={setCoinsSearchQuery}
                       testID="coins-search-input"
                     />
-                    <TouchableOpacity
-                      style={styles.timeCycleButton}
-                      onPress={() => {
-                        const periods: ('1h' | '1d' | '7d' | '1m' | '1y')[] = ['1h', '1d', '7d', '1m', '1y'];
-                        const currentIndex = periods.indexOf(coinsTimeFilter);
-                        const nextIndex = (currentIndex + 1) % periods.length;
-                        const nextPeriod = periods[nextIndex];
-                        if (nextPeriod) setCoinsTimeFilter(nextPeriod);
-                      }}
-                    >
-                      <Text style={styles.timeCycleText}>{coinsTimeFilter.toUpperCase()}</Text>
-                    </TouchableOpacity>
                   </View>
-
                 </View>
               </View>
 
 
 
-              {/* Comment 3: Display skeleton list while loading instead of spinner */}
+              {/* Loading state */}
               {isLoadingCoins ? (
-                <View style={styles.skeletonContainer}>
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <View key={i} style={styles.skeletonCard}>
-                      <View style={styles.skeletonLeft}>
-                        <View style={styles.skeletonAvatar} />
-                        <View style={styles.skeletonTextContainer}>
-                          <View style={styles.skeletonTextLarge} />
-                          <View style={styles.skeletonTextSmall} />
-                        </View>
-                      </View>
-                      <View style={styles.skeletonRight}>
-                        <View style={styles.skeletonTextMedium} />
-                        <View style={styles.skeletonTextSmall} />
-                      </View>
-                    </View>
-                  ))}
+                <View style={styles.loadingContainer}>
+                  <RefreshCw size={32} color={COLORS.primary} />
+                  <Text style={styles.loadingText}>Loading coins...</Text>
                 </View>
               ) : displayCoins.length === 0 ? (
                 <View style={styles.emptyContainer}>
@@ -544,47 +497,33 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               ) : (
-                displayCoins.map((coin: any) => {
-                  // Select the correct price change based on time filter
-                  const getChangeForPeriod = () => {
-                    switch (coinsTimeFilter) {
-                      case '1h': return coin.change1h || 0;
-                      case '1d': return coin.change24h || 0;
-                      case '7d': return coin.change7d || coin.change24h || 0;
-                      case '1m': return (coin.change24h || 0) * 2; // Estimated
-                      case '1y': return (coin.change24h || 0) * 5; // Estimated
-                      default: return coin.change24h || 0;
-                    }
-                  };
-
-                  return (
-                    <TokenCard
-                      key={coin.id}
-                      symbol={coin.symbol}
-                      name={coin.name}
-                      price={coin.price}
-                      change={getChangeForPeriod()}
-                      liquidity={coin.liquidity}
-                      volume={coin.volume24h}
-                      transactions={coin.transactions}
-                      {...(coin.logo ? { logo: coin.logo } : {})}
-                      onPress={() => {
-                        // Navigate with token data to ensure consistency
-                        router.push({
-                          pathname: `/coin/${coin.symbol.toLowerCase()}`,
-                          params: {
-                            price: coin.price.toString(),
-                            change: getChangeForPeriod().toString(),
-                            logo: coin.logo || '',
-                            contractAddress: coin.contractAddress || '',
-                            pairAddress: coin.pairAddress || '',
-                            name: coin.name,
-                          }
-                        });
-                      }}
-                    />
-                  );
-                })
+                displayCoins.map((coin: any) => (
+                  <TokenCard
+                    key={coin.id}
+                    symbol={coin.symbol}
+                    name={coin.name}
+                    price={coin.price}
+                    change={coin.change24h || 0}
+                    liquidity={coin.liquidity}
+                    volume={coin.volume24h}
+                    transactions={coin.transactions}
+                    {...(coin.logo ? { logo: coin.logo } : {})}
+                    onPress={() => {
+                      // Navigate with token data to ensure consistency
+                      router.push({
+                        pathname: `/coin/${coin.symbol.toLowerCase()}`,
+                        params: {
+                          price: coin.price.toString(),
+                          change: (coin.change24h || 0).toString(),
+                          logo: coin.logo || '',
+                          contractAddress: coin.contractAddress || '',
+                          pairAddress: coin.pairAddress || '',
+                          name: coin.name,
+                        }
+                      });
+                    }}
+                  />
+                ))
               )}
             </View>
           </ErrorBoundary>
@@ -606,20 +545,7 @@ export default function HomeScreen() {
                       onChangeText={setTradersSearchQuery}
                       testID="traders-search-input"
                     />
-                    <TouchableOpacity
-                      style={styles.timeCycleButton}
-                      onPress={() => {
-                        const periods: ('1d' | '7d' | '1m' | '1y')[] = ['1d', '7d', '1m', '1y'];
-                        const currentIndex = periods.indexOf(tradersTimeFilter);
-                        const nextIndex = (currentIndex + 1) % periods.length;
-                        const nextPeriod = periods[nextIndex];
-                        if (nextPeriod) setTradersTimeFilter(nextPeriod);
-                      }}
-                    >
-                      <Text style={styles.timeCycleText}>{tradersTimeFilter.toUpperCase()}</Text>
-                    </TouchableOpacity>
                   </View>
-
                 </View>
               </View>
 
@@ -1091,181 +1017,6 @@ export default function HomeScreen() {
                 </LinearGradient>
               </TouchableOpacity>
             </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Send Modal */}
-      <Modal
-        visible={showSendModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowSendModal(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowSendModal(false)} accessibilityRole="button" accessibilityLabel="Dismiss send modal">
-          <Pressable style={[styles.modalContainer, { width: width * 0.9, maxWidth: 400 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Send SOL</Text>
-              <TouchableOpacity onPress={() => setShowSendModal(false)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalContent}>
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Token</Text>
-                <TouchableOpacity
-                  style={styles.dropdownButton}
-                  onPress={() => setShowSendTokenDropdown(!showSendTokenDropdown)}
-                >
-                  <View style={styles.dropdownButtonContent}>
-                    <View style={styles.tokenInfo}>
-                      {availableTokens.find(t => t.symbol === selectedToken)?.logo && (
-                        <Image
-                          source={{ uri: availableTokens.find(t => t.symbol === selectedToken)?.logo }}
-                          style={styles.tokenLogo}
-                        />
-                      )}
-                      <Text style={styles.dropdownButtonText}>
-                        {selectedToken} {availableTokens.find(t => t.symbol === selectedToken)?.balance ? `(${availableTokens.find(t => t.symbol === selectedToken)?.balance?.toFixed(4)})` : ''}
-                      </Text>
-                    </View>
-                    <ChevronDown size={20} color={COLORS.textSecondary} />
-                  </View>
-                </TouchableOpacity>
-
-                {showSendTokenDropdown && (
-                  <View style={styles.dropdownContainer}>
-                    <View style={styles.modalSearchContainer}>
-                      <Search size={16} color={COLORS.textSecondary} />
-                      <TextInput
-                        style={styles.modalSearchInput}
-                        placeholder="Search tokens..."
-                        placeholderTextColor={COLORS.textSecondary}
-                        value={sendTokenSearch}
-                        onChangeText={setSendTokenSearch}
-                      />
-                    </View>
-                    <ScrollView style={styles.dropdownList} showsVerticalScrollIndicator={false}>
-                      {getFilteredTokens(sendTokenSearch).map((token) => (
-                        <TouchableOpacity
-                          key={token.symbol}
-                          style={styles.dropdownItem}
-                          onPress={() => {
-                            setSelectedToken(token.symbol);
-                            setShowSendTokenDropdown(false);
-                            setSendTokenSearch('');
-                          }}
-                        >
-                          <View style={styles.tokenInfo}>
-                            {token.logo && (
-                              <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
-                            )}
-                            <View>
-                              <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                              <Text style={styles.tokenName}>{token.name}</Text>
-                            </View>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Recipient Address</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter Solana address..."
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={sendAddress}
-                    onChangeText={setSendAddress}
-                    multiline
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Amount</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="0.00"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={sendAmount}
-                    onChangeText={setSendAmount}
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.inputSuffix}>{selectedToken}</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleSend}
-              >
-                <LinearGradient
-                  colors={[COLORS.solana, COLORS.solana + '80']}
-                  style={styles.actionGradient}
-                >
-                  <Send size={20} color={COLORS.textPrimary} />
-                  <Text style={styles.actionText}>SEND</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Receive Modal */}
-      <Modal
-        visible={showReceiveModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowReceiveModal(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowReceiveModal(false)} accessibilityRole="button" accessibilityLabel="Dismiss receive modal">
-          <Pressable style={[styles.modalContainer, { width: width * 0.9, maxWidth: 400 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Receive SOL</Text>
-              <TouchableOpacity onPress={() => setShowReceiveModal(false)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalContent}>
-              <Text style={styles.modalDescription}>
-                Share this address to receive SOL and Solana tokens
-              </Text>
-
-              <View style={styles.qrContainer}>
-                <View style={styles.qrPlaceholder}>
-                  <QrCode size={120} color={COLORS.solana} />
-                </View>
-              </View>
-
-              <View style={styles.addressContainer}>
-                <Text style={styles.addressLabel}>Your Solana Address</Text>
-                <View style={styles.addressBox}>
-                  <Text style={styles.addressText}>{walletAddress}</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleCopyAddress}
-              >
-                <LinearGradient
-                  colors={[COLORS.solana, COLORS.solana + '80']}
-                  style={styles.actionGradient}
-                >
-                  <Copy size={20} color={COLORS.textPrimary} />
-                  <Text style={styles.actionText}>COPY ADDRESS</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
           </Pressable>
         </Pressable>
       </Modal>

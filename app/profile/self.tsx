@@ -152,7 +152,7 @@ export default function SelfProfileScreen() {
               content={post.content}
               images={post.images}
               comments={post.commentsCount || 0}
-              reposts={post.repostsCount || 0}
+
               likes={post.likesCount || 0}
               timestamp={new Date(post.createdAt).toLocaleString()}
               mentionedToken={post.mentionedTokenSymbol || post.mentionedTokenName}

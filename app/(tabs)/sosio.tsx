@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,11 +13,10 @@ import {
   Easing,
   Alert,
   Image,
-  ActivityIndicator,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Settings, Search, X, Plus, Link, ShoppingBag, Bell } from 'lucide-react-native';
+import { Settings, Search, X, Plus, Link, ShoppingBag } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../../constants/colors';
@@ -34,7 +33,7 @@ import { useRouter } from 'expo-router';
 import { trpc } from '../../lib/trpc'
 import { useSolanaWallet } from '../../hooks/solana-wallet-store'
 
-type FeedTab = 'forYou' | 'feed' | 'following' | 'notifications' | 'vip';
+type FeedTab = 'forYou' | 'following';
 
 export default function SosioScreen() {
   const router = useRouter();
@@ -137,27 +136,17 @@ export default function SosioScreen() {
     refetchInterval: 30000,
   });
 
-  // ✅ Notifications query
-  const notificationsQuery = trpc.social.getNotifications.useQuery(
-    { limit: 20 },
-    {
-      enabled: activeTab === 'notifications',
-      refetchInterval: 30000,
-    }
-  );
+
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await feedQuery.refetch();
-      if (activeTab === 'notifications') {
-        await notificationsQuery.refetch();
-      }
     } catch (error) {
       console.error('[Sosio] Refresh error:', error);
     }
     setRefreshing(false);
-  }, [feedQuery, notificationsQuery, activeTab]);
+  }, [feedQuery, activeTab]);
 
   // Removed auto-hide header behavior on scroll; only tabs hide/show smoothly
   const handleTabsScroll = Animated.event(
@@ -198,13 +187,16 @@ export default function SosioScreen() {
     },
   });
 
-  // Unread notifications count for badge
-  const unreadCount = useMemo(() => {
-    return notificationsQuery.data?.filter((n: any) => !n.isRead).length || 0;
-  }, [notificationsQuery.data]);
+
 
   const handleCreatePost = async () => {
     if (!postContent.trim()) return;
+
+    // Validate token address if mentionToken is true
+    if (mentionToken && !tokenAddress.trim()) {
+      Alert.alert('Token Address Required', 'Please enter the token contract address when mentioning a token.');
+      return;
+    }
 
     try {
       // Map visibility to PostVisibility enum
@@ -240,14 +232,9 @@ export default function SosioScreen() {
     // Map tabs to feed types
     if (tab === 'forYou') {
       setActiveFeed('forYou');
-    } else if (tab === 'feed') {
-      setActiveFeed('all');
     } else if (tab === 'following') {
       setActiveFeed('following');
-    } else if (tab === 'vip') {
-      setActiveFeed('vip');
     }
-    // notifications tab doesn't change activeFeed
   };
 
   return (
@@ -335,21 +322,6 @@ export default function SosioScreen() {
           <Pressable
             style={[
               styles.tab,
-              activeTab === 'feed' && styles.activeTab,
-            ]}
-            onPress={() => handleTabChange('feed')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'feed' && styles.activeTabText,
-            ]}>
-              Feed
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.tab,
               activeTab === 'following' && styles.activeTab,
             ]}
             onPress={() => handleTabChange('following')}
@@ -361,300 +333,191 @@ export default function SosioScreen() {
               Following
             </Text>
           </Pressable>
-
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'notifications' && styles.activeTab,
-            ]}
-            onPress={() => handleTabChange('notifications')}
-          >
-            <View style={styles.notificationTabContent}>
-              <Bell size={16} color={activeTab === 'notifications' ? COLORS.solana : COLORS.textSecondary} />
-              <Text style={[
-                styles.tabText,
-                activeTab === 'notifications' && styles.activeTabText,
-                { marginLeft: 4 }
-              ]}>
-                Notifications
-              </Text>
-              {unreadCount > 0 && (
-                <View style={styles.notificationBadge}>
-                  <Text style={styles.notificationBadgeText}>
-                    {unreadCount > 99 ? '99+' : unreadCount}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'vip' && styles.activeTab,
-            ]}
-            onPress={() => handleTabChange('vip')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'vip' && styles.activeTabText,
-            ]}>
-              VIP
-            </Text>
-          </Pressable>
         </ScrollView>
       </Animated.View>
 
       {/* Main Content - FlatList for infinite scroll */}
-      {activeTab === 'notifications' ? (
-        // Notifications Tab Content
-        <FlatList
-          style={styles.content}
-          contentContainerStyle={[
-            styles.contentContainer,
-            {
-              paddingHorizontal: responsivePadding,
-              paddingBottom: bottomPadding
+      <FlatList
+        style={styles.content}
+        contentContainerStyle={[
+          styles.contentContainer,
+          {
+            paddingHorizontal: responsivePadding,
+            paddingBottom: bottomPadding
+          }
+        ]}
+        data={feedQuery.data?.posts || filteredPosts}
+        keyExtractor={(item: any) => item.id}
+        ListHeaderComponent={
+          // User Search Results - shown when searching
+          searchQuery.length >= 2 && userSearchQuery.data && userSearchQuery.data.length > 0 ? (
+            <View style={styles.userSearchResults}>
+              <Text style={styles.searchResultsTitle}>Users</Text>
+              {userSearchQuery.data.map((searchUser: any) => (
+                <Pressable
+                  key={searchUser.id}
+                  style={styles.userResultItem}
+                  onPress={() => router.push(`/profile/${searchUser.username}`)}
+                >
+                  <View style={styles.userResultAvatar}>
+                    <Text style={styles.userResultAvatarText}>
+                      {searchUser.username?.charAt(0).toUpperCase() || 'U'}
+                    </Text>
+                  </View>
+                  <View style={styles.userResultInfo}>
+                    <View style={styles.userResultNameRow}>
+                      <Text style={styles.userResultUsername}>@{searchUser.username}</Text>
+                    </View>
+                    <Text style={styles.userResultFollowers}>
+                      {searchUser.followersCount} followers
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          ) : null
+        }
+        renderItem={({ item: post }: { item: any }) => {
+          // Format timestamp - handle Date objects, strings, or ISO strings
+          let formattedTimestamp = '';
+          try {
+            const timestampValue = post.timestamp || post.createdAt;
+            if (timestampValue) {
+              const date = timestampValue instanceof Date
+                ? timestampValue
+                : new Date(timestampValue);
+              if (!isNaN(date.getTime())) {
+                // Format as relative time
+                const now = new Date();
+                const diffMs = now.getTime() - date.getTime();
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffMins < 1) formattedTimestamp = 'Just now';
+                else if (diffMins < 60) formattedTimestamp = `${diffMins}m ago`;
+                else if (diffHours < 24) formattedTimestamp = `${diffHours}h ago`;
+                else if (diffDays < 7) formattedTimestamp = `${diffDays}d ago`;
+                else formattedTimestamp = date.toLocaleDateString();
+              }
             }
-          ]}
-          data={notificationsQuery.data || []}
-          keyExtractor={(item: any) => item.id}
-          renderItem={({ item: notification }: { item: any }) => (
-            <Pressable
-              style={[
-                styles.notificationItem,
-                !notification.isRead && styles.notificationUnread
-              ]}
-              onPress={() => {
-                // Navigate based on notification type
-                if (notification.postId) {
-                  router.push(`/post/${notification.postId}`);
-                } else if (notification.actorUsername) {
-                  router.push(`/profile/${notification.actorUsername}`);
+          } catch (e) {
+            formattedTimestamp = '';
+          }
+
+          return (
+            <SocialPost
+              key={post.id}
+              id={post.id}
+              username={post.username || post.user?.username}
+              profileImage={post.profileImage || post.user?.profileImage}
+              content={post.content}
+              images={post.images || []}
+              comments={post.comments || post._count?.comments || 0}
+              likes={post.likes || post._count?.likes || 0}
+              timestamp={formattedTimestamp}
+              mentionedToken={post.mentionedToken || post.mentionedTokenName}
+              mentionedTokenMint={post.mentionedTokenMint}
+              walletAddress={post.walletAddress || post.user?.walletAddress}
+              isVerified={post.isVerified || post.user?.isVerified}
+              onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
+              onCopyPress={() => {
+                const walletAddr = post.walletAddress || post.user?.walletAddress;
+                if (walletAddr) {
+                  setSelectedTrader({
+                    username: post.username || post.user?.username,
+                    walletAddress: walletAddr,
+                    profileImage: post.profileImage || post.user?.profileImage,
+                  });
+                  setShowCopyTradingModal(true);
+                } else {
+                  router.push(`/profile/${post.username || post.user?.username}`);
                 }
               }}
-            >
-              <View style={styles.notificationIcon}>
-                <Bell size={20} color={COLORS.solana} />
-              </View>
-              <View style={styles.notificationContent}>
-                <Text style={styles.notificationText}>
-                  {notification.message || `${notification.actorUsername || 'Someone'} ${notification.type === 'LIKE' ? 'liked your post' : notification.type === 'COMMENT' ? 'commented on your post' : notification.type === 'FOLLOW' ? 'started following you' : notification.type === 'REPOST' ? 'reposted your post' : 'interacted with you'}`}
-                </Text>
-                <Text style={styles.notificationTime}>
-                  {new Date(notification.createdAt).toLocaleDateString()}
-                </Text>
-              </View>
-            </Pressable>
-          )}
-          ListEmptyComponent={
-            notificationsQuery.isLoading ? (
-              <View style={styles.skeletonContainer}>
-                <SocialPostSkeleton />
-                <SocialPostSkeleton />
-                <SocialPostSkeleton />
-              </View>
-            ) : (
-              <View style={styles.emptyContainer}>
-                <Bell size={48} color={COLORS.textSecondary} />
-                <Text style={[styles.emptyText, { marginTop: 16 }]}>
-                  No notifications yet
-                </Text>
-              </View>
-            )
-          }
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          showsVerticalScrollIndicator={false}
-        />
-      ) : (
-        // Feed/Following/VIP Tab Content
-        <FlatList
-          style={styles.content}
-          contentContainerStyle={[
-            styles.contentContainer,
-            {
-              paddingHorizontal: responsivePadding,
-              paddingBottom: bottomPadding
-            }
-          ]}
-          data={feedQuery.data?.posts || filteredPosts}
-          keyExtractor={(item: any) => item.id}
-          ListHeaderComponent={
-            // User Search Results - shown when searching
-            searchQuery.length >= 2 && userSearchQuery.data && userSearchQuery.data.length > 0 ? (
-              <View style={styles.userSearchResults}>
-                <Text style={styles.searchResultsTitle}>Users</Text>
-                {userSearchQuery.data.map((searchUser: any) => (
-                  <Pressable
-                    key={searchUser.id}
-                    style={styles.userResultItem}
-                    onPress={() => router.push(`/profile/${searchUser.username}`)}
-                  >
-                    <View style={styles.userResultAvatar}>
-                      <Text style={styles.userResultAvatarText}>
-                        {searchUser.username?.charAt(0).toUpperCase() || 'U'}
-                      </Text>
-                    </View>
-                    <View style={styles.userResultInfo}>
-                      <View style={styles.userResultNameRow}>
-                        <Text style={styles.userResultUsername}>@{searchUser.username}</Text>
-                      </View>
-                      <Text style={styles.userResultFollowers}>
-                        {searchUser.followersCount} followers
-                      </Text>
-                    </View>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null
-          }
-          renderItem={({ item: post }: { item: any }) => {
-            // Format timestamp - handle Date objects, strings, or ISO strings
-            let formattedTimestamp = '';
-            try {
-              const timestampValue = post.timestamp || post.createdAt;
-              if (timestampValue) {
-                const date = timestampValue instanceof Date
-                  ? timestampValue
-                  : new Date(timestampValue);
-                if (!isNaN(date.getTime())) {
-                  // Format as relative time
-                  const now = new Date();
-                  const diffMs = now.getTime() - date.getTime();
-                  const diffMins = Math.floor(diffMs / 60000);
-                  const diffHours = Math.floor(diffMs / 3600000);
-                  const diffDays = Math.floor(diffMs / 86400000);
+              onBuyPress={async () => {
+                const tokenMint = post.mentionedTokenMint;
+                if (!tokenMint) return;
 
-                  if (diffMins < 1) formattedTimestamp = 'Just now';
-                  else if (diffMins < 60) formattedTimestamp = `${diffMins}m ago`;
-                  else if (diffHours < 24) formattedTimestamp = `${diffHours}h ago`;
-                  else if (diffDays < 7) formattedTimestamp = `${diffDays}d ago`;
-                  else formattedTimestamp = date.toLocaleDateString();
+                if (!publicKey) {
+                  Alert.alert('Connect Wallet', 'Please connect your wallet to use iBuy.', [{ text: 'OK' }]);
+                  return;
                 }
-              }
-            } catch (e) {
-              formattedTimestamp = '';
-            }
 
-            return (
-              <SocialPost
-                key={post.id}
-                id={post.id}
-                username={post.username || post.user?.username}
-                profileImage={post.profileImage || post.user?.profileImage}
-                content={post.content}
-                images={post.images || []}
-                comments={post.comments || post._count?.comments || 0}
-                reposts={post.reposts || post._count?.reposts || 0}
-                likes={post.likes || post._count?.likes || 0}
-                timestamp={formattedTimestamp}
-                mentionedToken={post.mentionedToken || post.mentionedTokenName}
-                mentionedTokenMint={post.mentionedTokenMint}
-                walletAddress={post.walletAddress || post.user?.walletAddress}
-                isVerified={post.isVerified || post.user?.isVerified}
-                onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
-                onCopyPress={() => {
-                  const walletAddr = post.walletAddress || post.user?.walletAddress;
-                  if (walletAddr) {
-                    setSelectedTrader({
-                      username: post.username || post.user?.username,
-                      walletAddress: walletAddr,
-                      profileImage: post.profileImage || post.user?.profileImage,
+                const buyAmount = ibuySettingsQuery.data?.buyAmount || 10;
+
+                if ((balance || 0) < 0.01) {
+                  Alert.alert('Low SOL Balance', 'You need at least 0.01 SOL for transaction fees.', [{ text: 'OK' }]);
+                  return;
+                }
+
+                const usdcToken = tokenBalances?.find((t: { symbol: string }) => t.symbol === 'USDC');
+                const usdcBalance = usdcToken?.uiAmount || 0;
+                if (usdcBalance < buyAmount) {
+                  Alert.alert('Insufficient USDC', `Your USDC balance (${usdcBalance.toFixed(2)}) is less than your iBuy amount (${buyAmount} USDC).`, [{ text: 'OK' }]);
+                  return;
+                }
+
+                try {
+                  const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint });
+                  const swapResult = await executeSwap(res.swapTransaction);
+                  if (swapResult?.signature) {
+                    await recordPurchaseMutation.mutateAsync({
+                      postId: post.id,
+                      tokenMint,
+                      tokenSymbol: post.mentionedToken || post.mentionedTokenName,
+                      tokenName: post.mentionedToken || post.mentionedTokenName,
+                      amountBought: swapResult.outputAmount || 0,
+                      priceInUsdc: buyAmount,
+                      transactionSig: swapResult.signature,
                     });
-                    setShowCopyTradingModal(true);
-                  } else {
-                    router.push(`/profile/${post.username || post.user?.username}`);
+                    const amountText = swapResult.outputAmount ? ` (${swapResult.outputAmount.toFixed(4)} tokens)` : '';
+                    Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || post.mentionedTokenName || 'token'}!${amountText}`);
                   }
-                }}
-                onBuyPress={async () => {
-                  const tokenMint = post.mentionedTokenMint;
-                  if (!tokenMint) return;
-
-                  if (!publicKey) {
-                    Alert.alert('Connect Wallet', 'Please connect your wallet to use iBuy.', [{ text: 'OK' }]);
-                    return;
-                  }
-
-                  const buyAmount = ibuySettingsQuery.data?.buyAmount || 10;
-
-                  if ((balance || 0) < 0.01) {
-                    Alert.alert('Low SOL Balance', 'You need at least 0.01 SOL for transaction fees.', [{ text: 'OK' }]);
-                    return;
-                  }
-
-                  const usdcToken = tokenBalances?.find((t: { symbol: string }) => t.symbol === 'USDC');
-                  const usdcBalance = usdcToken?.uiAmount || 0;
-                  if (usdcBalance < buyAmount) {
-                    Alert.alert('Insufficient USDC', `Your USDC balance (${usdcBalance.toFixed(2)}) is less than your iBuy amount (${buyAmount} USDC).`, [{ text: 'OK' }]);
-                    return;
-                  }
-
-                  try {
-                    const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint });
-                    const swapResult = await executeSwap(res.swapTransaction);
-                    if (swapResult?.signature) {
-                      await recordPurchaseMutation.mutateAsync({
-                        postId: post.id,
-                        tokenMint,
-                        tokenSymbol: post.mentionedToken || post.mentionedTokenName,
-                        tokenName: post.mentionedToken || post.mentionedTokenName,
-                        amountBought: swapResult.outputAmount || 0,
-                        priceInUsdc: buyAmount,
-                        transactionSig: swapResult.signature,
-                      });
-                      const amountText = swapResult.outputAmount ? ` (${swapResult.outputAmount.toFixed(4)} tokens)` : '';
-                      Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || post.mentionedTokenName || 'token'}!${amountText}`);
-                    }
-                  } catch (e: any) {
-                    console.error('iBuy error:', e);
-                    Alert.alert('iBuy Failed', e.message || 'Failed to complete purchase');
-                  }
-                }}
-              />
-            );
-          }}
-          ListEmptyComponent={
-            feedQuery.isLoading ? (
-              <View style={styles.skeletonContainer}>
-                <SocialPostSkeleton />
-                <SocialPostSkeleton />
-                <SocialPostSkeleton />
-              </View>
-            ) : (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>
-                  {searchQuery
-                    ? 'No posts found matching your search.'
-                    : activeTab === 'following'
-                      ? 'Follow some traders to see their posts here.'
-                      : activeTab === 'vip'
-                        ? 'Subscribe to VIP content to see exclusive posts.'
-                        : 'No posts yet. Be the first to post!'}
-                </Text>
-              </View>
-            )
+                } catch (e: any) {
+                  console.error('iBuy error:', e);
+                  Alert.alert('iBuy Failed', e.message || 'Failed to complete purchase');
+                }
+              }}
+            />
+          );
+        }}
+        ListEmptyComponent={
+          feedQuery.isLoading ? (
+            <View style={styles.skeletonContainer}>
+              <SocialPostSkeleton />
+              <SocialPostSkeleton />
+              <SocialPostSkeleton />
+            </View>
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                {searchQuery
+                  ? 'No posts found matching your search.'
+                  : activeTab === 'following'
+                    ? 'Follow some traders to see their posts here.'
+                    : 'No posts yet. Be the first to post!'}
+              </Text>
+            </View>
+          )
+        }
+        onEndReached={() => {
+          // Infinite scroll - fetch more when reaching end
+          if (feedQuery.data?.nextCursor && !feedQuery.isFetching) {
+            // Note: Would need to implement fetchNextPage with useInfiniteQuery
+            console.log('[Sosio] Load more posts - cursor:', feedQuery.data.nextCursor);
           }
-          onEndReached={() => {
-            // Infinite scroll - fetch more when reaching end
-            if (feedQuery.data?.nextCursor && !feedQuery.isFetching) {
-              // Note: Would need to implement fetchNextPage with useInfiniteQuery
-              console.log('[Sosio] Load more posts - cursor:', feedQuery.data.nextCursor);
-            }
-          }}
-          onEndReachedThreshold={0.5}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          onScroll={handleTabsScroll}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          windowSize={10}
-        />
-      )}
+        }}
+        onEndReachedThreshold={0.5}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        onScroll={handleTabsScroll}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+      />
 
       {/* Token Bag Button */}
       <Pressable
@@ -766,7 +629,7 @@ export default function SosioScreen() {
                   </View>
 
                   <View style={styles.tokenInputWrapper}>
-                    <Text style={styles.tokenInputLabel}>Token Address (optional)</Text>
+                    <Text style={styles.tokenInputLabel}>Token Address *</Text>
                     <View style={styles.tokenInputField}>
                       <TextInput
                         style={styles.tokenTextInput}

@@ -34,7 +34,6 @@ export default function LoginNewScreen() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
-    const [rememberMe, setRememberMe] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -60,7 +59,7 @@ export default function LoginNewScreen() {
         setErrorMessage(null);
 
         try {
-            const success = await login(email.trim(), password, rememberMe);
+            const success = await login(email.trim(), password, true); // Always remember login
             if (success) {
                 router.replace('/(tabs)');
             } else {
@@ -178,25 +177,14 @@ export default function LoginNewScreen() {
                             </View>
                         </View>
 
-                        {/* Remember Me */}
-                        <View style={styles.rememberContainer}>
-                            <TouchableOpacity
-                                style={styles.rememberMeContainer}
-                                onPress={() => setRememberMe(!rememberMe)}
-                            >
-                                <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-                                    {rememberMe && <Text style={styles.checkmark}>✓</Text>}
-                                </View>
-                                <Text style={styles.rememberMeText}>Remember Me</Text>
+                        {/* Forgot Password Link */}
+                    <View style={styles.forgotPasswordContainer}>
+                        <Link href="/(auth)/forgot-password" asChild>
+                            <TouchableOpacity>
+                                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
                             </TouchableOpacity>
-
-                            <Link href="/(auth)/forgot-password" asChild>
-                                <TouchableOpacity>
-                                    <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                                </TouchableOpacity>
-                            </Link>
-                        </View>
-
+                        </Link>
+                    </View>
                         {/* Login Button */}
                         <NeonButton
                             title="Login"
@@ -328,39 +316,13 @@ const styles = StyleSheet.create({
     eyeIcon: {
         padding: 8,
     },
-    rememberContainer: {
+    forgotPasswordContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 24,
     },
-    rememberMeContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    checkbox: {
-        width: 20,
-        height: 20,
-        borderWidth: 2,
-        borderColor: COLORS.textSecondary,
-        borderRadius: 4,
-        marginRight: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    checkboxChecked: {
-        backgroundColor: COLORS.usdc,
-        borderColor: COLORS.usdc,
-    },
-    checkmark: {
-        color: COLORS.background,
-        fontSize: 14,
-        fontWeight: 'bold',
-    },
-    rememberMeText: {
-        color: COLORS.textPrimary,
-        fontSize: 14,
-    },
+    
     forgotPasswordText: {
         color: COLORS.usdc,
         fontSize: 14,
@@ -405,3 +367,4 @@ const styles = StyleSheet.create({
         opacity: 0.1,
     },
 });
+

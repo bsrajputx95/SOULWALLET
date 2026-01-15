@@ -28,6 +28,11 @@ import { queueManager } from '../lib/services/queueManager';
 import { getAllCircuitBreakerSnapshots } from '../lib/services/circuitBreaker';
 import { executionQueue } from '../lib/services/executionQueue';
 import { getCacheMetrics } from '../lib/redis';
+
+// Stub for geo-blocking - disabled for beta
+async function geoBlockMiddleware(_ip: string): Promise<void> {
+  // No-op - geo-blocking disabled for beta
+}
 // Business metrics for low-cardinality route normalization and counters
 import { normalizeRoute, getBusinessMetricsRegistry } from '../lib/metrics';
 

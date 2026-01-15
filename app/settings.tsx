@@ -17,14 +17,10 @@ import {
   Eye,
   EyeOff,
   Copy,
-  Mail,
-  Phone,
-  HelpCircle,
-  ExternalLink,
   Share2,
-  Link,
   Trash2,
   Shield,
+  ExternalLink,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 
@@ -125,57 +121,7 @@ export default function SettingsScreen() {
     }
   };
 
-  const openSupport = () => {
-    Alert.alert(
-      'Support',
-      'Choose your preferred support method:',
-      [
-        { text: 'Email Support', onPress: () => { if (__DEV__) console.log('Email support'); } },
-        { text: 'Live Chat', onPress: () => { if (__DEV__) console.log('Live chat'); } },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
-  };
 
-  const linkGmail = () => {
-    Alert.alert(
-      'Link Gmail',
-      'Enter your Gmail address to link your account:',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Link',
-          onPress: () => {
-            // In a real app, this would open a text input or OAuth flow
-            Alert.alert('Success', 'Gmail account linked successfully!');
-          },
-        },
-      ]
-    );
-  };
-
-  const linkMobile = () => {
-    Alert.alert(
-      'Link Mobile Number',
-      'Enter your mobile number to link your account:',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Link',
-          onPress: () => {
-            // In a real app, this would open a text input or SMS verification
-            Alert.alert('Success', 'Mobile number linked successfully!');
-          },
-        },
-      ]
-    );
-  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -365,24 +311,7 @@ export default function SettingsScreen() {
           </View>
         )}
 
-        {/* Account Linking Section */}
-        {hasWallet && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Account Linking</Text>
 
-            <TouchableOpacity style={styles.supportItem} onPress={linkGmail}>
-              <Mail size={20} color={COLORS.textSecondary} />
-              <Text style={styles.supportText}>Link Gmail Account</Text>
-              <Link size={16} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.supportItem} onPress={linkMobile}>
-              <Phone size={20} color={COLORS.textSecondary} />
-              <Text style={styles.supportText}>Link Mobile Number</Text>
-              <Link size={16} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          </View>
-        )}
 
         {/* Privacy & Data Section - Available to all authenticated users */}
         <View style={styles.section}>
@@ -397,30 +326,7 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Support Section */}
-        {hasWallet && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Support & Help</Text>
 
-            <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
-              <Mail size={20} color={COLORS.textSecondary} />
-              <Text style={styles.supportText}>Email Support</Text>
-              <ExternalLink size={16} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
-              <Phone size={20} color={COLORS.textSecondary} />
-              <Text style={styles.supportText}>Phone Support</Text>
-              <ExternalLink size={16} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.supportItem} onPress={openSupport}>
-              <HelpCircle size={20} color={COLORS.textSecondary} />
-              <Text style={styles.supportText}>Help Center</Text>
-              <ExternalLink size={16} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          </View>
-        )}
 
         {/* Warning */}
         {hasWallet && (

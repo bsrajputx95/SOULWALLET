@@ -300,58 +300,7 @@ export const socialRouter = router({
       return replies;
     }),
 
-  /**
-   * Repost a post
-   */
-  createRepost: protectedProcedure
-    .input(z.object({
-      postId: z.string(),
-      comment: z.string().max(500).optional(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      return await SocialService.createRepost(
-        ctx.user.id,
-        input.postId,
-        input.comment
-      );
-    }),
 
-  /**
-   * Delete a repost
-   */
-  deleteRepost: protectedProcedure
-    .input(z.object({
-      postId: z.string(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const repost = await prisma.repost.findUnique({
-        where: {
-          userId_postId: {
-            userId: ctx.user.id,
-            postId: input.postId,
-          },
-        },
-      });
-
-      if (!repost) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Repost not found',
-        });
-      }
-
-      await prisma.$transaction([
-        prisma.repost.delete({
-          where: { id: repost.id },
-        }),
-        prisma.post.update({
-          where: { id: input.postId },
-          data: { repostsCount: { decrement: 1 } },
-        }),
-      ]);
-
-      return { success: true };
-    }),
 
   /**
    * Follow or unfollow a user by userId
@@ -701,41 +650,6 @@ export const socialRouter = router({
       return suggestedUsers;
     }),
 
-  /**
-   * Get notifications
-   */
-  getNotifications: protectedProcedure
-    .input(z.object({
-      limit: z.number().min(1).max(50).default(20),
-      cursor: z.string().optional(),
-      type: z.enum(['all', 'social', 'trading']).default('all'),
-    }))
-    .query(async ({ ctx, input }) => {
-      const where: any = { userId: ctx.user!.id };
-
-      if (input.type === 'social') {
-        where.type = 'SOCIAL';
-      } else if (input.type === 'trading') {
-        where.type = { in: ['TRANSACTION', 'COPY_TRADE'] };
-      }
-
-      if (input.cursor) {
-        where.createdAt = { lt: new Date(input.cursor) };
-      }
-
-      const notifications = await prisma.notification.findMany({
-        where,
-        take: input.limit,
-        orderBy: { createdAt: 'desc' },
-      });
-
-      return {
-        notifications,
-        nextCursor: notifications.length === input.limit
-          ? notifications[notifications.length - 1]?.createdAt?.toISOString() || null
-          : null,
-      }
-    }),
 
 
   /**

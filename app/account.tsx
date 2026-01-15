@@ -6,30 +6,19 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Switch,
   Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Animated,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
-  User,
-  Mail,
-  Phone,
-  Calendar,
-  Lock,
-  Users,
-  Camera,
   Languages,
-  ShieldCheck,
   DollarSign,
   X,
-  Check,
   Trash2,
 } from 'lucide-react-native';
 
@@ -397,46 +386,34 @@ export default function AccountScreen() {
 
         </View>
 
-        {/* App Settings */}
+        {/* App Settings - Fixed Dummy Values */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>App Settings</Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Default Currency</Text>
-            <View style={styles.inputContainer}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
               <DollarSign size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="USD"
-                placeholderTextColor={COLORS.textSecondary}
-                value={defaultCurrency}
-                onChangeText={setDefaultCurrency}
-              />
+              <Text style={styles.settingText}>Default Currency</Text>
             </View>
+            <Text style={styles.settingValue}>USD</Text>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Language</Text>
-            <View style={styles.inputContainer}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
               <Languages size={20} color={COLORS.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="English"
-                placeholderTextColor={COLORS.textSecondary}
-                value={language}
-                onChangeText={setLanguage}
-              />
+              <Text style={styles.settingText}>Language</Text>
             </View>
+            <Text style={styles.settingValue}>English</Text>
           </View>
         </View>
 
 
 
-        {/* Social */}
+        {/* Social - Dummy for now */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Social</Text>
 
-          <TouchableOpacity style={styles.settingRow} onPress={handleInviteFriends}>
+          <TouchableOpacity style={styles.settingRow} onPress={() => Alert.alert('Invite Friends', 'This feature is coming soon!')}>
             <View style={styles.settingLeft}>
               <Users size={20} color={COLORS.textSecondary} />
               <Text style={styles.settingText}>Invite Friends</Text>
@@ -707,6 +684,11 @@ const styles = StyleSheet.create({
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 24,
+  },
+  settingValue: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
   },
   bottomPadding: {
     height: 40,

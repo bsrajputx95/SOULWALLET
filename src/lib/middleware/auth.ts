@@ -538,3 +538,13 @@ export async function securityHeadersPlugin(fastify: any) {
     }
   });
 }
+
+/**
+ * Stub function for TOTP verification - disabled for beta
+ * 2FA feature was removed as part of simplification
+ */
+export async function verifyTotpForUser(_userId: string, _code: string): Promise<void> {
+  // No-op stub - 2FA disabled for beta
+  // In production, this would verify TOTP codes
+}
+

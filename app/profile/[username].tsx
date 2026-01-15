@@ -471,7 +471,6 @@ export default function UserProfileScreen() {
                     content={post.content}
                     images={post.images}
                     comments={post.commentsCount || post.comments || 0}
-                    reposts={post.repostsCount || post.reposts || 0}
                     likes={post.likesCount || post.likes || 0}
                     timestamp={post.createdAt ? new Date(post.createdAt).toLocaleString() : post.timestamp}
                     mentionedToken={post.mentionedTokenSymbol || post.mentionedTokenName || post.mentionedToken}

@@ -13,8 +13,8 @@ const passwordSchema = z
   .min(8, 'Password must be at least 8 characters')
   .max(128, 'Password must be less than 128 characters')
   .regex(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
-    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
+    'Password must contain at least one uppercase letter, one lowercase letter, and one special character'
   );
 
 // Username validation
@@ -144,3 +144,4 @@ export type PaginationInput = z.infer<typeof paginationSchema>;
 export type SessionActivityFilterInput = z.infer<typeof sessionActivityFilterSchema>;
 export type LoginHistoryFilterInput = z.infer<typeof loginHistoryFilterSchema>;
 export type SessionManagementInput = z.infer<typeof sessionManagementSchema>;
+

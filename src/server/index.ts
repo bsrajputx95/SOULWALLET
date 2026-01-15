@@ -7,7 +7,7 @@ import { authRouter } from './routers/auth';
 import { walletRouter } from './routers/wallet';
 import { swapRouter } from './routers/swap';
 import { transactionRouter } from './routers/transaction';
-import { contactRouter } from './routers/contact';
+
 import { portfolioRouter } from './routers/portfolio';
 import { systemRouter } from './routers/system';
 import { copyTradingRouter } from './routers/copyTrading';
@@ -16,10 +16,6 @@ import { userRouter } from './routers/user';
 import { socialRouter } from './routers/social';
 import { tradersRouter } from './routers/traders';
 import { accountRouter } from './routers/account';
-import { adminRouter } from './routers/admin'
-import { apiKeyRouter } from './routers/apiKey'
-import { complianceRouter } from './routers/compliance'
-import { webhookRouter } from './routers/webhooks'
 import { queueRouter } from './routers/queue'
 import { logger } from '../lib/logger';
 import { disconnectDatabase, connectDatabase } from '../lib/prisma';
@@ -51,7 +47,6 @@ export const appRouter = router({
   wallet: walletRouter,
   swap: swapRouter,
   transaction: transactionRouter,
-  contact: contactRouter,
   portfolio: portfolioRouter,
   system: systemRouter,
   copyTrading: copyTradingRouter,
@@ -60,10 +55,6 @@ export const appRouter = router({
   social: socialRouter,
   traders: tradersRouter,
   account: accountRouter,
-  admin: adminRouter,
-  apiKey: apiKeyRouter,
-  compliance: complianceRouter,
-  webhook: webhookRouter,
   queue: queueRouter,
 });
 
@@ -691,10 +682,7 @@ export const initializeApp = async () => {
       logger.warn('Market cache warming failed (non-fatal):', err);
     });
 
-    // Initialize webhook delivery queue (Plan: Phase 5)
-    const { initializeWebhookQueue } = await import('../lib/services/webhookDelivery');
-    initializeWebhookQueue();
-    logger.info('🔔 Webhook delivery queue initialized');
+
 
     // Start transaction monitor (if enabled)
     if (process.env.FEATURE_TRANSACTION_MONITORING !== 'false') {
@@ -821,15 +809,6 @@ export const gracefulShutdown = async (signal: string) => {
       } catch (error) {
         logger.error('Error stopping copy trading services:', error);
       }
-    }
-
-    // Close webhook delivery queue (Plan: Phase 5)
-    try {
-      const { closeWebhookQueue } = await import('../lib/services/webhookDelivery');
-      await closeWebhookQueue();
-      logger.info('✅ Webhook queue closed');
-    } catch (error) {
-      logger.error('Error closing webhook queue:', error);
     }
 
     // Close database connections using singleton

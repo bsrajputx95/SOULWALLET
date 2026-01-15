@@ -13,6 +13,7 @@ import { LockService } from './lockService'
 import { priceMonitor } from './priceMonitor'
 import { jitoService } from './jitoService'
 import { redisCache, type CacheKey } from '../redis'
+import { transactionSecurityMiddleware } from './transactionSecurityMiddleware'
 
 // USDC mint address on Solana mainnet
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';

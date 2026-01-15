@@ -81,7 +81,6 @@ export default function PortfolioScreen() {
   const [editSL, setEditSL] = useState('');
   const [editTP, setEditTP] = useState('');
   const [editSlippage, setEditSlippage] = useState('');
-  const [editTotpCode, setEditTotpCode] = useState(''); // ✅ 2FA code for edit
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1d' | '7d' | '30d' | '1y'>('1d');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
 
@@ -340,7 +339,6 @@ export default function PortfolioScreen() {
                           setEditSL(wallet.stopLoss ? Math.abs(wallet.stopLoss).toString() : '10');
                           setEditTP(wallet.takeProfit?.toString() || '30');
                           setEditSlippage(wallet.slippage?.toString() || '1');
-                          setEditTotpCode('');
                         }}
                       >
                         <Text style={styles.editButtonText}>Edit</Text>
@@ -761,31 +759,22 @@ export default function PortfolioScreen() {
                 keyboardType="numeric"
               />
 
-              <NeonInput
-                label="2FA Code (Required)"
-                placeholder="Enter 6-digit code"
-                value={editTotpCode}
-                onChangeText={setEditTotpCode}
-                keyboardType="numeric"
-                maxLength={6}
-              />
+
 
               <View style={styles.editActions}>
                 <NeonButton
                   title="Stop Copying"
                   onPress={() => {
-                    if (__DEV__) console.log('Stop copying:', selectedWallet?.username);
                     setSelectedWallet(null);
-                    setEditTotpCode('');
                   }}
                   style={[styles.editActionButton, { backgroundColor: COLORS.error + '20' }]}
                 />
 
                 <NeonButton
                   title={isUpdatingCopyTrade ? "Saving..." : "Save Changes"}
-                  disabled={isUpdatingCopyTrade || editTotpCode.length !== 6}
+                  disabled={isUpdatingCopyTrade}
                   onPress={async () => {
-                    if (selectedWallet && editTotpCode.length === 6) {
+                    if (selectedWallet) {
                       const updates: Partial<CopiedWallet> = {};
                       const totalAmountVal = parseFloat(editAmount);
                       const amountPerTradeVal = parseFloat(editAmountPerTrade);
@@ -799,15 +788,14 @@ export default function PortfolioScreen() {
                       if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
                       if (!isNaN(slippageVal)) updates.slippage = slippageVal;
 
-                      const success = await updateCopiedWallet(selectedWallet.id, updates, editTotpCode);
+                      const success = await updateCopiedWallet(selectedWallet.id, updates, '');
                       if (success) {
                         Alert.alert('Success', 'Copy trade settings updated');
                         setSelectedWallet(null);
-                        setEditTotpCode('');
                       }
                     }
                   }}
-                  style={[styles.editActionButton, (isUpdatingCopyTrade || editTotpCode.length !== 6) && { opacity: 0.6 }]}
+                  style={[styles.editActionButton, isUpdatingCopyTrade && { opacity: 0.6 }]}
                 />
               </View>
             </ScrollView>
