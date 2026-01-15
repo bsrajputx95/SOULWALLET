@@ -209,7 +209,7 @@
     "install": {}
   },
   "engines": {
-    "node": ">=20.19.4",
+    "node": ">=20.0.0",
     "npm": ">=10.0.0"
   },
   "private": true

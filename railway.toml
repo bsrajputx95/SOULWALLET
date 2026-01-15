@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm ci && npm run db:generate && npm run server:build"
+buildCommand = "npm install --legacy-peer-deps && npm run db:generate && npm run server:build"
 
 [deploy]
 startCommand = "npm run db:migrate:deploy && npm run server"
