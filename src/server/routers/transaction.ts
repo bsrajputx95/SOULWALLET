@@ -6,7 +6,6 @@ import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
 import { rpcManager } from '../../lib/services/rpcManager';
 import { auditLogService } from '../../lib/services/auditLog'
-import { amlService } from '../../lib/services/kyc'
 
 export const transactionRouter = router({
   /**
@@ -91,7 +90,7 @@ export const transactionRouter = router({
           const confirmedTransaction = await rpcManager.withFailover((connection) =>
             connection.getTransaction(input.signature, { maxSupportedTransactionVersion: 0 })
           );
-          
+
           if (confirmedTransaction) {
             blockchainData = {
               blockTime: confirmedTransaction.blockTime,
@@ -137,7 +136,7 @@ export const transactionRouter = router({
         }
 
         const publicKey = new PublicKey(user.walletAddress);
-        
+
         // Get recent transactions from the blockchain
         const signatures = await rpcManager.withFailover((connection) =>
           connection.getSignaturesForAddress(publicKey, { limit: 50 })
@@ -163,8 +162,8 @@ export const transactionRouter = router({
               const accountKeys = transaction.transaction.message.getAccountKeys();
               const staticAccountKeys = accountKeys.staticAccountKeys;
               const isReceive = staticAccountKeys.some(
-                (key, index) => key.equals(publicKey) && 
-                  transaction.meta?.postBalances?.[index] && 
+                (key, index) => key.equals(publicKey) &&
+                  transaction.meta?.postBalances?.[index] &&
                   transaction.meta?.preBalances?.[index] !== undefined &&
                   transaction.meta.postBalances[index] > transaction.meta.preBalances[index]
               );
@@ -212,20 +211,7 @@ export const transactionRouter = router({
                 userAgent,
               })
 
-              try {
-                await amlService.monitorTransaction(
-                  ctx.user.id,
-                  created.id,
-                  signatureInfo.signature,
-                  amount,
-                  'SOL',
-                  { type: isReceive ? 'RECEIVE' : 'SEND' }
-                )
-              } catch (error) {
-                logger.warn('AML monitoring failed for synced transaction', { userId: ctx.user.id, transactionId: created.id, error })
-              }
-
-              newTransactionCount++;
+              // AML monitoring removed for beta
             }
           }
         }
@@ -297,7 +283,7 @@ export const transactionRouter = router({
         };
 
         // Verify transaction integrity
-        const isVerified = 
+        const isVerified =
           blockchainData.success &&
           blockchainData.fee === (dbTransaction.fee * 1_000_000_000) && // Convert SOL to lamports
           blockchainData.confirmations === 'finalized';

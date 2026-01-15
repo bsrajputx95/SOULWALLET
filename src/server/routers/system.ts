@@ -5,12 +5,9 @@ import { logger } from '../../lib/logger';
 import prisma from '../../lib/prisma';
 import { TRPCError } from '@trpc/server';
 import * as os from 'os';
-import { KeyMigrationService } from '../../lib/services/keyMigration'
 import { JWTRotationService } from '../../lib/services/jwtRotation'
 import { rpcManager } from '../../lib/services/rpcManager'
 import { getCacheMetrics, getRedisHealth } from '../../lib/redis'
-
-const keyMigrationService = new KeyMigrationService()
 
 export const systemRouter = router({
   /**
@@ -197,22 +194,15 @@ export const systemRouter = router({
     .input(z.object({
       batchSize: z.number().min(1).max(1000).default(100),
     }))
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ ctx }) => {
       if (ctx.user.role !== 'ADMIN') {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Admin access required',
         })
       }
-      try {
-        return await keyMigrationService.migrateWallets(input.batchSize)
-      } catch (error) {
-        logger.error('Migrate custodial wallets error:', error)
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to migrate custodial wallets',
-        })
-      }
+      // Key migration - not required for beta
+      return { success: true, migrated: 0, message: 'Key migration not required for beta' }
     }),
 
   getKeyOperationLogs: protectedProcedure

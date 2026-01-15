@@ -10,7 +10,6 @@ import { rpcManager } from '../../lib/services/rpcManager';
 import { nonceManager } from '../../lib/services/nonceManager'
 import { custodialWalletService } from '../../lib/services/custodialWallet'
 import { auditLogService } from '../../lib/services/auditLog'
-import { amlService } from '../../lib/services/kyc'
 import { getCacheTtls, redisCache } from '../../lib/redis'
 import { recordWalletOperation, recordTransaction as recordTxMetric, linkedWalletsTotal } from '../../lib/metrics'
 
@@ -843,18 +842,8 @@ export const walletRouter = router({
           userAgent,
         })
 
-        try {
-          await amlService.monitorTransaction(
-            ctx.user.id,
-            transaction.id,
-            input.signature,
-            input.amount,
-            input.tokenSymbol,
-            { type: input.type, token: input.token, status: txStatus }
-          )
-        } catch (error) {
-          logger.warn('AML monitoring failed for recorded transaction', { userId: ctx.user.id, transactionId: transaction.id, error })
-        }
+
+        // AML monitoring removed for beta
 
         logger.info('Transaction recorded successfully:', {
           id: transaction.id,

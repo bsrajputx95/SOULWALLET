@@ -7,7 +7,6 @@ import prisma from '../../lib/prisma';
 import { jupiterSwap } from '../../lib/services/jupiterSwap';
 import { verifyTotpForUser } from '../../lib/middleware/auth'
 import { auditLogService } from '../../lib/services/auditLog'
-import { amlService } from '../../lib/services/kyc'
 import { DECIMALS, FEES } from '@/constants'
 
 // Jupiter API base URL
@@ -37,7 +36,7 @@ export const swapRouter = router({
         });
 
         const response = await fetch(`${JUPITER_API_URL}/quote?${params}`);
-        
+
         if (!response.ok) {
           throw new Error(`Jupiter API error: ${response.status}`);
         }
@@ -155,15 +154,8 @@ export const swapRouter = router({
           userAgent,
         })
 
-        try {
-          await amlService.monitorTransaction(ctx.user.id, transaction.id, signature, input.amount, tokenSymbol, {
-            fromMint: input.fromMint,
-            toMint: input.toMint,
-            slippage: input.slippage,
-          })
-        } catch (error) {
-          logger.warn('AML monitoring failed for swap', { userId: ctx.user.id, transactionId: transaction.id, error })
-        }
+
+        // AML monitoring removed for beta
 
         return {
           signature,

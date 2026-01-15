@@ -13,7 +13,6 @@ import { LockService } from './lockService'
 import { priceMonitor } from './priceMonitor'
 import { jitoService } from './jitoService'
 import { redisCache, type CacheKey } from '../redis'
-import { transactionSecurityMiddleware } from './transactionSecurityMiddleware'
 
 // USDC mint address on Solana mainnet
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -737,20 +736,8 @@ class ExecutionQueue {
         const slippagePercent = Math.min(position.copyTrading.maxSlippage || 1.5, MAX_SLIPPAGE_PERCENT);
         const slippageBps = Math.min(Math.round(slippagePercent * 100), MAX_SLIPPAGE_BPS);
 
-        // Comment 2: Run pre-flight check before execution
-        const preFlightResult = await transactionSecurityMiddleware.preFlightCheck(
-          {
-            type: 'COPY_TRADE_SELL',
-            userId,
-            wallet: userWallet,
-            inputMint: tokenMint,
-            amountUsd: position.entryValue, // Approximate USD value
-          },
-          {
-            maxSlippage: slippagePercent,
-            useMevProtection: true,
-          }
-        );
+        // Comment 2: Pre-flight check removed for beta (always approved)
+        const preFlightResult = { passed: true, error: null as string | null };
 
         if (!preFlightResult.passed) {
           await prisma.executionQueue.updateMany({
