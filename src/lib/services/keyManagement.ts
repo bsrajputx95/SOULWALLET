@@ -4,11 +4,10 @@ export interface KeyManagementService {
     decrypt(data: string): Promise<string>;
     generateDataKey(): Promise<{ plaintext: Buffer; ciphertext: string; keyId: string }>;
     getCurrentKeyVersion(): Promise<string>;
-    decryptDataKey(encryptedKey: string): Promise<Buffer>;
+    decryptDataKey(encryptedKey: string, keyId?: string): Promise<Buffer>;
 }
 
 // Simple passthrough for beta - uses WALLET_ENCRYPTION_KEY from env
-const key = process.env.WALLET_ENCRYPTION_KEY || 'dev-key-32-chars-minimum-length!';
 
 export const keyManagementService: KeyManagementService = {
     async encrypt(data: string) {
@@ -26,7 +25,7 @@ export const keyManagementService: KeyManagementService = {
     async getCurrentKeyVersion() {
         return 'beta-key-v1';
     },
-    async decryptDataKey(encryptedKey: string) {
+    async decryptDataKey(encryptedKey: string, _keyId?: string) {
         return Buffer.from(encryptedKey, 'base64');
     },
 };

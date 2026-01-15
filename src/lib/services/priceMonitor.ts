@@ -582,7 +582,16 @@ export class PriceMonitor {
       isRunning: this.isRunning,
     };
   }
+
+  /**
+   * Get price for a single token (convenience method)
+   */
+  async getPrice(tokenMint: string): Promise<number> {
+    const prices = await this.fetchPricesWithCache([tokenMint]);
+    return prices[tokenMint] || 0;
+  }
 }
+
 
 // Export singleton instance
 export const priceMonitor = new PriceMonitor();
