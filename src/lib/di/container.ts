@@ -10,7 +10,6 @@ import { container } from 'tsyringe';
 export const SERVICE_TOKENS = {
     RpcManager: 'RpcManager',
     FeeManager: 'FeeManager',
-    QueueManager: 'QueueManager',
     JupiterSwap: 'JupiterSwap',
     TransactionSimulator: 'TransactionSimulator',
     JitoService: 'JitoService',
@@ -37,7 +36,7 @@ export function setupContainer(): void {
     // Core infrastructure services
     container.registerSingleton(SERVICE_TOKENS.RpcManager, require('../services/rpcManager').RpcManager);
     container.registerSingleton(SERVICE_TOKENS.FeeManager, require('../services/feeManager').FeeManager);
-    container.registerSingleton(SERVICE_TOKENS.QueueManager, require('../services/queueManager').QueueManager);
+    // QueueManager removed for beta - replaced by executionQueue service
 
     // Blockchain services
     container.registerSingleton(SERVICE_TOKENS.JupiterSwap, require('../services/jupiterSwap').JupiterSwap);

@@ -1,329 +1,217 @@
-# SoulWallet
+# SoulWallet - Feature Audit & Beta Status
 
-A comprehensive Solana wallet application with copy trading, social features, and portfolio management.
-
-## 📊 Monitoring & Error Tracking
-
-### Sentry Integration
-
-SoulWallet uses Sentry for crash reporting, error tracking, and performance monitoring across both mobile app and backend services.
-
-**Key Features:**
-- Real-time error tracking for mobile app and backend
-- Performance monitoring for critical endpoints
-- Source map support for readable stack traces
-- User context and breadcrumbs for debugging
-- Release tracking and deploy notifications
-
-**Setup:** See `scripts/sentry-setup-guide.md` for detailed configuration instructions.
-
-### Health Monitoring
-
-Comprehensive health check endpoints for system monitoring:
-
-- `/health` - Overall system health
-- `/health/db` - Database connectivity
-- `/health/redis` - Redis connectivity
-- `/health/solana` - Solana RPC connectivity
-- `/health/ready` - Readiness probe (for load balancers)
-- `/health/live` - Liveness probe (for orchestrators)
-
-**Health Check Scripts:**
-```bash
-# Run automated health check tests
-npm run health:test
-
-# Run with custom URL
-npm run health:test -- --url https://api.example.com
-
-# Run with custom timeout
-npm run health:test -- --timeout 10000
-
-# Run with verbose output
-npm run health:test -- --verbose
-
-# Run with JSON output for CI/CD
-npm run health:test -- --json
-
-# Start continuous health monitoring
-npm run health:monitor
-```
-
-### Testing Monitoring Setup
-
-```bash
-# Validate Sentry configuration
-npm run sentry:test-config
-
-# Test all health endpoints
-npm run health:test
-```
-
-## 📊 Observability Stack
-
-Complete production monitoring with Prometheus, Jaeger, ELK Stack, and Grafana.
-
-### Quick Start
-```bash
-# Start observability stack
-npm run observability:up
-
-# Verify all services
-npm run verify:observability
-
-# Open dashboards
-npm run dashboards:view   # Grafana (http://localhost:3000)
-npm run metrics:view      # Prometheus (http://localhost:9090)
-npm run traces:view       # Jaeger (http://localhost:16686)
-npm run logs:view         # Kibana (http://localhost:5601)
-```
-
-### Components
-| Component | Port | Purpose |
-|-----------|------|---------|
-| Prometheus | 9090 | Metrics collection |
-| AlertManager | 9093 | Alert routing |
-| Jaeger | 16686 | Distributed tracing |
-| Elasticsearch | 9200 | Log storage |
-| Kibana | 5601 | Log visualization |
-| Grafana | 3000 | Dashboards |
-
-### Pre-built Dashboards
-- **API Performance** - Request rate, latency, error rate
-- **Infrastructure** - Database pool, Redis cache, memory
-- **Copy Trading** - Trading-specific metrics
-- **Business** - Auth, user activity, API usage
-
-### Documentation
-For detailed setup and troubleshooting, see [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
-
-## 🧪 Testing
-
-SoulWallet has comprehensive integration tests covering all API endpoints and critical user flows.
-
-### Running Tests
-```bash
-# Run all tests
-npm test
-
-# Run integration tests only
-npm run test:integration
-
-# Run full integration suite with detailed report
-npm run test:integration:full
-
-# Run specific test suites
-npm run test:auth
-npm run test:wallet
-npm run test:copy-trading
-npm run test:market
-npm run test:social
-npm run test:swap
-npm run test:transaction
-npm run test:portfolio
-npm run test:health
-npm run test:errors
-
-# Run with coverage
-npm run test:coverage
-
-# Watch mode for development
-npm run test:watch
-```
-
-### Test Coverage
-We maintain 80-85% code coverage across:
-- Authentication & authorization
-- Wallet operations (balance, transactions, linking)
-- Copy trading (start, stop, positions, stats)
-- Market data (search, trending, token details)
-- Social features (posts, likes, comments, follows)
-- Token swaps (quotes, execution, history)
-- Transaction management (sync, verify, stats)
-- Portfolio tracking (overview, history, P&L)
-
-### Documentation
-For detailed testing documentation, see [docs/TESTING.md](docs/TESTING.md).
-
-## 🚀 Scripts
-
-### Development
-```bash
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run start        # Start production server
-```
-
-### Database
-```bash
-npm run db:migrate   # Run database migrations
-npm run db:seed      # Seed database with test data
-npm run db:reset     # Reset database (development only)
-```
-
-### Monitoring
-```bash
-npm run sentry:test-config  # Validate Sentry configuration
-npm run health:test         # Run health check tests
-npm run health:monitor      # Start continuous health monitoring
-```
-
-## 📚 Documentation
-
-- `scripts/sentry-setup-guide.md` - Sentry configuration guide
-- `scripts/deployment-checklist.md` - Production deployment checklist
-- `scripts/database-maintenance.md` - Database operations guide
-- `scripts/railway-env-setup.md` - Railway environment setup
-
-## 🏗️ Architecture
-
-- **Frontend:** React Native with Expo
-- **Backend:** Node.js with Fastify and tRPC
-- **Database:** PostgreSQL with Prisma ORM
-- **Blockchain:** Solana with web3.js
-- **Monitoring:** Sentry for error tracking and performance
-- **Deployment:** Railway for backend, EAS for mobile builds
-
-## 🔧 Environment Setup
-
-See `.env.production.example` for required environment variables and configuration options.
+> **Last Updated:** January 15, 2026  
+> **Status:** Beta APK Ready
 
 ---
 
-## 🛡️ V1 Launch Readiness & Compliance
+## 📱 App Screen Structure
 
-SoulWallet implements comprehensive compliance features required for production launch.
+### Authentication Flow (`app/(auth)/`)
+| Screen | Status | Description |
+|--------|--------|-------------|
+| `login.tsx` | ✅ **KEPT** | Email/password login with validation |
+| `signup.tsx` | ✅ **KEPT** | User registration with email verification |
+| `forgot-password.tsx` | ✅ **KEPT** | Password reset via email |
 
-### GDPR Compliance
-| Feature | Status | Endpoint |
-|---------|--------|----------|
-| Data Export (Article 15) | ✅ | `compliance.requestDataExport` |
-| Data Deletion (Article 17) | ✅ | `compliance.requestDataDeletion` |
-| Consent Management (Article 7) | ✅ | `compliance.logConsent` |
-| 30-day grace period | ✅ | Automatic via cron |
-| Data retention policies | ✅ | Configurable per data type |
+### Main Tabs (`app/(tabs)/`)
+| Tab | Status | Description | Key Features |
+|-----|--------|-------------|--------------|
+| `index.tsx` (Home) | ✅ **KEPT** | Main wallet dashboard | SOL/token balances, Send/Receive, Quick swap, Copy trading, Token list |
+| `market.tsx` | ✅ **KEPT** | Token discovery & market data | Trending tokens, DexScreener/Birdeye integration, External platform WebViews |
+| `portfolio.tsx` | ✅ **KEPT** | Portfolio tracking & analytics | P&L charts, Token allocation, Performance metrics, Queue status |
+| `sosio.tsx` | ✅ **KEPT** | Social feed & community | Posts, Comments, Likes, Following feed, Trending feed |
 
-### KYC/AML
-| Feature | Status |
-|---------|--------|
-| Tiered verification (0-3) | ✅ |
-| Document submission | ✅ |
-| Admin review flow | ✅ |
-| OFAC SDN screening | ✅ |
-
-### Geo-Blocking
-| Feature | Status |
-|---------|--------|
-| OFAC-sanctioned regions blocked | ✅ |
-| Global Fastify hook for auth paths | ✅ |
-| Quarterly review cadence | ✅ |
-| Fail-open for availability | ✅ |
-
-### Documentation
-- [Compliance Guide](docs/compliance.md) - Full GDPR/KYC/geo-block documentation
-- [Key Management](docs/KEY_MANAGEMENT.md) - Encryption key handling
-- [Deployment Checklist](scripts/deployment-checklist.md) - Production readiness
+### Other Screens
+| Screen | Status | Description |
+|--------|--------|-------------|
+| `account.tsx` | ✅ **KEPT** | Profile management (name, bio, image, password reset, invite friends) |
+| `settings.tsx` | ✅ **KEPT** | Wallet settings, Privacy & Data, Remove wallet |
+| `solana-setup.tsx` | ✅ **KEPT** | Initial wallet creation/import flow |
+| `coin/[mint].tsx` | ✅ **KEPT** | Individual token details page |
+| `profile/[username].tsx` | ✅ **KEPT** | User profile view |
+| `post/[id].tsx` | ✅ **KEPT** | Individual post view with comments |
 
 ---
 
-## 🚀 Production Deployment
+## 🔧 Backend Routers (`src/server/routers/`)
 
-### Prerequisites
-- Docker & Docker Compose
-- PM2 (`npm install -g pm2`)
-- k6 load testing tool (optional)
-- AWS KMS or HashiCorp Vault configured
+| Router | Status | Lines | Purpose |
+|--------|--------|-------|---------|
+| `auth.ts` | ✅ **KEPT** | ~12KB | Login, signup, logout, session management |
+| `wallet.ts` | ✅ **KEPT** | ~30KB | Wallet operations, balances, linking |
+| `walletRouter.ts` | ✅ **KEPT** | ~12KB | Additional wallet utilities |
+| `copyTrading.ts` | ✅ **KEPT** | ~33KB | Copy trading start/stop, positions, stats |
+| `traders.ts` | ✅ **KEPT** | ~10KB | Top traders discovery, leaderboard |
+| `swap.ts` | ✅ **KEPT** | ~12KB | Token swap quotes & execution |
+| `market.ts` | ✅ **KEPT** | ~10KB | Market data, trending, search |
+| `portfolio.ts` | ✅ **KEPT** | ~24KB | Portfolio tracking, P&L, history |
+| `social.ts` | ✅ **KEPT** | ~33KB | Posts, comments, likes, follows |
+| `user.ts` | ✅ **KEPT** | ~32KB | User profile, settings, preferences |
+| `account.ts` | ✅ **KEPT** | ~22KB | Account management, profile updates |
+| `transaction.ts` | ✅ **KEPT** | ~16KB | Transaction history, sync, verification |
+| `queue.ts` | ✅ **KEPT** | ~5KB | Queue status for async operations |
+| `system.ts` | ✅ **KEPT** | ~9KB | System health, feature flags |
 
-### Deployment Steps
+---
 
-1. **Configure Environment**
-   ```bash
-   cp .env.example .env.production
-   # Edit .env.production:
-   # - Set KMS_PROVIDER=aws (or vault)
-   # - Configure AWS_KMS_KEY_ID
-   # - Set CAPTCHA_ENABLED=true with valid keys
-   # - Generate TOTP_ENCRYPTION_KEY: openssl rand -base64 32
-   ```
+## 🔌 Backend Services (`src/lib/services/`)
 
-2. **Verify Security Configuration**
-   ```bash
-   npm run verify:security
-   ```
+### ✅ Active Services (32 Total)
 
-3. **Start Infrastructure**
-   ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-   ```
+| Service | Purpose | Criticality |
+|---------|---------|-------------|
+| `auth.ts` | Authentication, JWT, sessions | 🔴 Critical |
+| `custodialWallet.ts` | Custodial wallet management | 🔴 Critical |
+| `jitoService.ts` | MEV protection via Jito bundles | 🔴 Critical |
+| `jupiterSwap.ts` | Jupiter DEX swap execution | 🔴 Critical |
+| `wallet.ts` | Wallet operations | 🔴 Critical |
+| `jwtRotation.ts` | JWT token rotation & refresh | 🔴 Critical |
+| `keyManagement.ts` | Encryption key management | 🔴 Critical |
+| `executionQueue.ts` | Trade execution queueing | 🟡 High |
+| `profitSharing.ts` | Copy trade profit calculations | 🟡 High |
+| `transactionMonitor.ts` | Transaction status monitoring | 🟡 High |
+| `priceMonitor.ts` | Real-time price monitoring | 🟡 High |
+| `marketData.ts` | Market data aggregation | 🟡 High |
+| `birdeyeData.ts` | Birdeye API integration | 🟡 High |
+| `email.ts` | Email notifications (Resend) | 🟡 High |
+| `social.ts` | Social features (posts, follows) | 🟡 High |
+| `rpcManager.ts` | Solana RPC endpoint management | 🟡 High |
+| `circuitBreaker.ts` | Fault tolerance patterns | 🟢 Medium |
+| `alertManager.ts` | System alerts & notifications | 🟢 Medium |
+| `featureFlagService.ts` | Feature flag management | 🟢 Medium |
+| `feeManager.ts` | Fee calculation & management | 🟢 Medium |
+| `nonceManager.ts` | Transaction nonce handling | 🟢 Medium |
+| `transactionSimulator.ts` | Transaction simulation | 🟢 Medium |
+| `lockService.ts` | Distributed locking | 🟢 Medium |
+| `messageQueue.ts` | Async message handling | 🟢 Medium |
+| `deadLetterQueue.ts` | Failed message handling | 🟢 Medium |
+| `dlqProcessor.ts` | Dead letter processing | 🟢 Medium |
+| `cleanup.ts` | Data cleanup & maintenance | 🟢 Medium |
+| `payment-verification.ts` | Payment verification | 🟢 Medium |
+| `apiKey.ts` | API key management (stub) | ⚪ Low |
+| `auditLog.ts` | Audit logging (stub) | ⚪ Low |
+| `authorization.ts` | Authorization helpers (stub) | ⚪ Low |
+| `captcha.ts` | Captcha verification (stub) | ⚪ Low |
 
-4. **Run Database Migrations**
-   ```bash
-   npm run db:migrate:deploy
-   ```
+### ❌ Removed Services
 
-5. **Start Application with PM2**
-   ```bash
-   npm run server:build
-   pm2 start pm2.config.js --env production
-   pm2 save
-   pm2 startup
-   ```
+| Service | Reason for Removal | Removed In |
+|---------|-------------------|------------|
+| `vault.ts` | HashiCorp Vault integration not needed for beta | Build Fix PR |
+| `queryPerformance.ts` | Query monitoring - overkill for beta | Build Fix PR |
+| `trustedIps.ts` | IP whitelist management - simplified | Build Fix PR |
+| `queueManager.ts` | Redundant with `executionQueue.ts` | Build Fix PR |
+| `pubsub.ts` | Redis pub/sub - not needed for single-instance beta | Build Fix PR |
 
-6. **Verify Deployment**
-   ```bash
-   npm run health:test
-   npm run load-test
-   npm run verify:failover  # (staging only)
-   ```
+---
 
-### Production Checklist
+## 🗑️ Features Removed for Beta
 
-- [ ] KMS configured (AWS/Vault, not env)
-- [ ] CAPTCHA enabled with valid hCaptcha/reCAPTCHA keys
-- [ ] TOTP_ENCRYPTION_KEY set (32-byte random)
-- [ ] Database connection pooling configured (20+ connections)
-- [ ] Redis enabled for caching and pub/sub
-- [ ] PM2 clustering enabled (`instances: 'max'`)
-- [ ] Load tests passing (P95 < 500ms, error rate < 1%)
-- [ ] Security verification passing
-- [ ] Monitoring configured (Sentry, health checks)
-- [ ] Backups automated (daily database dumps)
-- [ ] SSL/TLS certificates configured
-- [ ] Rate limiting enabled
-- [ ] Audit logging enabled (`ENABLE_KEY_AUDIT_LOGGING=true`)
+### Infrastructure (Over-Engineered for Beta)
+| Feature | Status | Reason |
+|---------|--------|--------|
+| HashiCorp Vault KMS | ❌ **REMOVED** | Using environment-based secrets for beta |
+| Redis Pub/Sub | ❌ **REMOVED** | Single-instance deployment doesn't need it |
+| Chaos Testing (Chaos Mesh) | ❌ **REMOVED** | Replaced with simpler Toxiproxy |
+| Advanced Query Performance Monitoring | ❌ **REMOVED** | PostgreSQL built-in metrics sufficient |
+| Trusted IP Whitelisting | ❌ **REMOVED** | Standard rate limiting sufficient for beta |
+| Multi-Region Failover | ❌ **REMOVED** | Single Railway instance for beta |
 
-### Verification Commands
+### UI Screens Removed
+| Screen | Status | Reason |
+|--------|--------|--------|
+| `/swap` (dedicated swap tab) | ❌ **REMOVED** | Consolidated into Home screen quick swap |
 
-```bash
-# Security verification
-npm run verify:security
+---
 
-# Health checks
-npm run health:test
+## 🔮 Scope for Future Removal (Post-Beta Cleanup)
 
-# Load testing
-npm run load-test              # Normal load
-npm run load-test:production   # 1000 concurrent users
+### Candidates for Removal/Simplification
+| Component | Current State | Recommendation |
+|-----------|---------------|----------------|
+| `alertManager.ts` | Active but unused | Remove if alerts not implemented |
+| `deadLetterQueue.ts` + `dlqProcessor.ts` | Implemented but may be overkill | Simplify to single error handler |
+| `apiKey.ts` | Stub/placeholder | Remove or fully implement |
+| `auditLog.ts` | Stub/placeholder | Remove or fully implement |
+| `authorization.ts` | Stub/placeholder | Remove or fully implement |
+| `captcha.ts` | Stub/placeholder | Remove or fully implement |
+| Observability stack configs | Full Prometheus/Jaeger/ELK setup | May be overkill for small user base |
+| Load testing infrastructure | k6 scripts, load-test commands | Keep for staging, remove from prod image |
 
-# Full verification
-npm run verify:all
+### Features That Could Be Simplified
+| Feature | Current State | Simplification Option |
+|---------|---------------|----------------------|
+| Copy Trading | Full-featured | Could limit to basic follow mode |
+| Social Features | Full feed/posts/comments | Could reduce to just likes/follows |
+| Portfolio Charts | Multiple chart types | Could limit to simple P&L |
+| Market Tabs | Multiple data sources | Could consolidate to single source |
+
+---
+
+## 📊 Beta Feature Summary
+
+### ✅ Core Features (LIVE)
+- 🔐 **Authentication**: Email/password login, signup, password reset
+- 💰 **Wallet**: Create/import Solana wallet, SOL & SPL token balances
+- 💸 **Transactions**: Send/receive SOL & tokens
+- 🔄 **Swaps**: Jupiter-powered token swaps with slippage control
+- 📈 **Copy Trading**: Follow top traders, auto-copy positions
+- 📊 **Portfolio**: Balance tracking, P&L, token allocation
+- 🛒 **Market**: Trending tokens, search, external platform links
+- 👥 **Social**: Posts, comments, likes, follows, user profiles
+- ⚙️ **Settings**: Profile management, wallet settings, privacy controls
+
+### ⏳ Planned for v1.1
+- 🔔 Push Notifications
+- 📱 Biometric Auth
+- 🌙 Dark/Light Theme Toggle
+- 📤 Export Transaction History
+- 🏆 Trader Verification Badges
+
+---
+
+## 🏗️ Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Mobile** | React Native + Expo |
+| **Backend** | Node.js + Fastify + tRPC |
+| **Database** | PostgreSQL + Prisma |
+| **Blockchain** | Solana + @solana/web3.js |
+| **DEX** | Jupiter Aggregator |
+| **MEV Protection** | Jito Bundles |
+| **Deployment** | Railway (backend) + EAS (mobile) |
+| **Monitoring** | Sentry |
+
+---
+
+## 📂 Project Structure
+
+```
+SOULWALLET/
+├── app/                    # Expo Router screens
+│   ├── (auth)/            # Auth screens (login, signup, forgot-password)
+│   ├── (tabs)/            # Main tabs (home, market, portfolio, sosio)
+│   ├── coin/              # Token detail screens
+│   ├── profile/           # User profile screens
+│   ├── post/              # Post detail screens
+│   ├── account.tsx        # Account management
+│   ├── settings.tsx       # App settings
+│   └── solana-setup.tsx   # Wallet setup
+├── components/            # React Native components
+├── hooks/                 # Custom React hooks & stores
+├── lib/                   # Shared utilities
+├── src/
+│   ├── server/           # Backend server
+│   │   ├── routers/      # tRPC routers (14 active)
+│   │   └── fastify.ts    # Fastify server setup
+│   └── lib/
+│       └── services/     # Backend services (32 active)
+├── prisma/               # Database schema & migrations
+└── scripts/              # Utility scripts
 ```
 
-### Rollback Procedure
+---
 
-```bash
-# Stop current version
-pm2 stop all
-
-# Restore previous version
-git checkout <previous-tag>
-npm install
-npm run server:build
-
-# Rollback database (if needed)
-./scripts/restore-database.sh <backup-file>
-
-# Restart
-pm2 restart all
-```
-
+*This document tracks the feature set for SoulWallet Beta. Last audit: January 15, 2026.*

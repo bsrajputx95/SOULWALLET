@@ -216,6 +216,11 @@ export class RateLimitService {
     endpoint: keyof typeof RATE_LIMIT_CONFIGS,
     context: RateLimitContext
   ): Promise<{ bypassed?: boolean }> {
+    // BETA MODE: Skip rate limiting entirely for beta testing
+    if (process.env.BETA_MODE === 'true') {
+      return { bypassed: true };
+    }
+
     // Trusted IP bypass disabled for beta - all IPs subject to rate limiting
 
     const limiter = this.limiters.get(endpoint);

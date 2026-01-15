@@ -12,35 +12,7 @@
         "buildType": "apk"
       }
     },
-    "test": {
-      "distribution": "internal",
-      "node": "22.11.0",
-      "android": {
-        "buildType": "apk",
-        "withoutCredentials": true
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
-        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
-        "EXPO_PUBLIC_DEV_MODE": "true",
-        "EXPO_PUBLIC_LOG_LEVEL": "debug"
-      }
-    },
-    "apk": {
-      "distribution": "internal",
-      "node": "22.11.0",
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
-        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
-        "EXPO_PUBLIC_DEV_MODE": "false",
-        "EXPO_PUBLIC_LOG_LEVEL": "info"
-      }
-    },
-    "preview": {
+    "beta-apk": {
       "distribution": "internal",
       "node": "22.11.0",
       "android": {

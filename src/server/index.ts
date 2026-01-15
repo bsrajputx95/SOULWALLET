@@ -1,6 +1,9 @@
 // Initialize OpenTelemetry FIRST - before any other imports for proper instrumentation
+// BETA MODE: Skip OpenTelemetry to reduce overhead
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '../lib/otel';
-initializeOpenTelemetry();
+if (process.env.BETA_MODE !== 'true') {
+  initializeOpenTelemetry();
+}
 
 import { router } from './trpc';
 import { authRouter } from './routers/auth';
@@ -473,9 +476,8 @@ const validateProduction = async () => {
       throw new Error(
         '🚨 SECURITY ERROR: KMS_PROVIDER=env is NOT allowed in production!\n\n' +
         'Environment-based encryption keys are insecure for production use.\n' +
-        'Configure one of the following:\n' +
-        '  - KMS_PROVIDER=aws with AWS_REGION and AWS_KMS_KEY_ID\n' +
-        '  - KMS_PROVIDER=vault with VAULT_ADDR and VAULT_TOKEN\n\n' +
+        'Configure:\n' +
+        '  - KMS_PROVIDER=aws with AWS_REGION and AWS_KMS_KEY_ID\n\n' +
         'For testing ONLY, set ALLOW_ENV_KMS_IN_PROD=true (NOT for production with real user data).\n' +
         'See docs/KEY_MANAGEMENT.md for configuration details.'
       );
@@ -495,21 +497,11 @@ const validateProduction = async () => {
       region: process.env.AWS_REGION,
       keyId: process.env.AWS_KMS_KEY_ID?.substring(0, 20) + '...'
     });
-  } else if (kmsProvider === 'vault') {
-    if (!process.env.VAULT_ADDR) {
-      throw new Error('VAULT_ADDR is required when KMS_PROVIDER=vault');
-    }
-    if (!process.env.VAULT_TOKEN) {
-      throw new Error('VAULT_TOKEN is required when KMS_PROVIDER=vault');
-    }
-    logger.info('✅ HashiCorp Vault provider configured', {
-      addr: process.env.VAULT_ADDR,
-    });
   } else if (kmsProvider === 'env' && process.env.ALLOW_ENV_KMS_IN_PROD === 'true') {
     // env provider is allowed for beta testing when explicitly enabled
     logger.info('✅ Env-based KMS provider configured (beta testing only)');
   } else {
-    throw new Error(`Unknown KMS_PROVIDER: ${kmsProvider}. Use 'aws' or 'vault'.`);
+    throw new Error(`Unknown KMS_PROVIDER: ${kmsProvider}. Use 'aws' or 'env' (with ALLOW_ENV_KMS_IN_PROD=true for beta testing only).`);
   }
 
   // 1. Redis Validation

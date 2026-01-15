@@ -4,8 +4,8 @@ import superjson from 'superjson';
 import { SecureStorage } from './secure-storage';
 import Constants from 'expo-constants';
 import type { AppRouter } from '../src/server/types';
-import { Platform } from 'react-native';
 import { isAuthHydrated } from '../hooks/auth-store';
+
 
 export const trpc = createTRPCReact<AppRouter>();
 
@@ -52,28 +52,9 @@ export const trpcClient = trpc.createClient({
         // Without this header, the backend will reject with "Null origin not allowed" 403 error
         headers['x-mobile-app-version'] = String(appVersion);
 
-        if (Platform.OS === 'web' && typeof document !== 'undefined') {
-          const cookies = document.cookie || '';
-          const match = cookies.split(';').map(s => s.trim()).find(s => s.startsWith('csrf_token='));
-          if (match) {
-            const val = decodeURIComponent(match.split('=')[1] || '');
-            if (val) headers['x-csrf-token'] = val;
-          }
-        }
-        if (Platform.OS !== 'web' && process.env.CSRF_ENABLED === 'true') {
-          let csrf = await SecureStorage.getCsrfToken();
-          if (!csrf) {
-            try {
-              const res = await fetch(`${getBaseUrl()}/api/csrf`);
-              const data = await res.json();
-              csrf = data?.token;
-              if (csrf) await SecureStorage.setCsrfToken(csrf);
-            } catch {
-              void 0;
-            }
-          }
-          if (csrf) headers['x-csrf-token'] = csrf;
-        }
+        // CSRF protection disabled for beta (mobile apps don't need CSRF)
+        // Web-only protection - mobile apps use authorization tokens
+
         return headers;
       },
       fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -108,9 +89,9 @@ export const trpcClient = trpc.createClient({
         } catch (refreshError: any) {
           // Only clear auth if refresh explicitly fails with invalid/expired token
           const errorMessage = refreshError?.message?.toLowerCase() || '';
-          const isInvalidToken = errorMessage.includes('invalid') || 
-                                 errorMessage.includes('expired') || 
-                                 errorMessage.includes('unauthorized');
+          const isInvalidToken = errorMessage.includes('invalid') ||
+            errorMessage.includes('expired') ||
+            errorMessage.includes('unauthorized');
           if (isInvalidToken) {
             await SecureStorage.clearAll();
           }

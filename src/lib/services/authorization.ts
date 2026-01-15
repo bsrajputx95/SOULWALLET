@@ -1,4 +1,11 @@
-// Stub file - authorization service simplified for beta
+/**
+ * Authorization Service - SIMPLIFIED FOR BETA
+ * 
+ * This service is intentionally permissive to reduce complexity for beta.
+ * Full RBAC with granular permissions will be implemented post-beta.
+ * 
+ * Used in middleware but returns permissive defaults (all access allowed).
+ */
 export type AppRole = 'USER' | 'PREMIUM' | 'ADMIN';
 export type OwnershipResult = 'owned' | 'not_owned' | 'not_found';
 

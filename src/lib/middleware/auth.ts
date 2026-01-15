@@ -7,7 +7,7 @@ import { ApiKeyScope } from '@prisma/client'
 import prisma from '../prisma';
 import { logger } from '../logger';
 import { verifyCaptcha } from '../services/captcha'
-import { ApiKeyService } from '../services/apiKey'
+// API key auth disabled for beta - ApiKeyService removed
 
 function shouldLogApiRequestActivity(): boolean {
   if (process.env.LOG_API_REQUEST_ACTIVITY !== 'true') return false
@@ -169,35 +169,8 @@ export async function createAuthContext(
     const token = extractTokenFromHeader(authorization);
 
     if (!token) {
-      const apiKey = extractApiKeyFromHeader(authorization)
-      if (!apiKey) return defaultContext
-
-      const ipAddress = fingerprint.ipAddress || 'unknown'
-      const verified = await ApiKeyService.verifyApiKey(apiKey, ipAddress)
-      if (!verified.ok || !verified.userId || !verified.apiKeyId || !verified.scope) return defaultContext
-
-      const user = await prisma.user.findUnique({
-        where: { id: verified.userId },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          walletAddress: true,
-          walletVerifiedAt: true,
-          emailVerifiedAt: true,
-          createdAt: true,
-        },
-      })
-
-      if (!user) return defaultContext
-
-      // Comment 1 fix: Set isAuthenticated: true for valid API key auth
-      return {
-        user,
-        apiKey: { id: verified.apiKeyId, userId: verified.userId, scope: verified.scope },
-        fingerprint,
-        isAuthenticated: true,
-      }
+      // API key auth disabled for beta - return unauthenticated
+      return defaultContext
     }
 
     // Verify token and get user/session info
@@ -333,42 +306,8 @@ export async function fastifyAuthPlugin(fastify: any) {
       const token = extractTokenFromHeader(authorization);
 
       if (!token) {
-        const apiKey = extractApiKeyFromHeader(authorization)
-        if (!apiKey) {
-          (request as any).auth = { fingerprint, isAuthenticated: false }
-          return
-        }
-
-        const ipAddress = fingerprint.ipAddress || request.ip || 'unknown'
-        const verified = await ApiKeyService.verifyApiKey(apiKey, ipAddress)
-        if (!verified.ok || !verified.userId || !verified.apiKeyId || !verified.scope) {
-          (request as any).auth = { fingerprint, isAuthenticated: false }
-          return
-        }
-
-        const user = await prisma.user.findUnique({
-          where: { id: verified.userId },
-          select: {
-            id: true,
-            email: true,
-            role: true,
-            walletAddress: true,
-            walletVerifiedAt: true,
-            emailVerifiedAt: true,
-            createdAt: true,
-          },
-        })
-        if (!user) {
-          (request as any).auth = { fingerprint, isAuthenticated: false }
-          return
-        }
-
-        (request as any).auth = {
-          user,
-          apiKey: { id: verified.apiKeyId, userId: verified.userId, scope: verified.scope },
-          fingerprint,
-          isAuthenticated: false,
-        }
+        // API key auth disabled for beta - return unauthenticated
+        (request as any).auth = { fingerprint, isAuthenticated: false }
         return
       }
 

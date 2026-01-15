@@ -54,10 +54,15 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     
-    // Perform security checks on app startup (production only)
-    if (!BuildConfig.DEBUG) {
-      performSecurityChecks()
-    }
+    // Security checks disabled for beta testing
+    // Uncomment for production release to enable:
+    // - Root detection
+    // - Frida/Xposed detection  
+    // - Debugger detection
+    // - Emulator detection
+    // if (!BuildConfig.DEBUG) {
+    //   performSecurityChecks()
+    // }
     
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())

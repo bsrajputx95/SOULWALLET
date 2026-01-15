@@ -82,7 +82,7 @@ const DEFAULT_FLAGS: Record<string, FeatureFlag> = {
     'vault-secrets': {
         name: 'vault-secrets',
         enabled: false,
-        description: 'Use Vault for secret management',
+        description: 'Use Vault for secret management (REMOVED FOR BETA)',
     },
     'canary-features': {
         name: 'canary-features',
@@ -268,19 +268,19 @@ class FeatureFlagService {
                 return true;
 
             case 'userWithId':
-            {
-                if (!context?.userId) return false;
-                const userIds = strategy.parameters.userIds?.split(',') || [];
-                return userIds.includes(context.userId);
-            }
+                {
+                    if (!context?.userId) return false;
+                    const userIds = strategy.parameters.userIds?.split(',') || [];
+                    return userIds.includes(context.userId);
+                }
 
             case 'gradualRolloutUserId':
-            {
-                if (!context?.userId) return false;
-                const percentage = parseInt(strategy.parameters.percentage || '0', 10);
-                const hash = this.simpleHash(context.userId);
-                return hash % 100 < percentage;
-            }
+                {
+                    if (!context?.userId) return false;
+                    const percentage = parseInt(strategy.parameters.percentage || '0', 10);
+                    const hash = this.simpleHash(context.userId);
+                    return hash % 100 < percentage;
+                }
 
             case 'remoteAddress':
                 // Not implemented for mobile
@@ -290,13 +290,13 @@ class FeatureFlagService {
                 return true;
 
             case 'flexibleRollout':
-            {
-                const rollout = parseInt(strategy.parameters.rollout || '0', 10);
-                const stickiness = strategy.parameters.stickiness || 'default';
-                const value = context?.userId || context?.sessionId || 'anonymous';
-                const bucket = this.simpleHash(value + stickiness) % 100;
-                return bucket < rollout;
-            }
+                {
+                    const rollout = parseInt(strategy.parameters.rollout || '0', 10);
+                    const stickiness = strategy.parameters.stickiness || 'default';
+                    const value = context?.userId || context?.sessionId || 'anonymous';
+                    const bucket = this.simpleHash(value + stickiness) % 100;
+                    return bucket < rollout;
+                }
 
             default:
                 return true;

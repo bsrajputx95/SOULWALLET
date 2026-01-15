@@ -279,15 +279,7 @@ export async function getBusinessMetrics(): Promise<string> {
  * This merges business metrics with database query performance metrics
  */
 export async function getAllMetrics(): Promise<string> {
-    const businessMetrics = await register.metrics();
-
-    try {
-        const { queryPerformanceService } = await import('./services/queryPerformance');
-        const dbMetrics = await queryPerformanceService.getMetricsAsText();
-        return businessMetrics + '\n' + dbMetrics;
-    } catch (error) {
-        // If query performance service fails, just return business metrics
-        return businessMetrics;
-    }
+    // Query performance service removed for beta - return business metrics only
+    return register.metrics();
 }
 

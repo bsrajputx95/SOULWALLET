@@ -1,56 +1,52 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "CommonJS",
-    "lib": [
-      "ES2020"
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "CommonJS",
+        "moduleResolution": "Node",
+        "outDir": "./dist",
+        "rootDir": ".",
+        "strict": false,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "declaration": true,
+        "declarationMap": true,
+        "noEmit": false,
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true,
+        "baseUrl": ".",
+        "paths": {
+            "@/*": [
+                "./*"
+            ],
+            "@server/*": [
+                "./src/server/*"
+            ],
+            "@lib/*": [
+                "./src/lib/*"
+            ],
+            "@services/*": [
+                "./src/services/*"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*.ts"
     ],
-    "outDir": "./dist",
-    "rootDir": ".",
-    "strict": false,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "removeComments": false,
-    "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": false,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
-  },
-  "include": [
-    "src/server/**/*",
-    "src/lib/**/*",
-    "src/services/**/*",
-    "constants/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "**/*.test.ts",
-    "**/*.spec.ts",
-    "**/*.native.ts",
-    "**/*.native.tsx",
-    "src/app/**/*",
-    "src/components/**/*",
-    "src/hooks/**/*",
-    "src/utils/**/*",
-    "src/types/**/*",
-    "src/constants/**/*",
-    "src/store/**/*"
-  ],
-  "ts-node": {
-    "esm": false
-  }
+    "exclude": [
+        "node_modules",
+        "__tests__",
+        "dist",
+        "*.test.ts",
+        "*.spec.ts",
+        "app",
+        "components",
+        "hooks",
+        "lib",
+        "constants",
+        "utils",
+        "src/**/*.native.ts",
+        "src/**/*.native.tsx"
+    ]
 }

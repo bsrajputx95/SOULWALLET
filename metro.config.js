@@ -27,16 +27,29 @@ config.transformer = {
 // Enable require context for Expo Hermes
 config.transformer.unstable_allowRequireContext = true;
 
-// Enable tree shaking
+// Enable tree shaking and exclude server code from mobile bundle
 config.resolver = {
     ...config.resolver,
     // Only include necessary file extensions
     sourceExts: ['jsx', 'js', 'ts', 'tsx', 'json', 'cjs', 'mjs'],
-    // Exclude test files from bundle
+    // Exclude server code and test files from bundle - BETA OPTIMIZATION
     blockList: [
+        // Server-side code (not needed in mobile bundle)
+        /.*\/src\/server\/.*/,
+        /.*\/src\/lib\/services\/.*/,
+        /.*\/src\/lib\/middleware\/.*/,
+        /.*\/src\/lib\/di\/.*/,
+        /.*\/prisma\/.*/,
+        // Test files
         /.*\/__tests__\/.*/,
         /.*\.test\.(js|ts|tsx)$/,
         /.*\.spec\.(js|ts|tsx)$/,
+        // Docker and config files
+        /.*\/docker-compose.*\.yml$/,
+        /.*\/Dockerfile$/,
+        /.*\/nginx\/.*/,
+        /.*\/ssl\/.*/,
+        /.*\/scripts\/.*/,
     ],
     // Node.js polyfills for crypto packages (ed25519-hd-key, etc.)
     extraNodeModules: {
@@ -48,21 +61,58 @@ config.resolver = {
     },
 };
 
-// Optimize serializer
+// Optimize serializer - aggressive module filtering for beta
 config.serializer = {
     ...config.serializer,
-    // Process modules in parallel
+    // Process modules in parallel - exclude server-side dependencies
     processModuleFilter: (module) => {
-        // Exclude node_modules that aren't used
+        // Exclude node_modules that aren't used in mobile app
         if (module.path.includes('node_modules')) {
-            // Include only essential modules
+            // Server-side packages to exclude from mobile bundle
+            const serverOnlyModules = [
+                'fastify',
+                '@fastify',
+                'prisma',
+                '@prisma',
+                'ioredis',
+                'bull',
+                'amqplib',
+                'pino',
+                'nodemailer',
+                'sharp',
+                '@opentelemetry',
+                '@sentry/node',
+                'prom-client',
+                '@aws-sdk',
+                'rotating-file-stream',
+                'node-cron',
+            ];
+
+            // Exclude server-only modules
+            if (serverOnlyModules.some(m => module.path.includes(`node_modules/${m}`))) {
+                return false;
+            }
+
+            // Include essential mobile modules
             const essentialModules = [
                 '@react-native',
                 'react-native',
+                'react',
                 'expo',
+                '@expo',
                 '@solana',
-                '@trpc',
+                '@trpc/client',
+                '@trpc/react-query',
+                '@tanstack',
                 'superjson',
+                'zustand',
+                'lucide-react-native',
+                'zod',
+                'buffer',
+                'bs58',
+                'tweetnacl',
+                'bip39',
+                'ed25519-hd-key',
             ];
             return essentialModules.some(m => module.path.includes(m));
         }
@@ -71,4 +121,3 @@ config.serializer = {
 };
 
 module.exports = config;
-
