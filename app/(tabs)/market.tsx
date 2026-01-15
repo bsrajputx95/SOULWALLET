@@ -124,7 +124,7 @@ export default function MarketScreen() {
                     onPress={() => {
                       // Navigate to coin details page with all available data
                       router.push({
-                        pathname: `/coin/${token.symbol.toLowerCase()}`,
+                        pathname: `/coin/${token.symbol.toLowerCase()}` as any,
                         params: {
                           symbol: token.symbol,
                           name: token.name,

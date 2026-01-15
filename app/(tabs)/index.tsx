@@ -511,7 +511,7 @@ export default function HomeScreen() {
                     onPress={() => {
                       // Navigate with token data to ensure consistency
                       router.push({
-                        pathname: `/coin/${coin.symbol.toLowerCase()}`,
+                        pathname: `/coin/${coin.symbol.toLowerCase()}` as any,
                         params: {
                           price: coin.price.toString(),
                           change: (coin.change24h || 0).toString(),

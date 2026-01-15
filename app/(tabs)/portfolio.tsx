@@ -432,11 +432,12 @@ export default function PortfolioScreen() {
 
                     // Use wallet token or market token data
                     const displayToken = token || marketToken;
+                    if (!displayToken) return null;
                     return (
                       <Pressable
                         key={displayToken.symbol}
                         style={styles.tokenItem}
-                        onPress={() => router.push(`/coin/${displayToken.symbol.toLowerCase()}`)}
+                        onPress={() => router.push(`/coin/${displayToken.symbol.toLowerCase()}` as any)}
                       >
                         <View style={styles.tokenRow}>
                           <View style={styles.tokenLogoContainer}>
