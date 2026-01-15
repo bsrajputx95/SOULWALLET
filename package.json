@@ -208,5 +208,9 @@
     },
     "install": {}
   },
+  "engines": {
+    "node": ">=20.19.4",
+    "npm": ">=10.0.0"
+  },
   "private": true
 }
