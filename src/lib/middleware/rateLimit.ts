@@ -3,8 +3,6 @@ import Redis from 'ioredis';
 import { TRPCError } from '@trpc/server';
 import type { RateLimitContext } from './auth';
 import { logger } from '../logger';
-// Comment 3: Import trusted IPs service for bypass
-import { trustedIpsService } from '../services/trustedIps';
 
 
 
@@ -218,15 +216,7 @@ export class RateLimitService {
     endpoint: keyof typeof RATE_LIMIT_CONFIGS,
     context: RateLimitContext
   ): Promise<{ bypassed?: boolean }> {
-    // Comment 3: Check if IP is trusted and should bypass rate limiting
-    if (context.ip) {
-      const isTrusted = await trustedIpsService.isTrustedIp(context.ip);
-      if (isTrusted) {
-        // Log the bypass for audit trail
-        trustedIpsService.logBypass(context.ip, endpoint, context.userId);
-        return { bypassed: true };
-      }
-    }
+    // Trusted IP bypass disabled for beta - all IPs subject to rate limiting
 
     const limiter = this.limiters.get(endpoint);
     if (!limiter) {

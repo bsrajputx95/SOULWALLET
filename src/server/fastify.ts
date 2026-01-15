@@ -23,8 +23,6 @@ import { REQUEST_SIZE_LIMITS } from '../lib/middleware/requestSize';
 // Comment 4: Import AuthorizationService for admin IP whitelisting
 import { AuthorizationService } from '../lib/services/authorization';
 import { rpcManager } from '../lib/services/rpcManager';
-// Comment 1: Import queue manager for request queue limits
-import { queueManager } from '../lib/services/queueManager';
 import { getAllCircuitBreakerSnapshots } from '../lib/services/circuitBreaker';
 import { executionQueue } from '../lib/services/executionQueue';
 import { getCacheMetrics } from '../lib/redis';
@@ -324,36 +322,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return p
   }
 
-  // Comment 2: Initialize pub/sub for cross-instance coordination in production
-  if (process.env.NODE_ENV === 'production') {
-    const { pubsub } = await import('../lib/services/pubsub')
-
-    // Wait for pubsub to be ready or timeout after 5 seconds
-    let waitTime = 0
-    while (!pubsub.isReady() && waitTime < 5000) {
-      await new Promise(resolve => setTimeout(resolve, 100))
-      waitTime += 100
-    }
-
-    if (pubsub.isReady()) {
-      logger.info('[Fastify] Pub/sub initialized successfully', pubsub.getStatus())
-
-      // Subscribe to cache invalidation events from other instances
-      pubsub.subscribe('system:broadcast', (data: { type: string; message: string }) => {
-        if (data.type === 'cache:invalidate') {
-          logger.info('[Fastify] Cache invalidation received', data)
-          healthCache.clear() // Clear local health cache
-        }
-      })
-    } else {
-      logger.warn('[Fastify] Pub/sub not ready after timeout, continuing without cross-instance coordination')
-    }
-
-    // Graceful shutdown
-    server.addHook('onClose', async () => {
-      await pubsub.shutdown()
-    })
-  }
+  // Pub/sub disabled for beta - cross-instance coordination not needed
 
   // Redis connection singleton (Audit Issue #7)
   let redisClient: Redis | null = null;
@@ -446,57 +415,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   });
 
-  /**
-   * Comment 1: Request queue limits preHandler
-   * Prevents resource exhaustion by limiting concurrent requests per user/IP
-   * - Acquires a slot before processing
-   * - Returns 503 if queue is full
-   * - Stores slotId on request for release in onResponse
-   */
-  server.addHook('preHandler', async (request: any, reply) => {
-    // Skip queue management for health check endpoints
-    const url = request.url || '';
-    if (url === '/metrics' || url.startsWith('/health')) {
-      return;
-    }
-
-    // Get user ID from auth context (if available) and IP
-    const userId = request.auth?.user?.id;
-    const ip = request.ip || 'unknown';
-
-    // Try to acquire a queue slot
-    const slotId = await queueManager.acquireSlot(userId, ip);
-
-    if (slotId === null) {
-      // Queue is full, return 503
-      const queueStatus = await queueManager.getQueueStatus();
-      logger.warn('[QueueManager] Request rejected - queue full', {
-        ip,
-        userId,
-        queueDepth: queueStatus.globalQueueDepth,
-        url,
-      });
-      return reply.code(503).send({
-        error: 'Service Unavailable',
-        message: 'Too many concurrent requests. Please try again.',
-        retryAfter: 5,
-        queueDepth: queueStatus.globalQueueDepth,
-        maxQueueDepth: queueManager.getConfig().maxQueueDepth,
-      });
-    }
-
-    // Store slotId on request for release in onResponse
-    request.queueSlotId = slotId;
-  });
-
-  /**
-   * Comment 1: Release queue slot on response
-   */
-  server.addHook('onResponse', async (request: any, _reply) => {
-    if (request.queueSlotId) {
-      await queueManager.releaseSlot(request.queueSlotId);
-    }
-  });
+  // Queue management disabled for beta - queueManager service removed
 
   /**
    * Comment 4: Admin IP whitelisting middleware for Fastify admin endpoints
@@ -684,61 +603,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   });
 
-  // Query Performance Admin Endpoint
-  // Provides insights into database query performance using pg_stat_statements
-  // Requires admin authentication and IP whitelisting (enforced by preHandler hook)
-  server.get('/api/admin/query-performance', async (request: any, reply) => {
-    try {
-      const { queryPerformanceService } = await import('../lib/services/queryPerformance');
-
-      // Get comprehensive performance summary
-      const performance = await queryPerformanceService.getPerformanceSummary();
-
-      // Optional: Get additional metrics
-      const [indexUsage, tableBloat, longRunning] = await Promise.all([
-        queryPerformanceService.getIndexUsage(),
-        queryPerformanceService.getTableBloat(),
-        queryPerformanceService.getLongRunningQueries(),
-      ]);
-
-      return reply.send({
-        success: true,
-        extensionAvailable: performance.extensionAvailable,
-        slowQueries: performance.slowQueries,
-        topByTime: performance.topByTime,
-        n1Problems: performance.n1Problems,
-        cacheHitRatio: performance.cacheHitRatio,
-        indexUsage,
-        tableBloat,
-        longRunningQueries: longRunning,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error: any) {
-      logger.error('[Query Performance] Error fetching metrics', { error: error.message });
-      return reply.code(500).send({ error: 'Failed to fetch query performance metrics' });
-    }
-  });
-
-  // Reset query statistics (admin only)
-  server.post('/api/admin/query-performance/reset', async (request: any, reply) => {
-    try {
-      const { queryPerformanceService } = await import('../lib/services/queryPerformance');
-
-      const success = await queryPerformanceService.resetStats();
-
-      if (success) {
-        logger.info('[Query Performance] Statistics reset by admin', {
-          userId: request.auth?.user?.id
-        });
-        return reply.send({ success: true, message: 'Query statistics reset successfully' });
-      } else {
-        return reply.code(500).send({ error: 'Failed to reset statistics' });
-      }
-    } catch (error: any) {
-      logger.error('[Query Performance] Error resetting stats', { error: error.message });
-      return reply.code(500).send({ error: 'Failed to reset query statistics' });
-    }
-  });
+  // Query performance admin routes disabled for beta - service removed
 
   // Register Swagger/OpenAPI documentation (Comment 3)
   await server.register(swagger, {
@@ -1537,8 +1402,7 @@ export async function createServer(): Promise<FastifyInstance> {
   });
 
   /**
-   * Plan5 Step 2.3: Adaptive Rate Limiting Monitoring Dashboard
-   * Returns current adaptation state, violation rates, attack detection status
+   * Rate Limiting Monitoring Dashboard (simplified for beta)
    * Requires admin authentication + IP whitelist
    */
   server.get('/api/admin/rate-limits/adaptive', async (request: any, reply) => {
@@ -1550,16 +1414,11 @@ export async function createServer(): Promise<FastifyInstance> {
         return reply.code(403).send({ error: 'Admin access required', requestId });
       }
 
-      const { queueManager } = await import('../lib/services/queueManager');
-      const { trustedIpsService } = await import('../lib/services/trustedIps');
       const { alertManager } = await import('../lib/services/alertManager');
 
       return {
-        queue: {
-          status: await queueManager.getQueueStatus(),
-          config: queueManager.getConfig(),
-        },
-        trustedIps: trustedIpsService.getStatus(),
+        queue: { status: 'disabled', config: null }, // queueManager removed for beta
+        trustedIps: { status: 'disabled' }, // trustedIps removed for beta
         alerts: alertManager.getStats(),
         requestId,
         timestamp: new Date().toISOString(),
