@@ -9,7 +9,7 @@
  */
 
 import { logger } from '../logger'
-import { securityMonitor } from './securityMonitor'
+
 
 type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 
@@ -116,18 +116,6 @@ class AlertManager {
             },
         })
 
-        // Security Monitor channel
-        this.channels.set('security_monitor', {
-            name: 'security_monitor',
-            enabled: true,
-            send: async (alert) => {
-                securityMonitor.recordEvent(
-                    alert.type === 'ATTACK_DETECTED' ? 'HIGH_FREQUENCY_USER' : 'LIMIT_VIOLATION',
-                    undefined,
-                    { alertType: alert.type, severity: alert.severity, ...alert.data }
-                )
-            },
-        })
 
         // Email channel
         if (this.emailRecipients.length > 0 && process.env.ENABLE_RATE_LIMIT_ALERTS === 'true') {

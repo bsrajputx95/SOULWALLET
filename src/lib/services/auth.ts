@@ -987,18 +987,6 @@ export class AuthService {
         })
       }
 
-      // Register device and check if new (Comment 2 fix)
-      if (fingerprint) {
-        const { DeviceService } = await import('./device');
-        const deviceResult = await DeviceService.registerDevice(u.id, fingerprint);
-
-        // Send alert for new untrusted devices
-        if (deviceResult.isNewDevice && !deviceResult.isTrusted) {
-          DeviceService.sendNewDeviceAlert(u.id, deviceResult.deviceId, fingerprint).catch((error) => {
-            logger.error('Failed to send new device alert:', error);
-          });
-        }
-      }
 
       return {
         user: {

@@ -1,7 +1,6 @@
 import cron from 'node-cron';
 import { PerformanceSnapshotService } from '../services/performanceSnapshot';
 import { JWTRotationService, jwtSecretCache } from '../lib/services/jwtRotation';
-import { logRetentionService } from '../lib/services/logRetention';
 import { logger } from '../lib/logger';
 
 /**
@@ -76,93 +75,10 @@ export async function initializeCronJobs(): Promise<void> {
         }
     });
 
-    // Daily log retention cleanup - runs at 2:30 AM every day (Plan6 Step 8)
-    // Cleans session activities (90 days), login attempts (30 days), expired exports (7 days)
-    cron.schedule('30 2 * * *', async () => {
-        try {
-            logger.info('Starting daily log retention cleanup');
-            const result = await logRetentionService.cleanupExpiredLogs();
-            logger.info('Completed log retention cleanup', {
-                sessionActivitiesDeleted: result.sessionActivities,
-                loginAttemptsDeleted: result.loginAttempts,
-                expiredExportsDeleted: result.expiredExports,
-            });
-
-            // Also archive old audit logs
-            const archiveResult = await logRetentionService.archiveOldAuditLogs();
-            if (archiveResult.count > 0) {
-                logger.info('Archived old audit logs', archiveResult);
-            }
-        } catch (error) {
-            logger.error('Error in log retention cleanup job:', error);
-        }
-    });
-
-    // GDPR deletion processing - runs daily at 3 AM
-    // Processes pending deletion requests after 30-day grace period
-    cron.schedule('0 3 * * *', async () => {
-        try {
-            logger.info('Starting GDPR deletion processing');
-            const { gdprService } = await import('../lib/services/gdpr');
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            // Get configurable grace period and batch size from env
-            const gracePeriodDays = parseInt(process.env.GDPR_DELETION_GRACE_PERIOD_DAYS || '30', 10);
-            const batchSize = parseInt(process.env.GDPR_DELETION_BATCH_SIZE || '10', 10);
-
-            // Calculate grace period date
-            const graceDate = new Date(Date.now() - gracePeriodDays * 24 * 60 * 60 * 1000);
-
-            // Find pending deletions that have passed grace period
-            const pendingDeletions = await prisma.dataDeletionRequest.findMany({
-                where: {
-                    status: 'PENDING',
-                    createdAt: { lt: graceDate }
-                },
-                take: batchSize,
-                orderBy: { createdAt: 'asc' }
-            });
-
-            if (pendingDeletions.length === 0) {
-                logger.debug('No pending GDPR deletions to process');
-                await prisma.$disconnect();
-                return;
-            }
-
-            logger.info(`Processing ${pendingDeletions.length} GDPR deletion requests`);
-
-            let processed = 0;
-            let failed = 0;
-
-            for (const request of pendingDeletions) {
-                try {
-                    await gdprService.processDataDeletion(request.id, 'system-cron');
-                    processed++;
-                    logger.info('GDPR deletion completed', {
-                        requestId: request.id,
-                        userId: request.userId
-                    });
-                } catch (error) {
-                    failed++;
-                    logger.error('GDPR deletion failed for request', {
-                        requestId: request.id,
-                        error
-                    });
-                }
-            }
-
-            await prisma.$disconnect();
-            logger.info('GDPR deletion processing completed', { processed, failed });
-        } catch (error) {
-            logger.error('Error in GDPR deletion job:', error);
-        }
-    });
-
     logger.info('✅ Cron jobs initialized');
     logger.info('   - Trader performance snapshots: Daily at 2:00 AM');
-    logger.info('   - Log retention cleanup: Daily at 2:30 AM');
-    logger.info('   - GDPR deletion processing: Daily at 3:00 AM');
+    logger.info('   - JWT rotation check: Weekly on Sunday at 3:00 AM');
+    logger.info('   - JWT secret cleanup: Daily at 4:00 AM');
     logger.info('   - JWT rotation check: Weekly on Sunday at 3:00 AM');
     logger.info('   - JWT secret cleanup: Daily at 4:00 AM');
     logger.info('   - DLQ processing: Every 5 minutes');

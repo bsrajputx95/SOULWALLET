@@ -1550,16 +1550,11 @@ export async function createServer(): Promise<FastifyInstance> {
         return reply.code(403).send({ error: 'Admin access required', requestId });
       }
 
-      const { adaptiveRateLimiter } = await import('../lib/middleware/adaptiveRateLimiter');
       const { queueManager } = await import('../lib/services/queueManager');
       const { trustedIpsService } = await import('../lib/services/trustedIps');
       const { alertManager } = await import('../lib/services/alertManager');
 
       return {
-        adaptive: {
-          metrics: adaptiveRateLimiter.getMetrics(),
-          states: adaptiveRateLimiter.getAllStates(),
-        },
         queue: {
           status: await queueManager.getQueueStatus(),
           config: queueManager.getConfig(),
