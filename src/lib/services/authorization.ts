@@ -1,5 +1,6 @@
-// Stub file - authorization service disabled for beta
+// Stub file - authorization service simplified for beta
 export type AppRole = 'USER' | 'PREMIUM' | 'ADMIN';
+export type OwnershipResult = 'owned' | 'not_owned' | 'not_found';
 
 interface AuditContext {
     userId?: string;
@@ -23,19 +24,19 @@ export class AuthorizationService {
         // No-op for beta - authorization auditing disabled
     }
 
-    static async checkAdminIpWhitelist(_ipAddress: string, _extra?: any): Promise<boolean> {
+    static async checkAdminIpWhitelist(_userId: string, _ipAddress?: string): Promise<boolean> {
         // No-op for beta - all IPs allowed for admin access
         return true;
     }
 
-    static hasRole(_user: any, _role?: string): boolean {
+    static hasRole(_role: AppRole, _requiredRole?: AppRole): boolean {
         // No-op for beta - everyone has access
         return true;
     }
 
-    static async verifyOwnership(_userId: string, _resourceId: string, _resourceType: string): Promise<boolean> {
-        // No-op for beta - always allow
-        return true;
+    static async verifyOwnership(_userId: string, _resourceType: string, _resourceId: string): Promise<OwnershipResult> {
+        // No-op for beta - always return owned
+        return 'owned';
     }
 }
 

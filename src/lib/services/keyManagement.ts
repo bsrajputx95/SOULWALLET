@@ -3,7 +3,7 @@ export interface KeyManagementService {
     encrypt(data: string): Promise<string>;
     decrypt(data: string): Promise<string>;
     generateDataKey(): Promise<{ plaintext: Buffer; ciphertext: string; keyId: string }>;
-    getCurrentKeyVersion(): Promise<string>;
+    getCurrentKeyVersion(): Promise<number>;
     decryptDataKey(encryptedKey: string, keyId?: string): Promise<Buffer>;
 }
 
@@ -23,7 +23,7 @@ export const keyManagementService: KeyManagementService = {
         return { plaintext, ciphertext: plaintext.toString('base64'), keyId: 'beta-key-v1' };
     },
     async getCurrentKeyVersion() {
-        return 'beta-key-v1';
+        return 1; // Return number for keyVersion field
     },
     async decryptDataKey(encryptedKey: string, _keyId?: string) {
         return Buffer.from(encryptedKey, 'base64');
