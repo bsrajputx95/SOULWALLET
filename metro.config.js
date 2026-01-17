@@ -49,7 +49,8 @@ config.resolver = {
         /.*\/Dockerfile$/,
         /.*\/nginx\/.*/,
         /.*\/ssl\/.*/,
-        /.*\/scripts\/.*/,
+        // Only block project root scripts, not node_modules scripts
+        /^(?!.*node_modules).*\/scripts\/.*/,
     ],
     // Node.js polyfills for crypto packages (ed25519-hd-key, etc.)
     extraNodeModules: {
