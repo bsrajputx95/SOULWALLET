@@ -165,7 +165,7 @@ export default function CoinDetailsScreen() {
         txns24h: apiData.txns24h,
       };
     }
-    
+
     // Fallback: Create coinData from passed params if we have pairAddress or contractAddress
     // This ensures TokenInfo always loads if DexScreener data was passed
     if (passedPairAddress || passedContractAddress) {
@@ -193,7 +193,7 @@ export default function CoinDetailsScreen() {
         txns24h: undefined,
       };
     }
-    
+
     if (symbol?.toUpperCase() === 'SOL') {
       return {
         symbol: 'SOL',
@@ -430,12 +430,49 @@ export default function CoinDetailsScreen() {
     void Linking.openURL(url);
   };
 
-  const formatPrice = (price: number) => {
-    if (price < 0.000001) return price.toExponential(2);
-    if (price < 0.01) return price.toFixed(6);
-    if (price < 1) return price.toFixed(4);
-    if (price < 1000) return price.toFixed(2);
-    return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  /**
+   * Format price in DexScreener style: 0.0(5)234
+   * Shows the number of leading zeros in parentheses for very small prices
+   */
+  const formatPrice = (price: number): string => {
+    if (price === 0) return '0.00';
+
+    // For prices >= 1, use normal formatting
+    if (price >= 1000) {
+      return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+    if (price >= 1) {
+      return price.toFixed(2);
+    }
+    if (price >= 0.01) {
+      return price.toFixed(4);
+    }
+
+    // For very small prices, count leading zeros after decimal point
+    const priceStr = price.toFixed(20);
+    const decimalIndex = priceStr.indexOf('.');
+
+    if (decimalIndex === -1) return price.toFixed(2);
+
+    // Count leading zeros after decimal point
+    let zeroCount = 0;
+    for (let i = decimalIndex + 1; i < priceStr.length; i++) {
+      if (priceStr[i] === '0') {
+        zeroCount++;
+      } else {
+        break;
+      }
+    }
+
+    // If 4 or more leading zeros, use subscript notation
+    if (zeroCount >= 4) {
+      // Get the significant digits (up to 4 digits after the zeros)
+      const significantPart = priceStr.slice(decimalIndex + 1 + zeroCount, decimalIndex + 1 + zeroCount + 4);
+      return `0.0(${zeroCount})${significantPart}`;
+    }
+
+    // For fewer zeros, show normally
+    return price.toFixed(6);
   };
 
   const formatLargeNumber = (num: number) => {
@@ -500,9 +537,10 @@ export default function CoinDetailsScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Header */}
+        {/* Header - DexScreener Style */}
         <NeonCard style={styles.headerCard}>
           <View style={styles.tokenHeader}>
+            {/* Left: Logo + Ticker */}
             <View style={styles.tokenInfo}>
               {coinData.logo ? (
                 <Image source={{ uri: coinData.logo }} style={styles.tokenLogo} />
@@ -518,10 +556,10 @@ export default function CoinDetailsScreen() {
                     <Shield color={COLORS.success} size={16} style={styles.verifiedIcon} />
                   )}
                 </View>
-                <Text style={styles.tokenName}>{coinData.name}</Text>
               </View>
             </View>
 
+            {/* Right: Price + Change */}
             <View style={styles.priceContainer}>
               <Text style={styles.price}>${formatPrice(coinData.price)}</Text>
               <View style={styles.changeContainer}>
@@ -541,6 +579,18 @@ export default function CoinDetailsScreen() {
               </View>
             </View>
           </View>
+
+          {/* Watchlist button */}
+          <TouchableOpacity
+            onPress={toggleWatchlist}
+            style={styles.watchlistButton}
+          >
+            <Star
+              size={20}
+              color={watchlisted ? COLORS.warning : COLORS.textSecondary}
+              fill={watchlisted ? COLORS.warning : 'transparent'}
+            />
+          </TouchableOpacity>
         </NeonCard>
 
         {/* Stats + Sentiment (responsive order) */}
@@ -902,7 +952,7 @@ export default function CoinDetailsScreen() {
         {coinData.description && (
           <NeonCard style={styles.aboutCard}>
             <Text style={styles.sectionTitle}>About</Text>
-            <Text 
+            <Text
               style={styles.aboutText}
               numberOfLines={3}
               ellipsizeMode="tail"
@@ -1161,6 +1211,12 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 14,
     marginTop: SPACING.xs,
+  },
+  watchlistButton: {
+    position: 'absolute',
+    top: SPACING.m,
+    right: SPACING.m,
+    padding: SPACING.xs,
   },
   priceContainer: {
     alignItems: 'flex-end',

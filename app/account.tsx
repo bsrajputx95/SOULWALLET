@@ -20,6 +20,8 @@ import {
   DollarSign,
   X,
   Trash2,
+  Lock,
+  Users,
 } from 'lucide-react-native';
 
 import { COLORS } from '../constants/colors';
@@ -224,12 +226,7 @@ export default function AccountScreen() {
   );
 
   const handleResetPassword = () => {
-    setShowPasswordResetModal(true);
-    setPasswordResetStep(1);
-    setResetContactValue('');
-    setResetOtp('');
-    setNewPassword('');
-    setConfirmPassword('');
+    Alert.alert('Reset Password', 'This feature is coming soon!');
   };
 
 

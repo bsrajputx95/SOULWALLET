@@ -25,29 +25,67 @@ const isValidLogoUrl = (url?: string): boolean => {
   return true;
 };
 
+/**
+ * Format price in DexScreener style: 0.0(5)234
+ * Shows the number of leading zeros in parentheses for very small prices
+ */
+const formatDexScreenerPrice = (price: number): string => {
+  if (price === 0) return '$0.00';
+
+  // For prices >= 1, use normal formatting
+  if (price >= 1000) {
+    return `$${price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  }
+  if (price >= 1) {
+    return `$${price.toFixed(2)}`;
+  }
+  if (price >= 0.01) {
+    return `$${price.toFixed(4)}`;
+  }
+
+  // For very small prices, count leading zeros after decimal point
+  const priceStr = price.toFixed(20);
+  const decimalIndex = priceStr.indexOf('.');
+
+  if (decimalIndex === -1) return `$${price.toFixed(2)}`;
+
+  // Count leading zeros after decimal point
+  let zeroCount = 0;
+  for (let i = decimalIndex + 1; i < priceStr.length; i++) {
+    if (priceStr[i] === '0') {
+      zeroCount++;
+    } else {
+      break;
+    }
+  }
+
+  // If 4 or more leading zeros, use subscript notation
+  if (zeroCount >= 4) {
+    // Get the significant digits (up to 4 digits after the zeros)
+    const significantPart = priceStr.slice(decimalIndex + 1 + zeroCount, decimalIndex + 1 + zeroCount + 4);
+    return `$0.0(${zeroCount})${significantPart}`;
+  }
+
+  // For fewer zeros, show normally
+  return `$${price.toFixed(6)}`;
+};
+
 export const TokenCard: React.FC<TokenCardProps> = ({
   symbol,
-  name,
+  name: _name,
   price,
   change,
   liquidity,
   volume,
-  transactions,
+  transactions: _transactions,
   logo,
   onPress,
 }) => {
   // Track if image failed to load
   const [imageError, setImageError] = useState(false);
-  
+
   // Determine if we should show the image or letter avatar
   const showImage = isValidLogoUrl(logo) && !imageError;
-  const formatPrice = (price: number) => {
-    if (price < 0.000001) return price.toExponential(2);
-    if (price < 0.01) return price.toFixed(6);
-    if (price < 1) return price.toFixed(4);
-    if (price < 1000) return price.toFixed(2);
-    return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  };
 
   const formatLargeNumber = (num: number) => {
     if (num >= 1000000000) return `$${(num / 1000000000).toFixed(1)}B`;
@@ -58,12 +96,6 @@ export const TokenCard: React.FC<TokenCardProps> = ({
 
   const getChangeColor = (change: number) => {
     return change >= 0 ? COLORS.success : COLORS.error;
-  };
-
-  const formatTxnCount = (num: number) => {
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-    return `${Math.round(num)}`;
   };
 
   const handlePress = () => {
@@ -82,58 +114,48 @@ export const TokenCard: React.FC<TokenCardProps> = ({
     <TouchableOpacity onPress={handlePress} activeOpacity={0.8}>
       <NeonCard style={styles.container} color={getTokenColor(symbol)}>
         <View style={styles.content}>
-          <View style={styles.leftContent}>
-            <View style={styles.symbolContainer}>
-              {showImage ? (
-                <Image 
-                  source={{ uri: logo }} 
-                  style={styles.tokenLogo}
-                  onError={() => setImageError(true)}
-                />
-              ) : (
-                <View style={[styles.tokenLogoPlaceholder, { backgroundColor: getTokenColor(symbol)[0] + '30' }]}>
-                  <Text style={styles.tokenLogoText}>{symbol.charAt(0)}</Text>
-                </View>
-              )}
-              <View style={styles.tokenInfo}>
-                <Text style={styles.symbol}>{symbol}</Text>
-                <Text style={styles.name}>{name}</Text>
+          {/* Left: Logo + Ticker */}
+          <View style={styles.leftSection}>
+            {showImage ? (
+              <Image
+                source={{ uri: logo }}
+                style={styles.tokenLogo}
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <View style={[styles.tokenLogoPlaceholder, { backgroundColor: getTokenColor(symbol)[0] + '30' }]}>
+                <Text style={styles.tokenLogoText}>{symbol.charAt(0)}</Text>
               </View>
-            </View>
-            <Text style={styles.price}>${formatPrice(price)}</Text>
+            )}
+            <Text style={styles.ticker}>{symbol}</Text>
           </View>
-          
-          <View style={styles.rightContent}>
+
+          {/* Right: Price + Change */}
+          <View style={styles.rightSection}>
+            <Text style={styles.price}>{formatDexScreenerPrice(price)}</Text>
             <Text style={[styles.change, { color: getChangeColor(change) }]}>
-              {change >= 0 ? '+' : ''}{change.toFixed(1)}%
+              {change >= 0 ? '+' : ''}{change.toFixed(2)}%
             </Text>
-            
-            {(liquidity || volume || transactions) && (
-              <View style={styles.statsContainer}>
-                {liquidity && (
-                  <View style={styles.stat}>
-                    <Text style={[styles.statLabel, styles.statLabelL]}>L</Text>
-                    <Text style={styles.statValue}>{formatLargeNumber(liquidity)}</Text>
-                  </View>
-                )}
-                
-                {volume && (
-                  <View style={styles.stat}>
-                    <Text style={[styles.statLabel, styles.statLabelM]}>M</Text>
-                    <Text style={styles.statValue}>{formatLargeNumber(volume)}</Text>
-                  </View>
-                )}
-                
-                {typeof transactions === 'number' && (
-                  <View style={styles.stat}>
-                    <Text style={[styles.statLabel, styles.statLabelT]}>T</Text>
-                    <Text style={styles.statValue}>{formatTxnCount(transactions)}</Text>
-                  </View>
-                )}
+          </View>
+        </View>
+
+        {/* Bottom stats row (optional) */}
+        {(liquidity || volume) && (
+          <View style={styles.statsRow}>
+            {liquidity && (
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>LIQ</Text>
+                <Text style={styles.statValue}>{formatLargeNumber(liquidity)}</Text>
+              </View>
+            )}
+            {volume && (
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>VOL</Text>
+                <Text style={styles.statValue}>{formatLargeNumber(volume)}</Text>
               </View>
             )}
           </View>
-        </View>
+        )}
       </NeonCard>
     </TouchableOpacity>
   );
@@ -167,33 +189,32 @@ const getTokenColor = (symbol: string): readonly [string, string, ...string[]] =
 const styles = StyleSheet.create({
   container: {
     marginBottom: SPACING.xs,
+    paddingVertical: SPACING.s,
+    paddingHorizontal: SPACING.m,
   },
   content: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  leftContent: {
-    flex: 1,
-  },
-  rightContent: {
-    alignItems: 'flex-end',
-  },
-  symbolContainer: {
+  leftSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.xs,
+    flex: 1,
+  },
+  rightSection: {
+    alignItems: 'flex-end',
   },
   tokenLogo: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     marginRight: SPACING.s,
   },
   tokenLogoPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     marginRight: SPACING.s,
     justifyContent: 'center',
     alignItems: 'center',
@@ -201,56 +222,46 @@ const styles = StyleSheet.create({
   tokenLogoText: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
-    fontSize: 14,
+    fontSize: 16,
   },
-  tokenInfo: {
-    flex: 1,
-  },
-  symbol: {
+  ticker: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 16,
   },
-  name: {
-    ...FONTS.sfProRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-  },
   price: {
     ...FONTS.monospace,
     color: COLORS.textPrimary,
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: '600',
   },
   change: {
     ...FONTS.monospace,
     fontSize: 14,
     fontWeight: '700',
+    marginTop: 2,
   },
-  statsContainer: {
+  statsRow: {
     flexDirection: 'row',
-    marginTop: SPACING.xs,
+    marginTop: SPACING.s,
+    paddingTop: SPACING.s,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.cardBackground,
   },
   stat: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: SPACING.s,
+    marginRight: SPACING.m,
   },
   statLabel: {
-    fontSize: 12,
-    marginRight: 2,
-  },
-  statLabelL: {
-    color: COLORS.usdc,
-  },
-  statLabelM: {
-    color: COLORS.solana,
-  },
-  statLabelT: {
-    color: COLORS.warning,
+    ...FONTS.sfProMedium,
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    marginRight: 4,
   },
   statValue: {
-    ...FONTS.sfProRegular,
+    ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
   },
 });

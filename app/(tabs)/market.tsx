@@ -67,88 +67,93 @@ export default function MarketScreen() {
   // totalCount shows total filtered results, tokens shows paginated subset
   const visibleTokens = tokens;
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'soulmarket':
-        return (
-          <View style={styles.tabContent}>
-            {/* Queue Status Banner for transaction monitoring */}
-            <QueueStatusBanner onRetry={() => refetch()} />
+  // Check if current tab requires WebView (non-scrollable container)
+  const isWebViewTab = activeTab !== 'soulmarket';
 
-            {/* Loading State */}
-            {isLoading && tokens.length === 0 && (
-              <View style={styles.loadingContainer}>
-                <Text style={styles.loadingText}>Loading SoulMarket tokens...</Text>
-                <Text style={styles.loadingSubtext}>Filtering quality pairs with $250k+ liquidity</Text>
-              </View>
-            )}
+  const renderSoulMarketContent = () => {
+    return (
+      <View style={styles.tabContent}>
+        {/* Queue Status Banner for transaction monitoring */}
+        <QueueStatusBanner onRetry={() => refetch()} />
 
-            {/* Empty State */}
-            {!isLoading && visibleTokens.length === 0 && (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyTitle}>
-                  {searchQuery ? 'No tokens found' : 'No tokens available'}
-                </Text>
-                <Text style={styles.emptySubtitle}>
-                  {searchQuery
-                    ? 'Try a different search term'
-                    : 'Quality tokens will appear here'}
-                </Text>
-              </View>
-            )}
-
-            {/* Token Count */}
-            {totalCount > 0 && (
-              <Text style={styles.tokenCount}>
-                Showing {visibleTokens.length} of {totalCount} tokens
-              </Text>
-            )}
-
-            {/* Skeleton during initial load */}
-            {isInitialLoad && tokens.length === 0 ? (
-              <MarketSkeleton />
-            ) : (
-              <>
-                {/* Tokens List */}
-                {visibleTokens.map(token => (
-                  <TokenCard
-                    key={token.id}
-                    symbol={token.symbol}
-                    name={token.name}
-                    price={token.price}
-                    change={token.change24h}
-                    {...(token.liquidity !== undefined ? { liquidity: token.liquidity } : {})}
-                    {...(token.volume !== undefined ? { volume: token.volume } : {})}
-                    {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
-                    {...(token.logo ? { logo: token.logo } : {})}
-                    onPress={() => {
-                      // Navigate to coin details page with all available data
-                      router.push({
-                        pathname: `/coin/${token.symbol.toLowerCase()}` as any,
-                        params: {
-                          symbol: token.symbol,
-                          name: token.name,
-                          price: token.price.toString(),
-                          change: token.change24h.toString(),
-                          logo: token.logo || '',
-                          contractAddress: token.contractAddress || '',
-                          pairAddress: token.pairAddress || '',
-                        }
-                      });
-                    }}
-                  />
-                ))}
-              </>
-            )}
-
-            {/* Load More Button */}
-            {hasMore && (
-              <Pressable style={styles.loadMoreButton} onPress={loadMore}>
-                <Text style={styles.loadMoreText}>Load More</Text>
-              </Pressable>
-            )}
+        {/* Loading State */}
+        {isLoading && tokens.length === 0 && (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading SoulMarket tokens...</Text>
+            <Text style={styles.loadingSubtext}>Filtering quality pairs with $250k+ liquidity</Text>
           </View>
-        );
+        )}
+
+        {/* Empty State */}
+        {!isLoading && visibleTokens.length === 0 && (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>
+              {searchQuery ? 'No tokens found' : 'No tokens available'}
+            </Text>
+            <Text style={styles.emptySubtitle}>
+              {searchQuery
+                ? 'Try a different search term'
+                : 'Quality tokens will appear here'}
+            </Text>
+          </View>
+        )}
+
+        {/* Token Count */}
+        {totalCount > 0 && (
+          <Text style={styles.tokenCount}>
+            Showing {visibleTokens.length} of {totalCount} tokens
+          </Text>
+        )}
+
+        {/* Skeleton during initial load */}
+        {isInitialLoad && tokens.length === 0 ? (
+          <MarketSkeleton />
+        ) : (
+          <>
+            {/* Tokens List */}
+            {visibleTokens.map(token => (
+              <TokenCard
+                key={token.id}
+                symbol={token.symbol}
+                name={token.name}
+                price={token.price}
+                change={token.change24h}
+                {...(token.liquidity !== undefined ? { liquidity: token.liquidity } : {})}
+                {...(token.volume !== undefined ? { volume: token.volume } : {})}
+                {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
+                {...(token.logo ? { logo: token.logo } : {})}
+                onPress={() => {
+                  // Navigate to coin details page with all available data
+                  router.push({
+                    pathname: `/coin/${token.symbol.toLowerCase()}` as any,
+                    params: {
+                      symbol: token.symbol,
+                      name: token.name,
+                      price: token.price.toString(),
+                      change: token.change24h.toString(),
+                      logo: token.logo || '',
+                      contractAddress: token.contractAddress || '',
+                      pairAddress: token.pairAddress || '',
+                    }
+                  });
+                }}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Load More Button */}
+        {hasMore && (
+          <Pressable style={styles.loadMoreButton} onPress={loadMore}>
+            <Text style={styles.loadMoreText}>Load More</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  };
+
+  const renderWebViewTab = () => {
+    switch (activeTab) {
       case 'dexscreener':
         return <ExternalPlatformWebView platform="dexscreener" />;
       case 'raydium':
@@ -295,23 +300,31 @@ export default function MarketScreen() {
       </View>
 
       <ErrorBoundary>
-        <ScrollView
-          style={styles.content}
-          contentContainerStyle={[
-            styles.contentContainer,
-            {
-              paddingHorizontal: responsivePadding,
-              paddingTop: SPACING.s
+        {isWebViewTab ? (
+          /* WebView tabs need a flex container, not ScrollView */
+          <View style={styles.webViewContainer}>
+            {renderWebViewTab()}
+          </View>
+        ) : (
+          /* SoulMarket tab uses ScrollView for scrollable content */
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={[
+              styles.contentContainer,
+              {
+                paddingHorizontal: responsivePadding,
+                paddingTop: SPACING.s
+              }
+            ]}
+            showsVerticalScrollIndicator={false}
+            scrollEventThrottle={16}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
             }
-          ]}
-          showsVerticalScrollIndicator={false}
-          scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {renderTabContent()}
-        </ScrollView>
+          >
+            {renderSoulMarketContent()}
+          </ScrollView>
+        )}
       </ErrorBoundary>
     </SafeAreaView>
   );
@@ -319,6 +332,10 @@ export default function MarketScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  webViewContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
