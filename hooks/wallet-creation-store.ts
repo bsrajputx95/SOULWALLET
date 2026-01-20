@@ -5,6 +5,10 @@
  * - BIP39 mnemonic support
  * - No backend key storage
  */
+
+// CRITICAL: Polyfill must be imported FIRST before any crypto libraries
+import 'react-native-get-random-values';
+
 import { Keypair } from '@solana/web3.js';
 import * as bip39 from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
@@ -29,22 +33,22 @@ export class WalletManager {
   }> {
     // Generate BIP39 mnemonic (12 words)
     const mnemonic = bip39.generateMnemonic();
-    
+
     // Derive seed from mnemonic
     const seed = await bip39.mnemonicToSeed(mnemonic);
-    
+
     // Derive Solana keypair using standard path
     const path = "m/44'/501'/0'/0'"; // Solana derivation path
     const derivedSeed = derivePath(path, seed.toString('hex')).key;
     const keypair = Keypair.fromSeed(derivedSeed);
-    
+
     // Encrypt private key with user password
     const privateKeyBase58 = bs58.encode(keypair.secretKey);
     await SecureStorage.setEncryptedPrivateKey(privateKeyBase58, password);
-    
+
     // Encrypt mnemonic separately
     await SecureStorage.setEncryptedMnemonic(mnemonic, password);
-    
+
     return {
       keypair,
       mnemonic,
@@ -63,18 +67,18 @@ export class WalletManager {
     if (!bip39.validateMnemonic(mnemonic)) {
       throw new Error('Invalid mnemonic phrase');
     }
-    
+
     // Same derivation process as creation
     const seed = await bip39.mnemonicToSeed(mnemonic);
     const path = "m/44'/501'/0'/0'";
     const derivedSeed = derivePath(path, seed.toString('hex')).key;
     const keypair = Keypair.fromSeed(derivedSeed);
-    
+
     // Encrypt and store
     const privateKeyBase58 = bs58.encode(keypair.secretKey);
     await SecureStorage.setEncryptedPrivateKey(privateKeyBase58, password);
     await SecureStorage.setEncryptedMnemonic(mnemonic, password);
-    
+
     return {
       keypair,
       publicKey: keypair.publicKey.toString(),
@@ -89,7 +93,7 @@ export class WalletManager {
     password: string
   ): Promise<{ keypair: Keypair; publicKey: string }> {
     let keypair: Keypair;
-    
+
     try {
       // Try base58 format first
       const secretKey = bs58.decode(privateKey);
@@ -99,11 +103,11 @@ export class WalletManager {
       const secretKey = new Uint8Array(JSON.parse(privateKey));
       keypair = Keypair.fromSecretKey(secretKey);
     }
-    
+
     // Encrypt and store
     const privateKeyBase58 = bs58.encode(keypair.secretKey);
     await SecureStorage.setEncryptedPrivateKey(privateKeyBase58, password);
-    
+
     return {
       keypair,
       publicKey: keypair.publicKey.toString(),
@@ -115,11 +119,11 @@ export class WalletManager {
    */
   static async getWallet(password: string): Promise<Keypair> {
     const privateKeyBase58 = await SecureStorage.getDecryptedPrivateKey(password);
-    
+
     if (!privateKeyBase58) {
       throw new Error('No wallet found. Please create or import a wallet.');
     }
-    
+
     const secretKey = bs58.decode(privateKeyBase58);
     return Keypair.fromSecretKey(secretKey);
   }
@@ -150,11 +154,11 @@ export class WalletManager {
    */
   static async exportMnemonic(password: string): Promise<string> {
     const mnemonic = await SecureStorage.getDecryptedMnemonic(password);
-    
+
     if (!mnemonic) {
       throw new Error('No mnemonic found for this wallet.');
     }
-    
+
     return mnemonic;
   }
 
@@ -163,11 +167,11 @@ export class WalletManager {
    */
   static async exportPrivateKey(password: string): Promise<string> {
     const privateKeyBase58 = await SecureStorage.getDecryptedPrivateKey(password);
-    
+
     if (!privateKeyBase58) {
       throw new Error('No wallet found.');
     }
-    
+
     return privateKeyBase58;
   }
 
@@ -178,14 +182,14 @@ export class WalletManager {
     // Decrypt with old password
     const privateKeyBase58 = await SecureStorage.getDecryptedPrivateKey(oldPassword);
     const mnemonic = await SecureStorage.getDecryptedMnemonic(oldPassword);
-    
+
     if (!privateKeyBase58) {
       throw new Error('Invalid old password or no wallet found.');
     }
-    
+
     // Re-encrypt with new password
     await SecureStorage.setEncryptedPrivateKey(privateKeyBase58, newPassword);
-    
+
     if (mnemonic) {
       await SecureStorage.setEncryptedMnemonic(mnemonic, newPassword);
     }
@@ -206,7 +210,7 @@ interface WalletCreationState {
   hasWallet: boolean;
   currentPublicKey: string | null;
   error: string | null;
-  
+
   // Actions
   createWallet: (password: string) => Promise<{ mnemonic: string; publicKey: string }>;
   importFromMnemonic: (mnemonic: string, password: string) => Promise<string>;
@@ -226,19 +230,19 @@ export const useWalletCreationStore = create<WalletCreationState>()(
 
       createWallet: async (password: string) => {
         set({ isCreating: true, error: null });
-        
+
         try {
           const result = await WalletManager.createNewWallet(password);
-          
+
           // Register with backend
           await WalletManager.registerWallet(result.publicKey);
-          
+
           set({
             isCreating: false,
             hasWallet: true,
             currentPublicKey: result.publicKey,
           });
-          
+
           return {
             mnemonic: result.mnemonic,
             publicKey: result.publicKey,
@@ -254,19 +258,19 @@ export const useWalletCreationStore = create<WalletCreationState>()(
 
       importFromMnemonic: async (mnemonic: string, password: string) => {
         set({ isImporting: true, error: null });
-        
+
         try {
           const result = await WalletManager.importFromMnemonic(mnemonic, password);
-          
+
           // Register with backend
           await WalletManager.registerWallet(result.publicKey);
-          
+
           set({
             isImporting: false,
             hasWallet: true,
             currentPublicKey: result.publicKey,
           });
-          
+
           return result.publicKey;
         } catch (error: any) {
           set({
@@ -279,19 +283,19 @@ export const useWalletCreationStore = create<WalletCreationState>()(
 
       importFromPrivateKey: async (privateKey: string, password: string) => {
         set({ isImporting: true, error: null });
-        
+
         try {
           const result = await WalletManager.importFromPrivateKey(privateKey, password);
-          
+
           // Register with backend
           await WalletManager.registerWallet(result.publicKey);
-          
+
           set({
             isImporting: false,
             hasWallet: true,
             currentPublicKey: result.publicKey,
           });
-          
+
           return result.publicKey;
         } catch (error: any) {
           set({
@@ -305,7 +309,7 @@ export const useWalletCreationStore = create<WalletCreationState>()(
       checkWalletExists: async () => {
         try {
           const exists = await WalletManager.hasWallet();
-          
+
           // If wallet exists, try to get public key from storage
           if (exists) {
             const publicKey = await SecureStorage.getSecureItem('wallet_public_key');
