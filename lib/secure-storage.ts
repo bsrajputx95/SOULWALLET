@@ -57,10 +57,17 @@ function fromHex(hex: string): CryptoJS.lib.WordArray {
 
 function randomHex(bytes: number): string {
   // Use native crypto if available, otherwise expo-crypto
-  if (QuickCrypto) {
-    const randomBytes = QuickCrypto.randomBytes(bytes);
-    return Buffer.from(randomBytes).toString('hex');
+  // CRITICAL: Wrap in try-catch to prevent app crash if native module fails
+  if (QuickCrypto && Platform.OS !== 'web') {
+    try {
+      const randomBytes = QuickCrypto.randomBytes(bytes);
+      return Buffer.from(randomBytes).toString('hex');
+    } catch (error) {
+      // Native crypto failed - fall through to expo-crypto
+      logger.warn('QuickCrypto.randomBytes failed, using expo-crypto fallback');
+    }
   }
+  // Fallback to expo-crypto (works on all platforms)
   const randomBytes = ExpoCrypto.getRandomBytes(bytes);
   return Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
