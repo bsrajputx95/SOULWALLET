@@ -33,6 +33,9 @@ class BirdeyeDataService {
   // Comment 1: Circuit breakers for wallet data
   private readonly pnlBreaker = getCircuitBreaker('birdeye:pnl')
   private readonly walletBreaker = getCircuitBreaker('birdeye:wallet')
+  // Circuit breakers for market data
+  private readonly trendingBreaker = getCircuitBreaker('birdeye:trending')
+  private readonly topTokensBreaker = getCircuitBreaker('birdeye:soulmarket')
 
   /**
    * Get wallet PnL data from Birdeye
@@ -208,11 +211,13 @@ class BirdeyeDataService {
     return {
       success: false,
       data: {
-        total_pnl_usd: 0,
-        total_realized_profit_usd: 0,
-        total_unrealized_profit_usd: 0,
-        roi_percentage: 0,
-        total_trades: 0,
+        total_usd: 0,
+        realized_profit_usd: 0,
+        unrealized_usd: 0,
+        total_percent: 0,
+        realized_profit_percent: 0,
+        unrealized_percent: 0,
+        counts: { total_trade: 0 },
       }
     };
   }
@@ -229,6 +234,178 @@ class BirdeyeDataService {
     } else {
       void redisCache.invalidatePattern('birdeye:*')
     }
+  }
+
+  /**
+   * Calculate seconds until next 15:00 UTC
+   * Used for trending token cache TTL
+   */
+  private getSecondsUntilNext15UTC(): number {
+    const now = new Date()
+    const target = new Date(now)
+    target.setUTCHours(15, 0, 0, 0)
+
+    // If already past 15:00 UTC today, set to tomorrow
+    if (now >= target) {
+      target.setUTCDate(target.getUTCDate() + 1)
+    }
+
+    return Math.floor((target.getTime() - now.getTime()) / 1000)
+  }
+
+  /**
+   * Calculate seconds until next hour
+   * Used for SoulMarket cache TTL
+   */
+  private getSecondsUntilNextHour(): number {
+    const now = new Date()
+    const nextHour = new Date(now)
+    nextHour.setUTCHours(nextHour.getUTCHours() + 1, 0, 0, 0)
+    return Math.floor((nextHour.getTime() - now.getTime()) / 1000)
+  }
+
+  /**
+   * Get trending tokens from Birdeye
+   * Cached until next 15:00 UTC (daily refresh)
+   * @param limit Number of tokens to fetch (default 10)
+   */
+  async getTrendingTokens(limit: number = 10) {
+    const cacheKey = 'birdeye:trending:daily' as const
+    const cached = await redisCache.get<any>(cacheKey)
+    if (cached) return cached
+
+    return this.trendingBreaker.exec(
+      async () => {
+        return retryWithBackoff(async () => {
+          const response = await axiosInstance.get('/defi/token_trending', {
+            params: {
+              sort_by: 'rank',
+              sort_type: 'asc',
+              offset: 0,
+              limit: Math.min(limit, 20), // Birdeye max is 20
+            },
+            headers: {
+              'X-API-KEY': this.apiKey,
+              'x-chain': 'solana',
+              'accept': 'application/json',
+            },
+            timeout: EXTERNAL_CALL_TIMEOUT,
+          })
+
+          const data = response.data
+          if (!data?.success || !data?.data?.tokens) {
+            logger.warn('Invalid Birdeye trending response', { response: data })
+            return { pairs: [] }
+          }
+
+          // Transform Birdeye format to our standard format
+          const pairs = data.data.tokens.map((token: any) => ({
+            baseToken: {
+              address: token.address,
+              symbol: token.symbol,
+              name: token.name,
+            },
+            priceUsd: String(token.price || 0),
+            priceChange: {
+              h24: token.priceChange24h || 0,
+            },
+            volume: {
+              h24: String(token.v24hUSD || 0),
+            },
+            liquidity: {
+              usd: String(token.liquidity || 0),
+            },
+            info: {
+              imageUrl: token.logoURI || null,
+            },
+            chainId: 'solana',
+            pairAddress: token.address, // Use token address as pair address for navigation
+          }))
+
+          const result = { pairs }
+          const ttl = this.getSecondsUntilNext15UTC()
+          await redisCache.set(cacheKey, result, ttl)
+          logger.info(`Birdeye trending cached with ${pairs.length} tokens, TTL: ${ttl}s`)
+          return result
+        }, { maxRetries: 2, initialDelayMs: 500 })
+      },
+      () => {
+        logger.warn('Birdeye trending circuit breaker open, returning empty')
+        return { pairs: [] }
+      }
+    )
+  }
+
+  /**
+   * Get top tokens by volume for SoulMarket
+   * Cached for 1 hour (hourly refresh)
+   * @param limit Number of tokens to fetch (default 30)
+   */
+  async getTopTokens(limit: number = 30) {
+    const cacheKey = 'birdeye:soulmarket:hourly' as const
+    const cached = await redisCache.get<any>(cacheKey)
+    if (cached) return cached
+
+    return this.topTokensBreaker.exec(
+      async () => {
+        return retryWithBackoff(async () => {
+          const response = await axiosInstance.get('/defi/v3/token/list', {
+            params: {
+              sort_by: 'v24hUSD',
+              sort_type: 'desc',
+              offset: 0,
+              limit: Math.min(limit, 50), // Limit to 50 max
+            },
+            headers: {
+              'X-API-KEY': this.apiKey,
+              'x-chain': 'solana',
+              'accept': 'application/json',
+            },
+            timeout: EXTERNAL_CALL_TIMEOUT,
+          })
+
+          const data = response.data
+          if (!data?.success || !data?.data?.tokens) {
+            logger.warn('Invalid Birdeye top tokens response', { response: data })
+            return { pairs: [] }
+          }
+
+          // Transform Birdeye format to our standard format
+          const pairs = data.data.tokens.map((token: any) => ({
+            baseToken: {
+              address: token.address,
+              symbol: token.symbol,
+              name: token.name,
+            },
+            priceUsd: String(token.price || 0),
+            priceChange: {
+              h24: token.priceChange24hPercent || 0,
+            },
+            volume: {
+              h24: String(token.v24hUSD || 0),
+            },
+            liquidity: {
+              usd: String(token.liquidity || 0),
+            },
+            info: {
+              imageUrl: token.logoURI || null,
+            },
+            chainId: 'solana',
+            pairAddress: token.address,
+          }))
+
+          const result = { pairs }
+          const ttl = this.getSecondsUntilNextHour()
+          await redisCache.set(cacheKey, result, ttl)
+          logger.info(`Birdeye SoulMarket cached with ${pairs.length} tokens, TTL: ${ttl}s`)
+          return result
+        }, { maxRetries: 2, initialDelayMs: 500 })
+      },
+      () => {
+        logger.warn('Birdeye top tokens circuit breaker open, returning empty')
+        return { pairs: [] }
+      }
+    )
   }
 }
 

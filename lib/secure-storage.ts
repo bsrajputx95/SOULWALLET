@@ -95,7 +95,12 @@ function deriveKeyNative(password: string, saltBuffer: Buffer, keyBytes: number,
   if (!QuickCrypto) {
     throw new Error('Native crypto not available');
   }
-  return QuickCrypto.pbkdf2Sync(password, saltBuffer, iterations, keyBytes, 'sha256');
+  try {
+    return QuickCrypto.pbkdf2Sync(password, saltBuffer, iterations, keyBytes, 'sha256');
+  } catch (error: any) {
+    logger.error('Native PBKDF2 failed, will fallback to JS:', error?.message);
+    throw new Error('Native crypto operation failed');
+  }
 }
 
 function deriveKeyJS(password: string, saltHex: string, keyBytes: number, iterations: number): CryptoJS.lib.WordArray {
@@ -114,22 +119,28 @@ function deriveKeyJS(password: string, saltHex: string, keyBytes: number, iterat
 async function deriveKeys(password: string, saltHex: string, iterations: number): Promise<{ aesKey: CryptoJS.lib.WordArray; macKey: CryptoJS.lib.WordArray }> {
   // Use native crypto if available (much faster for high iterations)
   if (QuickCrypto && Platform.OS !== 'web') {
-    const saltBuffer = Buffer.from(saltHex, 'hex');
-    const derivedBuffer = await runOffMainThread(() =>
-      deriveKeyNative(password, saltBuffer, 64, iterations)
-    );
-    // Convert Buffer to CryptoJS WordArray
-    const derivedHex = derivedBuffer.toString('hex');
-    const derived = fromHex(derivedHex);
-    return {
-      aesKey: CryptoJS.lib.WordArray.create(derived.words.slice(0, 8), 32),
-      macKey: CryptoJS.lib.WordArray.create(derived.words.slice(8, 16), 32),
-    };
+    try {
+      const saltBuffer = Buffer.from(saltHex, 'hex');
+      const derivedBuffer = await runOffMainThread(() =>
+        deriveKeyNative(password, saltBuffer, 64, iterations)
+      );
+      // Convert Buffer to CryptoJS WordArray
+      const derivedHex = derivedBuffer.toString('hex');
+      const derived = fromHex(derivedHex);
+      return {
+        aesKey: CryptoJS.lib.WordArray.create(derived.words.slice(0, 8), 32),
+        macKey: CryptoJS.lib.WordArray.create(derived.words.slice(8, 16), 32),
+      };
+    } catch (error) {
+      // Native crypto failed - fall through to JS implementation
+      logger.warn('Native crypto failed, falling back to CryptoJS:', error);
+    }
   }
 
-  // Fallback to CryptoJS for web
+  // Fallback to CryptoJS for web or if native failed
+  const jsIterations = Math.min(iterations, PBKDF2_ITERATIONS_WEB); // Use lower iterations for JS
   const derived = await runOffMainThread(() =>
-    deriveKeyJS(password, saltHex, 64, iterations)
+    deriveKeyJS(password, saltHex, 64, jsIterations)
   );
   return {
     aesKey: CryptoJS.lib.WordArray.create(derived.words.slice(0, 8), 32),

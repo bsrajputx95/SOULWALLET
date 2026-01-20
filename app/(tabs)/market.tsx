@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ShoppingCart } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
@@ -21,6 +23,7 @@ import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
 import { QueueStatusBanner } from '../../components/QueueStatusBanner';
 import { MarketSkeleton } from '../../components/SkeletonLoader';
+import { QuickBuyModal } from '../../components/QuickBuyModal';
 
 type MarketTab = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
 
@@ -44,6 +47,7 @@ export default function MarketScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<MarketTab>('soulmarket');
+  const [showQuickBuyModal, setShowQuickBuyModal] = useState(false);
 
   // Loading state for skeleton - only show on initial cold start
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -179,27 +183,7 @@ export default function MarketScreen() {
           }
         ]}
       >
-        {/* Top Header Section */}
-        <View style={styles.header}>
-          <View style={styles.dropdown}>
-            <Pressable
-              style={styles.dropdownButton}
-              onPress={() => { if (__DEV__) console.log('Open dropdown'); }}
-            >
-              <Text style={styles.dropdownText}>
-                {activeTab === 'soulmarket' && 'SoulMarket'}
-                {activeTab === 'dexscreener' && 'DexScreener'}
-                {activeTab === 'raydium' && 'Raydium'}
-                {activeTab === 'bonk' && 'Bonk'}
-                {activeTab === 'pumpfun' && 'Pump.fun'}
-                {activeTab === 'orca' && 'Orca'}
-              </Text>
-              <Text style={styles.dropdownIcon}>▼</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Tabs Section */}
+        {/* Tabs Section - moved to top, no dropdown needed */}
         <View style={styles.tabsContainer}>
           <ScrollView
             horizontal
@@ -326,6 +310,25 @@ export default function MarketScreen() {
           </ScrollView>
         )}
       </ErrorBoundary>
+
+      {/* Floating Quick Buy Cart Button */}
+      <Pressable
+        style={styles.floatingCartButton}
+        onPress={() => setShowQuickBuyModal(true)}
+      >
+        <LinearGradient
+          colors={[COLORS.solana, COLORS.solana + '80']}
+          style={styles.floatingCartGradient}
+        >
+          <ShoppingCart size={24} color={COLORS.textPrimary} />
+        </LinearGradient>
+      </Pressable>
+
+      {/* Quick Buy Modal */}
+      <QuickBuyModal
+        visible={showQuickBuyModal}
+        onClose={() => setShowQuickBuyModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -341,37 +344,7 @@ const styles = StyleSheet.create({
   },
   combinedHeader: {
     backgroundColor: COLORS.background,
-    paddingVertical: 0, // Completely removed all vertical padding
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 0, // Completely removed all vertical padding
-    backgroundColor: COLORS.background,
-    height: 60,
-  },
-  headerButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.s,
-  },
-  dropdown: {
-    flex: 1,
-  },
-  dropdownButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dropdownText: {
-    ...FONTS.orbitronBold,
-    color: COLORS.solana,
-    fontSize: 18,
-    marginRight: SPACING.xs,
-  },
-  dropdownIcon: {
-    color: COLORS.solana,
-    fontSize: 12,
+    paddingVertical: SPACING.xs, // Minimal vertical padding for tabs
   },
   filterButton: {
     width: 40,
@@ -690,5 +663,25 @@ const styles = StyleSheet.create({
     ...FONTS.sfProMedium,
     color: COLORS.solana,
     fontSize: 14,
+  },
+  // Floating cart button
+  floatingCartButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    borderRadius: 30,
+    overflow: 'hidden',
+    shadowColor: COLORS.solana,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  floatingCartGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

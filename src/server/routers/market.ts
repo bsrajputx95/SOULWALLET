@@ -106,9 +106,10 @@ export const marketRouter = router({
           decimals: pair.baseToken?.decimals || 9,
           // Logo with multiple fallback sources
           logo: pair.info?.imageUrl
-            || pair.info?.header  // Some tokens have header image
             || getWellKnownTokenLogo(pair.baseToken?.symbol) // Fallback to well-known tokens
             || null,
+          // Banner/header image (separate from logo)
+          banner: pair.info?.header || null,
 
           // Price Data
           price: parseFloat(pair.priceUsd || '0'),
@@ -175,15 +176,11 @@ export const marketRouter = router({
       }
     }),
 
-  // Trending (fallback implementation)
+  // Trending - Uses DexScreener API, refreshes at 15:00 UTC daily
   trending: publicProcedure
     .query(async () => {
       try {
-        // Check cache first (key must match marketData.trending() which uses 'trending:daily')
-        const cached = await redisCache.get<any>('trending:daily');
-        if (cached) return cached;
-        
-        // Fetch trending data synchronously to ensure we return data
+        // Use DexScreener for trending tokens (10 tokens, proper logos and prices)
         const data = await marketData.trending();
         return data;
       } catch (error) {
@@ -191,14 +188,13 @@ export const marketRouter = router({
       }
     }),
 
-  // SoulMarket - Curated tokens with quality filters
+  // SoulMarket - Top 30 boosted tokens, refreshes hourly
   soulMarket: publicProcedure
     .query(async () => {
       try {
-        const cached = await redisCache.get<any>('soulmarket');
-        if (cached) return cached;
-        void marketData.getSoulMarket().catch(() => void 0);
-        return { pairs: [] };
+        // Use DexScreener for SoulMarket tokens (30 tokens, hourly refresh)
+        const data = await marketData.getSoulMarket();
+        return data;
       } catch (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch SoulMarket tokens' });
       }
