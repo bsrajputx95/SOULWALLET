@@ -4,6 +4,7 @@ import { trpcClient } from '../lib/trpc';
 import { SecureStorage } from '../lib/secure-storage';
 import { logger } from '../lib/client-logger';
 import { setUser as setSentryUser, clearUser as clearSentryUser, captureException, addBreadcrumb } from '../lib/sentry';
+import { setAuthHydrated } from '../lib/auth-hydration';
 
 export interface User {
   id: string;
@@ -25,10 +26,6 @@ export interface User {
     mnemonic: string;
   } | undefined;
 }
-
-// Track hydration state globally so trpc can check it
-let authHydrationComplete = false;
-export const isAuthHydrated = () => authHydrationComplete;
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
@@ -63,7 +60,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       captureException(err instanceof Error ? err : new Error('Failed to load user'), { context: 'loadUser' });
     } finally {
       // Mark hydration complete and stop loading
-      authHydrationComplete = true;
+      setAuthHydrated(true);
       setIsLoading(false);
     }
   };

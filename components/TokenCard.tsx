@@ -105,23 +105,23 @@ export const TokenCard: React.FC<TokenCardProps> = ({
               {change >= 0 ? '+' : ''}{change.toFixed(1)}%
             </Text>
 
-            {(liquidity || volume || transactions) && (
+            {(typeof liquidity === 'number' || typeof volume === 'number' || typeof transactions === 'number') && (
               <View style={styles.statsContainer}>
-                {liquidity && (
+                {typeof liquidity === 'number' && liquidity > 0 && (
                   <View style={styles.stat}>
                     <Text style={[styles.statLabel, styles.statLabelL]}>L</Text>
                     <Text style={styles.statValue}>{formatLargeNumber(liquidity)}</Text>
                   </View>
                 )}
 
-                {volume && (
+                {typeof volume === 'number' && volume > 0 && (
                   <View style={styles.stat}>
                     <Text style={[styles.statLabel, styles.statLabelM]}>M</Text>
                     <Text style={styles.statValue}>{formatLargeNumber(volume)}</Text>
                   </View>
                 )}
 
-                {typeof transactions === 'number' && (
+                {typeof transactions === 'number' && transactions > 0 && (
                   <View style={styles.stat}>
                     <Text style={[styles.statLabel, styles.statLabelT]}>T</Text>
                     <Text style={styles.statValue}>{formatTxnCount(transactions)}</Text>

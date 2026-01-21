@@ -279,21 +279,7 @@ export const copyTradingRouter = router({
       const userId = ctx.user.id
       const lockKey = `copy-trade:${userId}:${input.walletAddress}`
 
-      // Comment 3: Make TOTP optional - only verify if user has 2FA enabled
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { totpSecret: true },
-      });
-
-      const has2FAEnabled = !!user?.totpSecret;
-
-      if (has2FAEnabled) {
-        if (!input.totpCode) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required for copy trading' });
-        }
-        await verifyTotpForUser(userId, input.totpCode);
-      }
-      // If user doesn't have 2FA, allow proceeding without TOTP code
+      // 2FA removed - allow copy trading without verification
 
       // Validate amount per trade <= total budget
       if (input.amountPerTrade > input.totalBudget) {

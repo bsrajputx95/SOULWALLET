@@ -1,12 +1,17 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import createContextHook from '@/lib/create-context-hook';
 import { trpc } from '@/lib/trpc';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   MarketFilters,
   DEFAULT_FILTERS,
   QuickFilterType,
   countActiveFilters
 } from '../types/market-filters';
+
+// Cache key for market data
+const MARKET_CACHE_KEY = 'SOULMARKET_CACHE_V1';
+const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 // Well-known token logos for popular Solana tokens (fallback when DexScreener doesn't have them)
 const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
@@ -67,13 +72,57 @@ export interface Token {
 const PAGE_SIZE = 20;
 
 export const [MarketProvider, useMarket] = createContextHook(() => {
+  // Cached data for instant display
+  const [cachedData, setCachedData] = useState<any>(null);
+  const cacheLoadedRef = useRef(false);
+
+  // Load cached data immediately on mount (before API call)
+  useEffect(() => {
+    if (cacheLoadedRef.current) return;
+    cacheLoadedRef.current = true;
+
+    (async () => {
+      try {
+        const cached = await AsyncStorage.getItem(MARKET_CACHE_KEY);
+        if (cached) {
+          const { data, timestamp } = JSON.parse(cached);
+          // Use cache if less than 1 hour old
+          if (Date.now() - timestamp < CACHE_MAX_AGE_MS) {
+            setCachedData(data);
+          }
+        }
+      } catch (e) {
+        // Ignore cache read errors
+      }
+    })();
+  }, []);
+
   // ✅ Fetch real SoulMarket tokens from backend - hourly snapshot
   const { data: soulMarketData, isLoading: isLoadingMarket, refetch: refetchMarket } = trpc.market.soulMarket.useQuery(undefined, {
     staleTime: Infinity, // Treat as hourly snapshot - don't refetch automatically
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnMount: true, // Fetch on mount to refresh cache
     refetchOnReconnect: false,
   });
+
+  // Save to cache when fresh data arrives
+  useEffect(() => {
+    if (soulMarketData && 'pairs' in soulMarketData) {
+      (async () => {
+        try {
+          await AsyncStorage.setItem(MARKET_CACHE_KEY, JSON.stringify({
+            data: soulMarketData,
+            timestamp: Date.now(),
+          }));
+        } catch (e) {
+          // Ignore cache write errors
+        }
+      })();
+    }
+  }, [soulMarketData]);
+
+  // Use API data if available, otherwise fallback to cached data
+  const effectiveMarketData = soulMarketData || cachedData;
 
   // Filter state
   const [filters, setFilters] = useState<MarketFilters>(DEFAULT_FILTERS);
@@ -181,12 +230,12 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
 
   // Transform DexScreener data to Token format with extended fields
   const rawTokens = useMemo(() => {
-    if (!soulMarketData || !('pairs' in soulMarketData) || !soulMarketData.pairs || (soulMarketData.pairs as any[]).length === 0) {
+    if (!effectiveMarketData || !('pairs' in effectiveMarketData) || !effectiveMarketData.pairs || (effectiveMarketData.pairs as any[]).length === 0) {
       // Return dummy data for UI testing when no real data
       return DUMMY_TOKENS;
     }
 
-    return (soulMarketData.pairs as any[]).map((pair: any) => {
+    return (effectiveMarketData.pairs as any[]).map((pair: any) => {
       const buys24h = pair.txns?.h24?.buys || 0;
       const sells24h = pair.txns?.h24?.sells || 0;
       const totalTxns = buys24h + sells24h;
@@ -216,7 +265,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
         pairAddress: pair.pairAddress || '',
       };
     });
-  }, [soulMarketData]);
+  }, [effectiveMarketData]);
 
   // Apply all filters
   const filteredTokens = useMemo(() => {
@@ -604,7 +653,8 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
   ]);
   */
 
-  const isLoading = isLoadingMarket;
+  // Only show loading if no data at all (cached or fresh)
+  const isLoading = isLoadingMarket && !effectiveMarketData;
 
   // Filter actions
   const toggleQuickFilter = useCallback((filter: QuickFilterType) => {

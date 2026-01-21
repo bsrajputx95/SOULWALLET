@@ -4,7 +4,7 @@ import superjson from 'superjson';
 import { SecureStorage } from './secure-storage';
 import Constants from 'expo-constants';
 import type { AppRouter } from '../src/server/types';
-import { isAuthHydrated } from '../hooks/auth-store';
+import { isAuthHydrated } from './auth-hydration';
 
 
 export const trpc = createTRPCReact<AppRouter>();

@@ -59,14 +59,29 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
 }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const webViewRef = useRef<WebView>(null);
 
   const platformUrl = PLATFORM_URLS[platform] || '';
   const platformName = PLATFORM_NAMES[platform] || platform;
 
+  // Auto-load WebView when component mounts (helps with perceived speed)
+  React.useEffect(() => {
+    // Reset loading state when platform changes
+    setLoading(true);
+    setError(null);
+    setHasLoaded(false);
+  }, [platform]);
+
   // Handle WebView navigation state changes
   const handleNavigationStateChange = useCallback((_navState: WebViewNavigation) => {
     // Simple navigation tracking (no token detection)
+  }, []);
+
+  // When load finishes, mark as loaded to prevent flicker on re-visits
+  const handleLoadEnd = useCallback(() => {
+    setLoading(false);
+    setHasLoaded(true);
   }, []);
 
   const handleRefresh = useCallback(() => {
@@ -169,20 +184,28 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
 
       {/* WebView */}
       <WebView
+        key={platform} // Force re-mount on platform change for clean state
         ref={webViewRef}
         source={{ uri: platformUrl }}
-        style={styles.webView}
+        style={[styles.webView, { opacity: hasLoaded ? 1 : 0.99 }]} // Slight opacity change forces render
         onLoadStart={() => setLoading(true)}
-        onLoadEnd={() => setLoading(false)}
+        onLoadEnd={handleLoadEnd}
         onNavigationStateChange={handleNavigationStateChange}
         onError={(syntheticEvent) => {
           const { nativeEvent } = syntheticEvent;
           setError(nativeEvent.description || 'Failed to load page');
           onError?.(nativeEvent.description || 'Failed to load page');
         }}
+        onHttpError={(syntheticEvent) => {
+          // Handle HTTP errors (4xx, 5xx)
+          const { nativeEvent } = syntheticEvent;
+          if (nativeEvent.statusCode >= 400) {
+            console.warn(`HTTP ${nativeEvent.statusCode} loading ${platformName}`);
+          }
+        }}
         javaScriptEnabled={true}
         domStorageEnabled={true}
-        startInLoadingState={true}
+        startInLoadingState={false} // We handle our own loading state
         scalesPageToFit={true}
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
@@ -196,6 +219,10 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         thirdPartyCookiesEnabled={true}
         sharedCookiesEnabled={true}
         incognito={false}
+        // Additional performance settings
+        allowsBackForwardNavigationGestures={true}
+        bounces={false}
+        overScrollMode="never"
       />
     </View>
   );

@@ -261,6 +261,11 @@ export default function HomeScreen() {
         volume24h: parseFloat(pair.volume?.h24 || '0'),
         // Use DexScreener logo, header image, or well-known token logos as fallback
         logo: pair.info?.imageUrl || pair.info?.header || getWellKnownTokenLogo(symbol),
+        // Add missing fields to match topCoins structure
+        liquidity: parseFloat(pair.liquidity?.usd || '0'),
+        transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
+        contractAddress: pair.baseToken?.address || '',
+        pairAddress: pair.pairAddress || '',
       };
     });
   }, [searchData]);
