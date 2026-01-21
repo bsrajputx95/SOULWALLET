@@ -28,6 +28,9 @@
         "android.permission.INTERNET",
         "android.permission.VIBRATE",
         "android.permission.CAMERA"
+      ],
+      "abiFilters": [
+        "arm64-v8a"
       ]
     },
     "plugins": [
@@ -41,9 +44,9 @@
         "origin": "https://rork.com/"
       },
       "eas": {
-        "projectId": "12a94060-924c-4280-a06f-a522cf7ed700"
+        "projectId": "39377c11-1e45-436d-95c7-267e708b6b86"
       }
     },
-    "owner": "bhavanisinghx17"
+    "owner": "bhavanisinghx18"
   }
 }

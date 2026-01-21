@@ -1,12 +1,44 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import createContextHook from '@/lib/create-context-hook';
 import { trpc } from '@/lib/trpc';
-import { 
-  MarketFilters, 
-  DEFAULT_FILTERS, 
+import {
+  MarketFilters,
+  DEFAULT_FILTERS,
   QuickFilterType,
-  countActiveFilters 
+  countActiveFilters
 } from '../types/market-filters';
+
+// Well-known token logos for popular Solana tokens (fallback when DexScreener doesn't have them)
+const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
+  'SOL': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+  'RAY': 'https://raw.githubusercontent.com/raydium-io/media-assets/master/logo/logo_200x200.png',
+  'JUP': 'https://static.jup.ag/jup/icon.png',
+  'USDC': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
+  'USDT': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+  'BONK': 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
+  'WIF': 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link',
+  'POPCAT': 'https://bafkreidvnhdzuq3pvhnzq26hjydmhrr2xw2flkxkflg7swmrxnx7c7xvey.ipfs.nftstorage.link',
+  'PYTH': 'https://pyth.network/token.svg',
+  'JTO': 'https://metadata.jito.network/token/jto/icon.png',
+  'ORCA': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE/logo.png',
+  'MNGO': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/MangoCzJ36AjZyKwVj3VnYU4GTonjfVEnJmvvWaxLac/token.png',
+  'RENDER': 'https://assets.coingecko.com/coins/images/11636/small/rndr.png',
+  'FIDA': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EchesyfXePKdLtoiZSL8pBe8Myagyy8ZRqsACNCFGnvp/logo.svg',
+  'STEP': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/StepAscQoEioFxxWGnh2sLBDFp9d8rvKz2Yp39iDpyT/logo.png',
+  'SRM': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt/logo.png',
+  'COPE': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/8HGyAAB1yoM1ttS7pXjHMa3dukTFGQggnFFH3hJZgzQh/logo.png',
+  'SAMO': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU/logo.png',
+  'MEME': 'https://assets.coingecko.com/coins/images/31614/small/meme_logo.png',
+  'TRUMP': 'https://dd.dexscreener.com/ds-data/tokens/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN.png',
+  'PEPE': 'https://assets.coingecko.com/coins/images/29850/small/pepe-token.jpeg',
+  'SHIB': 'https://assets.coingecko.com/coins/images/11939/small/shiba.png',
+  'DOGE': 'https://assets.coingecko.com/coins/images/5/small/dogecoin.png',
+};
+
+function getWellKnownTokenLogo(symbol?: string): string | undefined {
+  if (!symbol) return undefined;
+  return WELL_KNOWN_TOKEN_LOGOS[symbol.toUpperCase()];
+}
 
 export interface Token {
   id: string;
@@ -153,12 +185,12 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
       // Return dummy data for UI testing when no real data
       return DUMMY_TOKENS;
     }
-    
+
     return (soulMarketData.pairs as any[]).map((pair: any) => {
       const buys24h = pair.txns?.h24?.buys || 0;
       const sells24h = pair.txns?.h24?.sells || 0;
       const totalTxns = buys24h + sells24h;
-      
+
       return {
         id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
         symbol: pair.baseToken?.symbol || 'UNKNOWN',
@@ -174,7 +206,10 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
         sells24h,
         buyRatio: totalTxns > 0 ? buys24h / totalTxns : 0,
         pairAge: pair.pairCreatedAt ? Math.floor((Date.now() - pair.pairCreatedAt) / 3600000) : undefined,
-        logo: pair.info?.imageUrl,
+        // Use DexScreener logo, header image, or fallback to well-known logos
+        logo: pair.info?.imageUrl
+          || pair.info?.header
+          || getWellKnownTokenLogo(pair.baseToken?.symbol),
         verified: pair.info?.verified || false,
         pairToken: pair.quoteToken?.symbol,
         contractAddress: pair.baseToken?.address || '',
@@ -276,7 +311,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
 
     // Pair filter
     if (filters.pairToken) {
-      result = result.filter(t => 
+      result = result.filter(t =>
         t.pairToken?.toLowerCase() === filters.pairToken!.toLowerCase()
       );
     }
@@ -568,7 +603,7 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
     },
   ]);
   */
-  
+
   const isLoading = isLoadingMarket;
 
   // Filter actions
@@ -610,24 +645,24 @@ export const [MarketProvider, useMarket] = createContextHook(() => {
     totalCount: filteredTokens.length,
     isLoading,
     hasMore,
-    
+
     // Filter state
     filters,
     searchQuery,
     activeFilterCount,
-    
+
     // Filter actions
     setSearchQuery,
     toggleQuickFilter,
     setAdvancedFilters,
     clearFilters,
-    
+
     // Pagination
     loadMore,
-    
+
     // Refresh
     refetch,
-    
+
     // Legacy compatibility
     activeFilters: filters.quickFilters,
     toggleFilter: toggleQuickFilter,

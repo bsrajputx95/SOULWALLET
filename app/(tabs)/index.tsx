@@ -34,6 +34,30 @@ import { PublicKey } from '@solana/web3.js';
 import { SendModal } from '../../components/SendModal';
 import { ReceiveModal } from '../../components/ReceiveModal';
 
+// Well-known token logos for popular Solana tokens (fallback when API doesn't have them)
+const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
+  'SOL': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+  'RAY': 'https://raw.githubusercontent.com/raydium-io/media-assets/master/logo/logo_200x200.png',
+  'JUP': 'https://static.jup.ag/jup/icon.png',
+  'USDC': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
+  'USDT': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+  'BONK': 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
+  'WIF': 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link',
+  'POPCAT': 'https://bafkreidvnhdzuq3pvhnzq26hjydmhrr2xw2flkxkflg7swmrxnx7c7xvey.ipfs.nftstorage.link',
+  'PYTH': 'https://pyth.network/token.svg',
+  'JTO': 'https://metadata.jito.network/token/jto/icon.png',
+  'ORCA': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE/logo.png',
+  'TRUMP': 'https://dd.dexscreener.com/ds-data/tokens/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN.png',
+  'PEPE': 'https://assets.coingecko.com/coins/images/29850/small/pepe-token.jpeg',
+  'SHIB': 'https://assets.coingecko.com/coins/images/11939/small/shiba.png',
+  'DOGE': 'https://assets.coingecko.com/coins/images/5/small/dogecoin.png',
+};
+
+function getWellKnownTokenLogo(symbol?: string): string | undefined {
+  if (!symbol) return undefined;
+  return WELL_KNOWN_TOKEN_LOGOS[symbol.toUpperCase()];
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -75,21 +99,25 @@ export default function HomeScreen() {
   const topCoins = React.useMemo(() => {
     if (!trendingData?.pairs) return [];
 
-    return trendingData.pairs.slice(0, 20).map((pair: any) => ({
-      id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
-      symbol: pair.baseToken?.symbol || 'UNKNOWN',
-      name: pair.baseToken?.name || 'Unknown Token',
-      price: parseFloat(pair.priceUsd || '0'),
-      change1h: parseFloat(pair.priceChange?.h1 || '0'),
-      change24h: parseFloat(pair.priceChange?.h24 || '0'),
-      change7d: parseFloat(pair.priceChange?.h24 || '0') * 1.5, // Estimated from 24h (API limitation)
-      volume24h: parseFloat(pair.volume?.h24 || '0'),
-      logo: pair.info?.imageUrl,
-      liquidity: parseFloat(pair.liquidity?.usd || '0'),
-      transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
-      contractAddress: pair.baseToken?.address || '',
-      pairAddress: pair.pairAddress || '',
-    }));
+    return trendingData.pairs.slice(0, 20).map((pair: any) => {
+      const symbol = pair.baseToken?.symbol || 'UNKNOWN';
+      return {
+        id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
+        symbol,
+        name: pair.baseToken?.name || 'Unknown Token',
+        price: parseFloat(pair.priceUsd || '0'),
+        change1h: parseFloat(pair.priceChange?.h1 || '0'),
+        change24h: parseFloat(pair.priceChange?.h24 || '0'),
+        change7d: parseFloat(pair.priceChange?.h24 || '0') * 1.5, // Estimated from 24h (API limitation)
+        volume24h: parseFloat(pair.volume?.h24 || '0'),
+        // Use DexScreener logo, header image, or well-known token logos as fallback
+        logo: pair.info?.imageUrl || pair.info?.header || getWellKnownTokenLogo(symbol),
+        liquidity: parseFloat(pair.liquidity?.usd || '0'),
+        transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
+        contractAddress: pair.baseToken?.address || '',
+        pairAddress: pair.pairAddress || '',
+      };
+    });
   }, [trendingData]);
 
   // ✅ Custodial wallet for copy trading
@@ -222,15 +250,19 @@ export default function HomeScreen() {
   const searchCoins = React.useMemo(() => {
     if (!searchData?.pairs) return [];
 
-    return searchData.pairs.slice(0, 10).map((pair: any) => ({
-      id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
-      symbol: pair.baseToken?.symbol || 'UNKNOWN',
-      name: pair.baseToken?.name || 'Unknown Token',
-      price: parseFloat(pair.priceUsd || '0'),
-      change24h: parseFloat(pair.priceChange?.h24 || '0'),
-      volume24h: parseFloat(pair.volume?.h24 || '0'),
-      logo: pair.info?.imageUrl,
-    }));
+    return searchData.pairs.slice(0, 10).map((pair: any) => {
+      const symbol = pair.baseToken?.symbol || 'UNKNOWN';
+      return {
+        id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
+        symbol,
+        name: pair.baseToken?.name || 'Unknown Token',
+        price: parseFloat(pair.priceUsd || '0'),
+        change24h: parseFloat(pair.priceChange?.h24 || '0'),
+        volume24h: parseFloat(pair.volume?.h24 || '0'),
+        // Use DexScreener logo, header image, or well-known token logos as fallback
+        logo: pair.info?.imageUrl || pair.info?.header || getWellKnownTokenLogo(symbol),
+      };
+    });
   }, [searchData]);
 
   // Determine which coins to display
@@ -1055,13 +1087,15 @@ export default function HomeScreen() {
                       onPress={() => setShowFromTokenDropdown(!showFromTokenDropdown)}
                     >
                       <View style={styles.tokenInfo}>
-                        {availableTokens.find(t => t.symbol === fromToken)?.logo && (
+                        {availableTokens.find(t => t.mint === fromToken)?.logo && (
                           <Image
-                            source={{ uri: availableTokens.find(t => t.symbol === fromToken)?.logo }}
+                            source={{ uri: availableTokens.find(t => t.mint === fromToken)?.logo }}
                             style={styles.tokenLogoSmall}
                           />
                         )}
-                        <Text style={styles.swapTokenText}>{fromToken}</Text>
+                        <Text style={styles.swapTokenText}>
+                          {availableTokens.find(t => t.mint === fromToken)?.symbol || 'Select'}
+                        </Text>
                       </View>
                       <ChevronDown size={16} color={COLORS.textSecondary} />
                     </TouchableOpacity>
@@ -1082,10 +1116,10 @@ export default function HomeScreen() {
                       <ScrollView style={styles.swapDropdownList} showsVerticalScrollIndicator={false}>
                         {getFilteredTokens(fromTokenSearch).map((token) => (
                           <TouchableOpacity
-                            key={token.symbol}
+                            key={token.mint}
                             style={styles.dropdownItem}
                             onPress={() => {
-                              setFromToken(token.symbol);
+                              setFromToken(token.mint);
                               setShowFromTokenDropdown(false);
                               setFromTokenSearch('');
                             }}
@@ -1128,13 +1162,15 @@ export default function HomeScreen() {
                       onPress={() => setShowToTokenDropdown(!showToTokenDropdown)}
                     >
                       <View style={styles.tokenInfo}>
-                        {availableTokens.find(t => t.symbol === toToken)?.logo && (
+                        {availableTokens.find(t => t.mint === toToken)?.logo && (
                           <Image
-                            source={{ uri: availableTokens.find(t => t.symbol === toToken)?.logo }}
+                            source={{ uri: availableTokens.find(t => t.mint === toToken)?.logo }}
                             style={styles.tokenLogoSmall}
                           />
                         )}
-                        <Text style={styles.swapTokenText}>{toToken}</Text>
+                        <Text style={styles.swapTokenText}>
+                          {availableTokens.find(t => t.mint === toToken)?.symbol || 'Select'}
+                        </Text>
                       </View>
                       <ChevronDown size={16} color={COLORS.textSecondary} />
                     </TouchableOpacity>
@@ -1155,10 +1191,10 @@ export default function HomeScreen() {
                       <ScrollView style={styles.swapDropdownList} showsVerticalScrollIndicator={false}>
                         {getFilteredTokens(toTokenSearch).map((token) => (
                           <TouchableOpacity
-                            key={token.symbol}
+                            key={token.mint}
                             style={styles.dropdownItem}
                             onPress={() => {
-                              setToToken(token.symbol);
+                              setToToken(token.mint);
                               setShowToTokenDropdown(false);
                               setToTokenSearch('');
                             }}

@@ -4,14 +4,20 @@ export const BirdeyePnLSchema = z.object({
   success: z.boolean(),
   data: z
     .object({
-      total_pnl_usd: z.number().finite().default(0),
-      total_realized_profit_usd: z.number().finite().default(0),
-      total_unrealized_profit_usd: z.number().finite().default(0),
-      roi_percentage: z.number().finite().min(-100).max(10000).default(0),
-      total_trades: z.number().int().nonnegative().default(0),
+      // Birdeye actual field names from their API
+      total_usd: z.number().finite().default(0), // Total PnL in USD
+      realized_profit_usd: z.number().finite().default(0), // Realized profit USD
+      unrealized_usd: z.number().finite().default(0), // Unrealized profit USD
+      total_percent: z.number().finite().default(0), // ROI percentage (this is the key field!)
+      realized_profit_percent: z.number().finite().default(0), // Realized profit %
+      unrealized_percent: z.number().finite().default(0), // Unrealized profit %
+      counts: z.object({
+        total_trade: z.number().int().nonnegative().default(0),
+      }).optional(),
     })
     .optional(),
-}).strict()
+}).passthrough() // Allow extra fields from API
+
 
 export const JupiterPriceSchema = z
   .object({

@@ -12,8 +12,8 @@ import 'react-native-get-random-values';
 import { Keypair } from '@solana/web3.js';
 import * as bip39 from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
-import { SecureStorage } from '@/lib/secure-storage';
-import { trpc } from '@/lib/trpc';
+import { SecureStorage, setSecureItem, getSecureItem } from '@/lib/secure-storage';
+import { trpcClient } from '@/lib/trpc';
 import bs58 from 'bs58';
 
 /**
@@ -31,29 +31,58 @@ export class WalletManager {
     mnemonic: string;
     publicKey: string;
   }> {
-    // Generate BIP39 mnemonic (12 words)
-    const mnemonic = bip39.generateMnemonic();
+    try {
+      console.log('[WalletManager] Step 1: Starting wallet creation');
+      
+      // Generate BIP39 mnemonic (12 words)
+      console.log('[WalletManager] Step 2: Generating mnemonic...');
+      const mnemonic = bip39.generateMnemonic();
+      console.log('[WalletManager] Step 2: Mnemonic generated successfully');
 
-    // Derive seed from mnemonic
-    const seed = await bip39.mnemonicToSeed(mnemonic);
+      // Derive seed from mnemonic
+      console.log('[WalletManager] Step 3: Deriving seed from mnemonic...');
+      const seed = await bip39.mnemonicToSeed(mnemonic);
+      console.log('[WalletManager] Step 3: Seed derived successfully');
 
-    // Derive Solana keypair using standard path
-    const path = "m/44'/501'/0'/0'"; // Solana derivation path
-    const derivedSeed = derivePath(path, seed.toString('hex')).key;
-    const keypair = Keypair.fromSeed(derivedSeed);
+      // Derive Solana keypair using standard path
+      console.log('[WalletManager] Step 4: Deriving keypair from seed...');
+      const path = "m/44'/501'/0'/0'"; // Solana derivation path
+      const derivedSeed = derivePath(path, seed.toString('hex')).key;
+      console.log('[WalletManager] Step 4: Keypair path derived successfully');
+      
+      console.log('[WalletManager] Step 5: Creating Keypair from seed...');
+      const keypair = Keypair.fromSeed(derivedSeed);
+      console.log('[WalletManager] Step 5: Keypair created successfully');
 
-    // Encrypt private key with user password
-    const privateKeyBase58 = bs58.encode(keypair.secretKey);
-    await SecureStorage.setEncryptedPrivateKey(privateKeyBase58, password);
+      // Encrypt private key with user password
+      console.log('[WalletManager] Step 6: Encrypting private key...');
+      const privateKeyBase58 = bs58.encode(keypair.secretKey);
+      await SecureStorage.setEncryptedPrivateKey(privateKeyBase58, password);
+      console.log('[WalletManager] Step 6: Private key encrypted and stored');
 
-    // Encrypt mnemonic separately
-    await SecureStorage.setEncryptedMnemonic(mnemonic, password);
+      // Encrypt mnemonic separately
+      console.log('[WalletManager] Step 7: Encrypting mnemonic...');
+      await SecureStorage.setEncryptedMnemonic(mnemonic, password);
+      console.log('[WalletManager] Step 7: Mnemonic encrypted and stored');
 
-    return {
-      keypair,
-      mnemonic,
-      publicKey: keypair.publicKey.toString(),
-    };
+      console.log('[WalletManager] Step 8: Wallet creation complete');
+      return {
+        keypair,
+        mnemonic,
+        publicKey: keypair.publicKey.toString(),
+      };
+    } catch (error) {
+      console.error('[WalletManager] Error creating wallet:', error);
+      
+      // Log full error details for debugging
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorStack = error instanceof Error ? error.stack : '';
+      console.error('[WalletManager] Error message:', errorMsg);
+      console.error('[WalletManager] Error stack:', errorStack);
+      
+      // Re-throw the original error to see what's actually happening
+      throw error;
+    }
   }
 
   /**
@@ -134,7 +163,7 @@ export class WalletManager {
   static async hasWallet(): Promise<boolean> {
     try {
       // Try to get encrypted private key (doesn't require password)
-      const encrypted = await SecureStorage.getSecureItem('wallet_private_key_enc');
+      const encrypted = await getSecureItem('wallet_private_key_enc');
       return encrypted !== null;
     } catch {
       return false;
@@ -197,10 +226,24 @@ export class WalletManager {
 
   /**
    * Register wallet with backend (public key only)
+   * Uses existing user.updateWalletAddress endpoint
+   * Non-blocking: wallet creation succeeds even if sync fails
    */
-  static async registerWallet(publicKey: string): Promise<void> {
-    // Only send public key to backend
-    await trpc.wallet.register.mutate({ publicKey });
+  static async registerWallet(publicKey: string): Promise<boolean> {
+    try {
+      // Store public key locally first (unencrypted, for app access)
+      await setSecureItem('wallet_public_key', publicKey);
+
+      // Sync to backend using existing endpoint
+      await trpcClient.user.updateWalletAddress.mutate({ walletAddress: publicKey });
+      console.log('[WalletManager] Wallet synced to backend:', publicKey.slice(0, 8) + '...');
+      return true;
+    } catch (error) {
+      // Non-blocking: log the error but don't throw
+      // Wallet is still usable locally, sync can be retried later
+      console.warn('[WalletManager] Backend sync failed (non-blocking):', error);
+      return false;
+    }
   }
 }
 
@@ -233,9 +276,11 @@ export const useWalletCreationStore = create<WalletCreationState>()(
 
         try {
           const result = await WalletManager.createNewWallet(password);
+          console.log('[WalletCreation] Wallet created locally:', result.publicKey.slice(0, 8) + '...');
 
-          // Register with backend
-          await WalletManager.registerWallet(result.publicKey);
+          // Register with backend (non-blocking)
+          // Wallet creation succeeds even if backend sync fails
+          const synced = await WalletManager.registerWallet(result.publicKey);
 
           set({
             isCreating: false,
@@ -243,11 +288,16 @@ export const useWalletCreationStore = create<WalletCreationState>()(
             currentPublicKey: result.publicKey,
           });
 
+          if (!synced) {
+            console.log('[WalletCreation] Wallet created but backend sync pending');
+          }
+
           return {
             mnemonic: result.mnemonic,
             publicKey: result.publicKey,
           };
         } catch (error: any) {
+          console.error('[WalletCreation] Failed to create wallet:', error);
           set({
             isCreating: false,
             error: error.message || 'Failed to create wallet',
@@ -261,9 +311,10 @@ export const useWalletCreationStore = create<WalletCreationState>()(
 
         try {
           const result = await WalletManager.importFromMnemonic(mnemonic, password);
+          console.log('[WalletImport] Wallet imported from mnemonic:', result.publicKey.slice(0, 8) + '...');
 
-          // Register with backend
-          await WalletManager.registerWallet(result.publicKey);
+          // Register with backend (non-blocking)
+          const synced = await WalletManager.registerWallet(result.publicKey);
 
           set({
             isImporting: false,
@@ -271,8 +322,13 @@ export const useWalletCreationStore = create<WalletCreationState>()(
             currentPublicKey: result.publicKey,
           });
 
+          if (!synced) {
+            console.log('[WalletImport] Wallet imported but backend sync pending');
+          }
+
           return result.publicKey;
         } catch (error: any) {
+          console.error('[WalletImport] Failed to import wallet:', error);
           set({
             isImporting: false,
             error: error.message || 'Failed to import wallet',
@@ -286,9 +342,10 @@ export const useWalletCreationStore = create<WalletCreationState>()(
 
         try {
           const result = await WalletManager.importFromPrivateKey(privateKey, password);
+          console.log('[WalletImport] Wallet imported from private key:', result.publicKey.slice(0, 8) + '...');
 
-          // Register with backend
-          await WalletManager.registerWallet(result.publicKey);
+          // Register with backend (non-blocking)
+          const synced = await WalletManager.registerWallet(result.publicKey);
 
           set({
             isImporting: false,
@@ -296,8 +353,13 @@ export const useWalletCreationStore = create<WalletCreationState>()(
             currentPublicKey: result.publicKey,
           });
 
+          if (!synced) {
+            console.log('[WalletImport] Wallet imported but backend sync pending');
+          }
+
           return result.publicKey;
         } catch (error: any) {
+          console.error('[WalletImport] Failed to import wallet:', error);
           set({
             isImporting: false,
             error: error.message || 'Failed to import wallet',
@@ -312,7 +374,7 @@ export const useWalletCreationStore = create<WalletCreationState>()(
 
           // If wallet exists, try to get public key from storage
           if (exists) {
-            const publicKey = await SecureStorage.getSecureItem('wallet_public_key');
+            const publicKey = await getSecureItem('wallet_public_key');
             set({
               hasWallet: true,
               currentPublicKey: publicKey,

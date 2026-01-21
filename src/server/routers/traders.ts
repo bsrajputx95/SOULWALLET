@@ -58,11 +58,11 @@ export const tradersRouter = router({
             knownTraders.slice(0, limit).map(async (trader) => {
               try {
                 const pnlData = await birdeyeData.getWalletPnL(trader.walletAddress);
-                const totalPnL = (pnlData as any)?.data?.total_pnl_usd || 0;
-                const realizedProfit = (pnlData as any)?.data?.total_realized_profit_usd || 0;
-                const unrealizedProfit = (pnlData as any)?.data?.total_unrealized_profit_usd || 0;
-                const roi = (pnlData as any)?.data?.roi_percentage || 0;
-                const totalTrades = (pnlData as any)?.data?.total_trades || 0;
+                const totalPnL = (pnlData as any)?.data?.total_usd || 0;
+                const realizedProfit = (pnlData as any)?.data?.realized_profit_usd || 0;
+                const unrealizedProfit = (pnlData as any)?.data?.unrealized_usd || 0;
+                const roi = (pnlData as any)?.data?.total_percent || 0;
+                const totalTrades = (pnlData as any)?.data?.counts?.total_trade || 0;
                 return {
                   id: trader.id,
                   name: trader.username,
@@ -104,11 +104,11 @@ export const tradersRouter = router({
           traders.map(async (trader) => {
             try {
               const pnlData = await birdeyeData.getWalletPnL(trader.walletAddress);
-              const totalPnL = (pnlData as any)?.data?.total_pnl_usd || 0;
-              const realizedProfit = (pnlData as any)?.data?.total_realized_profit_usd || 0;
-              const unrealizedProfit = (pnlData as any)?.data?.total_unrealized_profit_usd || 0;
-              const roi = (pnlData as any)?.data?.roi_percentage || 0;
-              const totalTrades = (pnlData as any)?.data?.total_trades || 0;
+              const totalPnL = (pnlData as any)?.data?.total_usd || 0;
+              const realizedProfit = (pnlData as any)?.data?.realized_profit_usd || 0;
+              const unrealizedProfit = (pnlData as any)?.data?.unrealized_usd || 0;
+              const roi = (pnlData as any)?.data?.total_percent || 0;
+              const totalTrades = (pnlData as any)?.data?.counts?.total_trade || 0;
               return {
                 id: trader.id,
                 name: trader.username || trader.id,
@@ -183,10 +183,10 @@ export const tradersRouter = router({
           birdeyeData.getWalletTokens(trader.walletAddress),
         ]);
 
-        const totalPnL = (pnlData as any)?.data?.total_pnl_usd || 0;
-        const realizedProfit = (pnlData as any)?.data?.total_realized_profit_usd || 0;
-        const unrealizedProfit = (pnlData as any)?.data?.total_unrealized_profit_usd || 0;
-        const roi = (pnlData as any)?.data?.roi_percentage || 0;
+        const totalPnL = (pnlData as any)?.data?.total_usd || 0;
+        const realizedProfit = (pnlData as any)?.data?.realized_profit_usd || 0;
+        const unrealizedProfit = (pnlData as any)?.data?.unrealized_usd || 0;
+        const roi = (pnlData as any)?.data?.total_percent || 0;
 
         return {
           success: true,

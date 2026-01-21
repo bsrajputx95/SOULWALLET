@@ -225,24 +225,65 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
   const createWalletEncrypted = async (password: string) => {
     try {
+      logger.info('[Wallet] Starting wallet creation...');
       setState(prev => ({ ...prev, isLoading: true }));
-      const { WalletManager } = await import('./wallet-creation-store');
-      const result = await WalletManager.createNewWallet(password);
+
+      // Add timeout to prevent indefinite hanging
+      const WALLET_CREATION_TIMEOUT = 120000; // 120 seconds - encryption is slow on mobile
+
+      const walletCreationPromise = (async () => {
+        // Dynamically import wallet manager
+        logger.info('[Wallet] Importing WalletManager...');
+        const { WalletManager } = await import('./wallet-creation-store');
+
+        // Create wallet with encryption (heavy crypto operations)
+        logger.info('[Wallet] Creating new wallet with encryption...');
+        const result = await WalletManager.createNewWallet(password);
+        logger.info('[Wallet] Wallet created successfully');
+
+        return result;
+      })();
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Wallet creation timeout - took longer than 30 seconds')), WALLET_CREATION_TIMEOUT)
+      );
+
+      const result = await Promise.race([walletCreationPromise, timeoutPromise]);
       const wallet = result.keypair;
       const publicKey = result.publicKey;
 
-      await setSecureItem('wallet_public_key', publicKey);
-      await AsyncStorage.setItem(ENCRYPTED_MARKER_KEY, 'true');
-      await deleteSecureItem(STORAGE_KEY);
+      // Store wallet metadata - ensure all storage operations complete
+      logger.info('[Wallet] Storing wallet metadata...');
+      await Promise.all([
+        setSecureItem('wallet_public_key', publicKey),
+        AsyncStorage.setItem(ENCRYPTED_MARKER_KEY, 'true'),
+        deleteSecureItem(STORAGE_KEY)
+      ]);
+      logger.info('[Wallet] Wallet metadata stored');
 
+      // Update state with new wallet
       setState(prev => ({ ...prev, wallet, publicKey, isLoading: false, needsUnlock: false }));
-      await syncWalletAddressToBackend(publicKey);
+
+      // Sync to backend (non-blocking - don't await)
+      logger.info('[Wallet] Syncing to backend (non-blocking)...');
+      syncWalletAddressToBackend(publicKey).catch(err => {
+        if (__DEV__) logger.warn('Backend sync failed (non-critical):', err);
+      });
+
       logger.info('New encrypted wallet created:', publicKey);
       return wallet;
     } catch (error) {
-      if (__DEV__) logger.error('Error creating encrypted wallet:', error);
+      logger.error('Error creating encrypted wallet:', error);
       setState(prev => ({ ...prev, isLoading: false }));
-      throw new Error('Failed to create encrypted wallet. Please try again.');
+
+      // Log the full error for debugging
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorStack = error instanceof Error ? error.stack : '';
+      logger.error('[Wallet] Error details:', errorMsg);
+      logger.error('[Wallet] Error stack:', errorStack);
+
+      // Re-throw the original error to see what's actually happening
+      throw error;
     }
   };
 

@@ -92,7 +92,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     return purchasesQuery.data.filter((p: any) => p.status === 'OPEN');
   }, [purchasesQuery.data]);
 
-  const openMints = React.useMemo(() => {
+  const openMints: string[] = React.useMemo(() => {
     if (openPurchases.length === 0) return [];
     return Array.from(new Set(openPurchases.map((p: any) => String(p.tokenMint))));
   }, [openPurchases]);
@@ -346,7 +346,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
         await purchasesQuery.refetch();
         Alert.alert(
           'Success!',
-          `Bought ${status.result.tokensReceived?.toFixed(4) || 'some'} ${token.symbol} for $${result.amountUsd || buyAmount} ${inputCurrency}`
+          `Bought ${token.symbol} for $${result.amountUsd || buyAmount} ${inputCurrency}`
         );
       }
     } catch (error: any) {
@@ -453,23 +453,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                             }
                           }}
                         />
-                      </View>
-                    </View>
-
-                    {/* Quick-buy preset buttons */}
-                    <View style={styles.settingsRow}>
-                      <Text style={styles.inputLabel}>Quick Amount (USDC)</Text>
-                      <View style={styles.presetsRow}>
-                        {[10, 25, 50, 100].map((amount) => (
-                          <NeonButton
-                            key={amount}
-                            title={`$${amount}`}
-                            variant={buyAmount === String(amount) ? 'primary' : 'outline'}
-                            size="small"
-                            style={styles.presetButton}
-                            onPress={() => setBuyAmount(String(amount))}
-                          />
-                        ))}
                       </View>
                     </View>
 

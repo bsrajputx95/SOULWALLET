@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
+import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '../lib/priceFormatter';
 
 interface TokenCardProps {
   symbol: string;
@@ -17,12 +18,17 @@ interface TokenCardProps {
   onPress?: () => void;
 }
 
-// Validate logo URL - must be https and non-empty
+// Validate logo URL - allow https and known trusted http domains
 const isValidLogoUrl = (url?: string): boolean => {
   if (!url || url.trim() === '') return false;
-  // Only allow https URLs
-  if (!url.startsWith('https://')) return false;
-  return true;
+  // Allow https URLs
+  if (url.startsWith('https://')) return true;
+  // Allow trusted http sources (arweave, ipfs gateways, etc.)
+  const trustedHttpDomains = ['arweave.net', 'ipfs.io', 'nftstorage.link', 'cloudflare-ipfs.com'];
+  if (url.startsWith('http://')) {
+    return trustedHttpDomains.some(domain => url.includes(domain));
+  }
+  return false;
 };
 
 export const TokenCard: React.FC<TokenCardProps> = ({
@@ -41,20 +47,11 @@ export const TokenCard: React.FC<TokenCardProps> = ({
 
   // Determine if we should show the image or letter avatar
   const showImage = isValidLogoUrl(logo) && !imageError;
-  const formatPrice = (price: number) => {
-    if (price < 0.000001) return price.toExponential(2);
-    if (price < 0.01) return price.toFixed(6);
-    if (price < 1) return price.toFixed(4);
-    if (price < 1000) return price.toFixed(2);
-    return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  };
+  // Use imported formatSubscriptPrice for DexScreener-style formatting
+  const formatPrice = formatSubscriptPrice;
 
-  const formatLargeNumber = (num: number) => {
-    if (num >= 1000000000) return `$${(num / 1000000000).toFixed(1)}B`;
-    if (num >= 1000000) return `$${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `$${(num / 1000).toFixed(1)}K`;
-    return `$${num.toFixed(0)}`;
-  };
+  // Use imported formatter for large numbers
+  const formatLargeNumber = formatLargeNum;
 
   const getChangeColor = (change: number) => {
     return change >= 0 ? COLORS.success : COLORS.error;

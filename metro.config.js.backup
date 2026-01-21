@@ -71,7 +71,7 @@ config.resolver = {
                 type: 'sourceFile',
             };
         }
-
+        
         // Also handle stream imports (some packages use 'stream' instead of 'readable-stream')
         if (moduleName === 'stream') {
             return {
@@ -79,7 +79,7 @@ config.resolver = {
                 type: 'sourceFile',
             };
         }
-
+        
         // Let Metro handle other modules normally
         return context.resolveRequest(context, moduleName, platform);
     },

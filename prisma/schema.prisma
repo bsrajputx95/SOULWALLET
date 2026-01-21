@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
@@ -12,217 +9,166 @@ datasource db {
   extensions = [pgcrypto]
 }
 
-// Connection pooling configuration (set via DATABASE_URL query params):
-// ?connection_limit=10&pool_timeout=20&connect_timeout=10
-// Example: postgresql://user:pass@host:5432/db?connection_limit=10
-
-// ============================================
-// ENCRYPTION CONFIGURATION
-// ============================================
-// Sensitive fields encrypted using pgcrypto via application-layer middleware:
-// - User.email, User.walletAddress
-// - CustodialWallet.encryptedKey
-// - KYCVerification.encryptedData
-// Key management: PGCRYPTO_KEY environment variable (rotate via KMS)
-
-// User model for authentication
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  username  String   @unique
-  password  String   // hashed with bcrypt
-  name      String?
-  walletAddress String? // Solana wallet public key
-  walletVerifiedAt DateTime? // Wallet verification timestamp
-  emailVerifiedAt DateTime? // Email verification timestamp
-  lockedUntil DateTime? // Account lockout timestamp
-  failedLoginAttempts Int @default(0) // Failed login attempt counter
-  role      Role     @default(USER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  // Comment 1 Fix: Deterministic lookup hashes for encrypted fields
-  // These enable WHERE clause filtering on encrypted email/walletAddress
-  // Populated automatically by Prisma encryption middleware
-  emailHash         String?  @unique @db.VarChar(64)
-  walletAddressHash String?  @unique @db.VarChar(64)
-  
-  // Social/Trading Profile
-  bio             String?
-  profileImage    String?
-  coverImage      String?
-  isVerified      Boolean   @default(false)
-  badge           UserBadge @default(GENERAL)
-  
-  // VIP Settings
-  vipPrice        Float?    // Monthly price in SOL
-  vipDescription  String?
-  
-  // Counts (denormalized for performance)
-  followersCount     Int @default(0)
-  followingCount     Int @default(0)
-  vipFollowersCount  Int @default(0)
-  copyTradersCount   Int @default(0)
-  
-  // Trading Stats (cached)
-  roi30d          Float?
-  pnl24h          Float?
-  pnl1w           Float?
-  pnl1m           Float?
-  pnl90d          Float?
-  maxDrawdown     Float?
-  winRate         Float?
-  totalTrades     Int       @default(0)
-  statsUpdatedAt  DateTime?
-  
-  // Relations
-  sessions Session[]
-  otps     OTP[]
-  transactions Transaction[]
-  contacts Contact[]
-  notifications Notification[]
-  portfolioSnapshots PortfolioSnapshot[]
-  sessionActivities SessionActivity[]
-  copyTrades CopyTrading[]
-  settings UserSettings?
-  pushTokens PushToken[]
-  apiKeys ApiKey[]
-  authorizationAudits AuthorizationAudit[]
-  financialAuditLogs FinancialAuditLog[]
+  id                   String                @id @default(cuid())
+  email                String                @unique
+  username             String                @unique
+  password             String
+  name                 String?
+  walletAddress        String?
+  walletVerifiedAt     DateTime?
+  emailVerifiedAt      DateTime?
+  lockedUntil          DateTime?
+  failedLoginAttempts  Int                   @default(0)
+  role                 Role                  @default(USER)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  emailHash            String?               @unique @db.VarChar(64)
+  walletAddressHash    String?               @unique @db.VarChar(64)
+  bio                  String?
+  profileImage         String?
+  coverImage           String?
+  isVerified           Boolean               @default(false)
+  badge                UserBadge             @default(GENERAL)
+  vipPrice             Float?
+  vipDescription       String?
+  followersCount       Int                   @default(0)
+  followingCount       Int                   @default(0)
+  vipFollowersCount    Int                   @default(0)
+  copyTradersCount     Int                   @default(0)
+  roi30d               Float?
+  pnl24h               Float?
+  pnl1w                Float?
+  pnl1m                Float?
+  pnl90d               Float?
+  maxDrawdown          Float?
+  winRate              Float?
+  totalTrades          Int                   @default(0)
+  statsUpdatedAt       DateTime?
+  amlAlerts            AMLAlert[]
+  apiKeys              ApiKey[]
+  authorizationAudits  AuthorizationAudit[]
+  consentLogs          ConsentLog[]
+  contacts             Contact[]
+  copyTrades           CopyTrading[]
+  custodialWallet      CustodialWallet?
   dataDeletionRequests DataDeletionRequest[]
-  dataExportRequests DataExportRequest[]
-  consentLogs ConsentLog[]
-  kycVerification KYCVerification?
-  amlAlerts AMLAlert[]
+  dataExportRequests   DataExportRequest[]
   deadLetterQueueItems DeadLetterQueueItem[]
-  
-  // Social Relations
-  posts           Post[]
-  postLikes       PostLike[]
-  postComments    PostComment[]
-  reposts         Repost[]
-  followers       Follow[]  @relation("UserFollowing")
-  following       Follow[]  @relation("UserFollowers")
-  vipSubscribers      VIPSubscription[] @relation("VIPCreator")
-  vipSubscriptions    VIPSubscription[] @relation("VIPSubscriber")
-  postVotes           PostVote[]
-  ibuySettings        IBuySettings?
-  ibuyPurchases       IBuyPurchase[]
-  
-  // Custodial Wallet for copy trading
-  custodialWallet CustodialWallet?
-  
-  // User wallets (client-side encrypted)
-  wallets Wallet[]
-  
-  // Device tracking for new device detection (Comment 2 fix)
-  devices Device[]
-  
-  // Webhook integrations (Plan: Phase 5)
-  webhooks Webhook[]
-  
+  devices              Device[]
+  financialAuditLogs   FinancialAuditLog[]
+  following            Follow[]              @relation("UserFollowers")
+  followers            Follow[]              @relation("UserFollowing")
+  ibuyPurchases        IBuyPurchase[]
+  ibuySettings         IBuySettings?
+  kycVerification      KYCVerification?
+  notifications        Notification[]
+  otps                 OTP[]
+  portfolioSnapshots   PortfolioSnapshot[]
+  postComments         PostComment[]
+  postLikes            PostLike[]
+  postVotes            PostVote[]
+  posts                Post[]
+  pushTokens           PushToken[]
+  reposts              Repost[]
+  sessionActivities    SessionActivity[]
+  sessions             Session[]
+  transactions         Transaction[]
+  settings             UserSettings?
+  vipSubscribers       VIPSubscription[]     @relation("VIPCreator")
+  vipSubscriptions     VIPSubscription[]     @relation("VIPSubscriber")
+  wallets              Wallet[]
+  webhooks             Webhook[]
+
   @@index([walletAddress])
   @@index([email, emailVerifiedAt])
   @@index([createdAt])
-  @@index([createdAt, isVerified]) // GDPR/retention queries
+  @@index([createdAt, isVerified])
   @@index([emailHash])
   @@index([walletAddressHash])
   @@map("users")
 }
 
-// Session model for JWT token management
 model Session {
-  id        String   @id @default(cuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  ipAddress String? // IP address where session was created
-  userAgent String? // Browser/device fingerprint
-  lastActivityAt DateTime @default(now()) // Last request timestamp
-  createdAt DateTime @default(now())
-  
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String            @id @default(cuid())
+  userId            String
+  token             String            @unique
+  expiresAt         DateTime
+  ipAddress         String?
+  userAgent         String?
+  lastActivityAt    DateTime          @default(now())
+  createdAt         DateTime          @default(now())
   sessionActivities SessionActivity[]
-  
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([token])
   @@index([userId, lastActivityAt])
   @@map("sessions")
 }
 
-// ============================================
-// WALLET MODEL (Client-side encrypted wallets)
-// ============================================
-
-// Wallet model for user's Solana wallets (client-side encrypted private keys)
 model Wallet {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  publicKey       String   @unique
-  privateKey      String   // Client-side encrypted private key
-  encryptedMnemonic String? // BIP39 mnemonic backup (encrypted)
-  isPrimary       Boolean  @default(false)
-  balance         Float    @default(0)
-  network         String   @default("mainnet-beta")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  // Relations
-  holdings        TokenHolding[]
+  id                 String              @id @default(cuid())
+  userId             String
+  publicKey          String              @unique
+  privateKey         String
+  encryptedMnemonic  String?
+  isPrimary          Boolean             @default(false)
+  balance            Float               @default(0)
+  network            String              @default("mainnet-beta")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  holdings           TokenHolding[]
   walletTransactions WalletTransaction[]
-  
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([publicKey])
   @@index([userId, isPrimary])
   @@map("wallets")
 }
 
-// Token holdings for a wallet
 model TokenHolding {
-  id          String   @id @default(cuid())
-  walletId    String
-  wallet      Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  mint        String
-  symbol      String
-  name        String
-  amount      Float
-  decimals    Int
-  priceUSD    Float?
-  valueUSD    Float?
-  logo        String?
-  updatedAt   DateTime @updatedAt
-  
+  id        String   @id @default(cuid())
+  walletId  String
+  mint      String
+  symbol    String
+  name      String
+  amount    Float
+  decimals  Int
+  priceUSD  Float?
+  valueUSD  Float?
+  logo      String?
+  updatedAt DateTime @updatedAt
+  wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
   @@unique([walletId, mint])
   @@index([walletId])
   @@map("token_holdings")
 }
 
-// Wallet-specific transactions (separate from user Transaction model)
 model WalletTransaction {
-  id              String            @id @default(cuid())
-  walletId        String
-  wallet          Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  signature       String            @unique
-  type            TransactionType
-  status          TransactionStatus
-  fromAddress     String?
-  toAddress       String?
-  amount          Float?
-  tokenMint       String?
-  tokenSymbol     String?
-  fee             Float?
-  blockTime       DateTime?
-  createdAt       DateTime          @default(now())
-  
+  id          String            @id @default(cuid())
+  walletId    String
+  signature   String            @unique
+  type        TransactionType
+  status      TransactionStatus
+  fromAddress String?
+  toAddress   String?
+  amount      Float?
+  tokenMint   String?
+  tokenSymbol String?
+  fee         Float?
+  blockTime   DateTime?
+  createdAt   DateTime          @default(now())
+  wallet      Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
   @@index([walletId])
   @@index([signature])
   @@index([walletId, createdAt])
   @@map("wallet_transactions")
 }
 
-// OTP model for password reset and email verification
 model OTP {
   id        String   @id @default(cuid())
   email     String
@@ -231,10 +177,8 @@ model OTP {
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
-  
-  // Relations
-  user User? @relation(fields: [email], references: [email])
-  
+  user      User     @relation(fields: [email], references: [email])
+
   @@index([email, type])
   @@index([code])
   @@map("otps")
@@ -254,13 +198,835 @@ model SignatureNonce {
   @@map("signature_nonces")
 }
 
-// OTP types enum
+model ApiKey {
+  id                  String               @id @default(cuid())
+  userId              String
+  name                String
+  keyHash             String               @unique
+  keyPrefix           String
+  scope               ApiKeyScope          @default(READ_ONLY)
+  permissions         Json?
+  ipWhitelist         String[]
+  isActive            Boolean              @default(true)
+  expiresAt           DateTime?
+  lastUsedAt          DateTime?
+  usageCount          Int                  @default(0)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  authorizationAudits AuthorizationAudit[]
+
+  @@index([userId, isActive])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model AuthorizationAudit {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  resource   String?
+  resourceId String?
+  endpoint   String
+  allowed    Boolean
+  reason     String?
+  ipAddress  String
+  userAgent  String?
+  role       Role?
+  apiKeyId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  apiKey     ApiKey?  @relation(fields: [apiKeyId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([allowed, createdAt])
+  @@index([action, createdAt])
+  @@map("authorization_audits")
+}
+
+model Device {
+  id          String    @id @default(cuid())
+  userId      String
+  fingerprint String
+  ipAddress   String?
+  userAgent   String?
+  name        String?
+  deviceType  String?
+  browser     String?
+  os          String?
+  isTrusted   Boolean   @default(false)
+  trustedAt   DateTime?
+  lastSeenAt  DateTime  @default(now())
+  loginCount  Int       @default(1)
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fingerprint])
+  @@index([userId, lastSeenAt])
+  @@index([fingerprint])
+  @@map("devices")
+}
+
+model Transaction {
+  id          String            @id @default(cuid())
+  userId      String
+  signature   String            @unique
+  type        TransactionType
+  amount      Float
+  token       String
+  tokenSymbol String
+  from        String
+  to          String
+  fee         Float
+  status      TransactionStatus
+  notes       String?
+  createdAt   DateTime          @default(now())
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([type, userId])
+  @@index([signature])
+  @@map("transactions")
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  address   String
+  notes     String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, address])
+  @@index([userId])
+  @@map("contacts")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  data      Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model PortfolioSnapshot {
+  id            String   @id @default(cuid())
+  userId        String
+  totalValueUSD Float
+  tokens        Json
+  timestamp     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, timestamp])
+  @@map("portfolio_snapshots")
+}
+
+model LoginAttempt {
+  id            String   @id @default(cuid())
+  identifier    String
+  ipAddress     String
+  userAgent     String?
+  successful    Boolean
+  failureReason String?
+  createdAt     DateTime @default(now())
+
+  @@index([identifier, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("login_attempts")
+}
+
+model SessionActivity {
+  id         String   @id @default(cuid())
+  sessionId  String
+  userId     String
+  action     String
+  ipAddress  String
+  userAgent  String?
+  metadata   Json?
+  suspicious Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([suspicious, createdAt])
+  @@map("session_activities")
+}
+
+model Post {
+  id                   String         @id @default(cuid())
+  userId               String
+  content              String
+  visibility           PostVisibility @default(PUBLIC)
+  mentionedTokenName   String?
+  mentionedTokenSymbol String?
+  mentionedTokenMint   String?
+  images               Json?
+  likesCount           Int            @default(0)
+  commentsCount        Int            @default(0)
+  repostsCount         Int            @default(0)
+  agreeCount           Int            @default(0)
+  disagreeCount        Int            @default(0)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  ibuyPurchases        IBuyPurchase[]
+  comments             PostComment[]
+  likes                PostLike[]
+  votes                PostVote[]
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reposts              Repost[]
+
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+  @@index([visibility])
+  @@index([mentionedTokenSymbol])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([mentionedTokenSymbol, createdAt(sort: Desc)])
+  @@index([visibility, likesCount(sort: Desc)])
+  @@index([visibility, createdAt(sort: Desc), likesCount(sort: Desc)])
+  @@map("posts")
+}
+
+model PostVote {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  vote      Boolean
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([postId])
+  @@index([userId])
+  @@map("post_votes")
+}
+
+model IBuySettings {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  buyAmount     Float    @default(10)
+  slippage      Float    @default(0.5)
+  inputCurrency String   @default("SOL")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ibuy_settings")
+}
+
+model IBuyPurchase {
+  id              String    @id @default(cuid())
+  userId          String
+  postId          String
+  tokenMint       String
+  tokenSymbol     String?
+  tokenName       String?
+  amountBought    Float
+  amountRemaining Float     @default(0)
+  priceInUsdc     Float
+  buyTxSig        String    @unique
+  sellAmountUsdc  Float?
+  sellTxSig       String?
+  soldAt          DateTime?
+  profitLoss      Float?
+  creatorFee      Float?
+  creatorFeeTxSig String?
+  status          String    @default("OPEN")
+  createdAt       DateTime  @default(now())
+  post            Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([tokenMint])
+  @@index([postId])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("ibuy_purchases")
+}
+
+model PostLike {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([postId])
+  @@index([userId])
+  @@map("post_likes")
+}
+
+model PostComment {
+  id        String        @id @default(cuid())
+  postId    String
+  userId    String
+  content   String
+  parentId  String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  parent    PostComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   PostComment[] @relation("CommentReplies")
+  post      Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([userId])
+  @@index([parentId])
+  @@map("post_comments")
+}
+
+model Repost {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  comment   String?
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([postId])
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+  @@map("reposts")
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("follows")
+}
+
+model VIPSubscription {
+  id                   String   @id @default(cuid())
+  subscriberId         String
+  creatorId            String
+  priceInSol           Float
+  expiresAt            DateTime
+  autoRenew            Boolean  @default(true)
+  transactionSignature String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  creator              User     @relation("VIPCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  subscriber           User     @relation("VIPSubscriber", fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriberId, creatorId])
+  @@index([subscriberId])
+  @@index([creatorId])
+  @@index([expiresAt])
+  @@map("vip_subscriptions")
+}
+
+model UserSettings {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  notifications    Json?
+  privacy          Json?
+  security         Json?
+  adminIpWhitelist String[] @default([])
+  preferences      Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String
+  platform  String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform])
+  @@index([userId, active])
+  @@map("push_tokens")
+}
+
+model TraderProfile {
+  id             String                      @id @default(cuid())
+  walletAddress  String                      @unique
+  username       String?
+  avatarUrl      String?
+  bio            String?
+  totalFollowers Int                         @default(0)
+  totalTrades    Int                         @default(0)
+  winRate        Float                       @default(0)
+  totalROI       Float                       @default(0)
+  avgTradeSize   Float                       @default(0)
+  totalVolume    Float                       @default(0)
+  roi7d          Float                       @default(0)
+  roi30d         Float                       @default(0)
+  roi90d         Float                       @default(0)
+  isFeatured     Boolean                     @default(false)
+  featuredOrder  Int?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  copiers        CopyTrading[]
+  monitored      MonitoredWallet[]
+  snapshots      TraderPerformanceSnapshot[]
+
+  @@index([isFeatured, featuredOrder])
+  @@index([totalROI])
+  @@index([walletAddress])
+  @@index([totalROI(sort: Desc), isFeatured])
+  @@map("trader_profiles")
+}
+
+model TraderPerformanceSnapshot {
+  id             String        @id @default(cuid())
+  traderId       String
+  date           DateTime
+  roi            Float
+  totalPnL       Float
+  totalTrades    Int
+  totalFollowers Int
+  winRate        Float
+  createdAt      DateTime      @default(now())
+  trader         TraderProfile @relation(fields: [traderId], references: [id], onDelete: Cascade)
+
+  @@unique([traderId, date])
+  @@index([traderId, date])
+  @@map("trader_performance_snapshots")
+}
+
+model CopyTrading {
+  id                  String        @id @default(cuid())
+  userId              String
+  traderId            String
+  isActive            Boolean       @default(true)
+  totalBudget         Float
+  amountPerTrade      Float
+  stopLoss            Float?
+  takeProfit          Float?
+  maxSlippage         Float         @default(0.5)
+  exitWithTrader      Boolean       @default(false)
+  totalCopied         Int           @default(0)
+  activeTrades        Int           @default(0)
+  totalProfit         Float         @default(0)
+  totalFeesPaid       Float         @default(0)
+  minProfitForSharing Float         @default(0)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  trader              TraderProfile @relation(fields: [traderId], references: [id], onDelete: Cascade)
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions           Position[]
+
+  @@unique([userId, traderId])
+  @@index([userId, isActive])
+  @@index([traderId, isActive])
+  @@map("copy_trading")
+}
+
+model Position {
+  id                String         @id @default(cuid())
+  copyTradingId     String
+  tokenMint         String
+  tokenSymbol       String
+  tokenName         String
+  entryTxHash       String
+  entryPrice        Float
+  entryAmount       Float
+  entryValue        Float
+  entryTimestamp    DateTime
+  exitTxHash        String?
+  exitPrice         Float?
+  exitAmount        Float?
+  exitValue         Float?
+  exitTimestamp     DateTime?
+  exitReason        String?
+  profitLoss        Float?
+  profitLossPercent Float?
+  feeAmount         Float?
+  feeTxHash         String?
+  status            PositionStatus @default(OPEN)
+  slTpTriggeredAt   DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  copyTrading       CopyTrading    @relation(fields: [copyTradingId], references: [id], onDelete: Cascade)
+
+  @@index([tokenMint, status])
+  @@index([status, updatedAt])
+  @@index([copyTradingId, status, updatedAt(sort: Desc)])
+  @@index([status, exitTimestamp(sort: Desc)])
+  @@index([status, slTpTriggeredAt])
+  @@index([copyTradingId, tokenMint])
+  @@map("positions")
+}
+
+model MonitoredWallet {
+  id            String                @id @default(cuid())
+  walletAddress String                @unique
+  traderId      String?
+  isActive      Boolean               @default(true)
+  lastSeenTx    String?
+  lastSeenAt    DateTime?
+  totalCopiers  Int                   @default(0)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  transactions  DetectedTransaction[]
+  trader        TraderProfile?        @relation(fields: [traderId], references: [id])
+
+  @@index([walletAddress, isActive])
+  @@map("monitored_wallets")
+}
+
+model DetectedTransaction {
+  id                String          @id @default(cuid())
+  monitoredWalletId String
+  txHash            String          @unique
+  type              String
+  tokenMint         String
+  tokenSymbol       String?
+  amount            Float
+  price             Float
+  totalValue        Float
+  processed         Boolean         @default(false)
+  copiesCreated     Int             @default(0)
+  detectedAt        DateTime        @default(now())
+  processedAt       DateTime?
+  monitoredWallet   MonitoredWallet @relation(fields: [monitoredWalletId], references: [id])
+
+  @@index([txHash])
+  @@index([monitoredWalletId, processed])
+  @@index([detectedAt])
+  @@map("detected_transactions")
+}
+
+model TokenPrice {
+  id             String   @id @default(cuid())
+  tokenMint      String   @unique
+  tokenSymbol    String
+  priceUSD       Float
+  priceChange24h Float?
+  volume24h      Float?
+  updatedAt      DateTime @updatedAt
+
+  @@index([tokenMint])
+  @@map("token_prices")
+}
+
+model ExecutionQueue {
+  id            String    @id @default(cuid())
+  type          String
+  userId        String
+  copyTradingId String
+  positionId    String?
+  tokenMint     String
+  amount        Float
+  maxSlippage   Float     @default(1)
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  lastError     String?
+  txHash        String?
+  priority      Int       @default(0)
+  createdAt     DateTime  @default(now())
+  executedAt    DateTime?
+
+  @@index([status, priority, createdAt])
+  @@index([userId])
+  @@map("execution_queue")
+}
+
+model CustodialWallet {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  publicKey         String   @unique
+  encryptedKey      String
+  keyIv             String
+  keyTag            String
+  keySalt           String?
+  keyVersion        Int      @default(1)
+  dataKeyCiphertext String?
+  dataKeyKeyId      String?
+  encryptedMnemonic String?
+  mnemonicIv        String?
+  mnemonicTag       String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([publicKey])
+  @@index([userId, isActive])
+  @@map("custodial_wallets")
+}
+
+model KeyVersion {
+  id        String    @id @default(cuid())
+  version   Int       @unique
+  algorithm String
+  kdfConfig Json
+  kmsKeyId  String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+  isActive  Boolean   @default(true)
+
+  @@index([version, isActive])
+  @@map("key_versions")
+}
+
+model KeyOperationLog {
+  id         String   @id @default(cuid())
+  operation  String
+  keyVersion Int
+  userId     String?
+  success    Boolean
+  errorMsg   String?
+  ipAddress  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([operation, createdAt])
+  @@index([userId, createdAt])
+  @@map("key_operation_logs")
+}
+
+model JWTSecretVersion {
+  id         String   @id @default(cuid())
+  secretHash String   @unique
+  version    Int      @unique
+  purpose    String   @default("access")
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  isActive   Boolean  @default(true)
+  rotatedBy  String?
+
+  @@index([version, isActive])
+  @@index([purpose, isActive])
+  @@index([expiresAt])
+  @@map("jwt_secret_versions")
+}
+
+model FinancialAuditLog {
+  id           String   @id @default(cuid())
+  userId       String
+  operation    String
+  resourceType String
+  resourceId   String
+  amount       Float?
+  currency     String?
+  feeAmount    Float?
+  metadata     Json
+  ipAddress    String
+  userAgent    String?
+  previousHash String?
+  currentHash  String
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([operation, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("financial_audit_logs")
+}
+
+model DataDeletionRequest {
+  id          String    @id @default(cuid())
+  userId      String
+  reason      String?
+  status      String    @default("PENDING")
+  processedAt DateTime?
+  processedBy String?
+  deletedData Json?
+  ipAddress   String
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("data_deletion_requests")
+}
+
+model DataExportRequest {
+  id          String    @id @default(cuid())
+  userId      String
+  format      String    @default("JSON")
+  status      String    @default("PENDING")
+  fileUrl     String?
+  fileSize    Int?
+  expiresAt   DateTime?
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("data_export_requests")
+}
+
+model ConsentLog {
+  id          String   @id @default(cuid())
+  userId      String
+  consentType String
+  version     String
+  granted     Boolean
+  ipAddress   String
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consentType])
+  @@index([consentType, createdAt])
+  @@map("consent_logs")
+}
+
+model KYCVerification {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  status            String    @default("PENDING")
+  tier              Int       @default(1)
+  encryptedData     String?
+  dataKeyCiphertext String?
+  dataKeyKeyId      String?
+  keyIv             String?
+  keyTag            String?
+  keySalt           String?
+  keyVersion        Int?
+  verifiedAt        DateTime?
+  verifiedBy        String?
+  rejectionReason   String?
+  riskScore         Float?
+  riskLevel         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, tier])
+  @@index([userId])
+  @@map("kyc_verifications")
+}
+
+model AMLAlert {
+  id              String    @id @default(cuid())
+  userId          String
+  alertType       String
+  severity        String
+  description     String
+  transactionId   String?
+  transactionHash String?
+  amount          Float?
+  currency        String?
+  status          String    @default("OPEN")
+  assignedTo      String?
+  resolution      String?
+  resolvedAt      DateTime?
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([alertType, severity])
+  @@index([status, createdAt])
+  @@map("aml_alerts")
+}
+
+model RegulatoryReport {
+  id          String   @id @default(cuid())
+  reportType  String
+  period      String
+  fileUrl     String
+  fileSize    Int
+  fileHash    String
+  recordCount Int
+  generatedBy String?
+  createdAt   DateTime @default(now())
+
+  @@index([reportType, period])
+  @@index([createdAt])
+  @@map("regulatory_reports")
+}
+
+model DeadLetterQueueItem {
+  id          String    @id @default(cuid())
+  operation   String
+  payload     Json
+  error       String
+  retryCount  Int       @default(0)
+  lastRetryAt DateTime?
+  nextRetryAt DateTime?
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+  status      String    @default("PENDING")
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([status, nextRetryAt])
+  @@index([userId])
+  @@map("dead_letter_queue")
+}
+
+model Webhook {
+  id         String            @id @default(cuid())
+  userId     String
+  url        String
+  events     String[]
+  secret     String
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  deliveries WebhookDelivery[]
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id           String   @id @default(cuid())
+  webhookId    String
+  event        String
+  payload      Json?
+  status       String
+  responseCode Int?
+  error        String?
+  attempt      Int      @default(1)
+  createdAt    DateTime @default(now())
+  webhook      Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
+  @@index([status, createdAt])
+  @@map("webhook_deliveries")
+}
+
 enum OTPType {
   RESET_PASSWORD
   VERIFY_EMAIL
 }
 
-// User roles for RBAC
 enum Role {
   USER
   PREMIUM
@@ -273,346 +1039,22 @@ enum ApiKeyScope {
   CUSTOM
 }
 
-model ApiKey {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  name        String
-  keyHash     String   @unique
-  keyPrefix   String
-
-  scope       ApiKeyScope @default(READ_ONLY)
-  permissions Json?
-
-  ipWhitelist String[]
-
-  isActive    Boolean  @default(true)
-  expiresAt   DateTime?
-  lastUsedAt  DateTime?
-  usageCount  Int      @default(0)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  authorizationAudits AuthorizationAudit[]
-
-  @@index([userId, isActive])
-  @@index([keyHash])
-  @@map("api_keys")
-}
-
-model AuthorizationAudit {
-  id          String   @id @default(cuid())
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  action      String
-  resource    String?
-  resourceId  String?
-  endpoint    String
-
-  allowed     Boolean
-  reason      String?
-
-  ipAddress   String
-  userAgent   String?
-  role        Role?
-  apiKeyId    String?
-  apiKey      ApiKey?  @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
-
-  metadata    Json?
-
-  createdAt   DateTime @default(now())
-
-  @@index([userId, createdAt])
-  @@index([allowed, createdAt])
-  @@index([action, createdAt])
-  @@map("authorization_audits")
-}
-
-// Device model for device tracking and "new device" detection (Comment 2 fix)
-model Device {
-  id             String   @id @default(cuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  // Fingerprint components
-  fingerprint    String   // Hash of IP+UserAgent or device-specific identifier
-  ipAddress      String?
-  userAgent      String?
-  
-  // Device metadata
-  name           String?  // User-provided device name (e.g., "My iPhone")
-  deviceType     String?  // phone, tablet, desktop, unknown
-  browser        String?  // Chrome, Safari, etc.
-  os             String?  // iOS, Android, Windows, macOS
-  
-  // Trust status
-  isTrusted      Boolean  @default(false)
-  trustedAt      DateTime?
-  
-  // Activity tracking
-  lastSeenAt     DateTime @default(now())
-  loginCount     Int      @default(1)
-  createdAt      DateTime @default(now())
-  
-  @@unique([userId, fingerprint])
-  @@index([userId, lastSeenAt])
-  @@index([fingerprint])
-  @@map("devices")
-}
-
 enum UserBadge {
   GENERAL
   PRO
   ELITE
 }
 
-// Transaction model for wallet operations
-model Transaction {
-  id          String            @id @default(cuid())
-  userId      String
-  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  signature   String            @unique
-  type        TransactionType
-  amount      Float
-  token       String            // Mint address or 'SOL'
-  tokenSymbol String
-  from        String
-  to          String
-  fee         Float
-  status      TransactionStatus
-  notes       String?
-  createdAt   DateTime          @default(now())
-  
-  @@index([userId, createdAt])
-  @@index([status, createdAt])  // Comment 4 Fix: For pending transaction queries
-  @@index([type, userId])       // Comment 4 Fix: For swap/receive filtering
-  @@index([signature])
-  @@map("transactions")
-}
-
-// Contact model for address book
-model Contact {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  address   String
-  notes     String?
-  createdAt DateTime @default(now())
-  
-  @@unique([userId, address])
-  @@index([userId])
-  @@map("contacts")
-}
-
-// Notification model for transaction alerts
-model Notification {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String
-  title     String
-  message   String
-  data      Json?
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
-  
-  @@index([userId, isRead])
-  @@map("notifications")
-}
-
-// Portfolio snapshot model for tracking value over time
-model PortfolioSnapshot {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  totalValueUSD Float
-  tokens        Json     // { mint: { symbol, balance, value } }
-  timestamp     DateTime @default(now())
-  
-  @@index([userId, timestamp])
-  @@map("portfolio_snapshots")
-}
-
-// Transaction type enum
 enum TransactionType {
   SEND
   RECEIVE
   SWAP
 }
 
-// Transaction status enum
 enum TransactionStatus {
   PENDING
   CONFIRMED
   FAILED
-}
-
-// Login attempt model for brute-force protection
-model LoginAttempt {
-  id            String   @id @default(cuid())
-  identifier    String   // email or username attempted
-  ipAddress     String   // IP address of attempt
-  userAgent     String?  // browser/device info
-  successful    Boolean  // whether login succeeded
-  failureReason String?  // reason for failure
-  createdAt     DateTime @default(now())
-  
-  @@index([identifier, createdAt])
-  @@index([ipAddress, createdAt])
-  @@map("login_attempts")
-}
-
-// Session activity model for audit trail
-model SessionActivity {
-  id        String   @id @default(cuid())
-  sessionId String
-  userId    String
-  action    String   // action type (LOGIN, LOGOUT, TOKEN_REFRESH, etc.)
-  ipAddress String   // IP at time of action
-  userAgent String?  // browser/device at time of action
-  metadata  Json?    // additional context data
-  suspicious Boolean @default(false) // flag for suspicious activity
-  createdAt DateTime @default(now())
-  
-  // Relations
-  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@index([userId, createdAt])
-  @@index([sessionId, createdAt])
-  @@index([suspicious, createdAt])
-  @@map("session_activities")
-}
-
-// ============================================
-// SOCIAL FEATURE MODELS
-// ============================================
-
-// Post model for social feed
-model Post {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  content   String
-  visibility PostVisibility @default(PUBLIC)
-  
-  // Token mention fields
-  mentionedTokenName   String?
-  mentionedTokenSymbol String?
-  mentionedTokenMint   String?
-  
-  // Image attachments (future)
-  images    Json?
-  
-  // Denormalized counts
-  likesCount    Int @default(0)
-  commentsCount Int @default(0)
-  repostsCount  Int @default(0)
-  
-  // Agree/Disagree voting counts
-  agreeCount    Int @default(0)
-  disagreeCount Int @default(0)
-  
-  // Relationships
-  likes     PostLike[]
-  comments  PostComment[]
-  reposts   Repost[]
-  votes     PostVote[]
-  ibuyPurchases IBuyPurchase[]
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  @@index([userId])
-  @@index([createdAt(sort: Desc)])
-  @@index([visibility])
-  @@index([mentionedTokenSymbol])
-  @@index([userId, createdAt(sort: Desc)])
-  @@index([mentionedTokenSymbol, createdAt(sort: Desc)])
-  // Audit Issue #15: Composite indexes for common query patterns
-  @@index([visibility, likesCount(sort: Desc)])
-  @@index([visibility, createdAt(sort: Desc), likesCount(sort: Desc)])
-  @@map("posts")
-}
-
-// Post vote model for agree/disagree
-model PostVote {
-  id        String   @id @default(cuid())
-  postId    String
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  vote      Boolean  // true = agree, false = disagree
-  
-  createdAt DateTime @default(now())
-  
-  @@unique([userId, postId])  // One vote per user per post
-  @@index([postId])
-  @@index([userId])
-  @@map("post_votes")
-}
-
-// iBuy settings model - persists user's buy preferences
-model IBuySettings {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  buyAmount     Float    @default(10)    // USDC amount
-  slippage      Float    @default(0.5)   // percentage
-  inputCurrency String   @default("SOL") // SOL or USDC - input currency for iBuy
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  @@map("ibuy_settings")
-}
-
-// iBuy purchase tracking - with sell and 5% creator profit share
-model IBuyPurchase {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postId          String
-  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  
-  // Buy data
-  tokenMint       String
-  tokenSymbol     String?
-  tokenName       String?
-  amountBought    Float    // Amount of tokens received
-  amountRemaining Float    @default(0)
-  priceInUsdc     Float    // USDC spent (buy price)
-  buyTxSig        String   @unique // Buy transaction signature
-  
-  // Sell data (filled when sold)
-  sellAmountUsdc  Float?   // USDC received on sell
-  sellTxSig       String?  // Sell transaction signature
-  soldAt          DateTime?
-  
-  // Profit sharing (5% to creator)
-  profitLoss      Float?   // sellAmountUsdc - priceInUsdc
-  creatorFee      Float?   // 5% of profit (if positive)
-  creatorFeeTxSig String?  // Fee payment transaction
-  
-  // Status: OPEN = holding, SOLD = sold, FEE_PENDING = fee processing
-  status          String   @default("OPEN")
-  
-  createdAt       DateTime @default(now())
-  
-  @@index([userId, status])
-  @@index([userId, createdAt(sort: Desc)])
-  @@index([tokenMint])
-  @@index([postId])
-  // Audit Issue #15: Composite index for status queries
-  @@index([status, createdAt(sort: Desc)])
-  @@map("ibuy_purchases")
 }
 
 enum PostVisibility {
@@ -621,754 +1063,9 @@ enum PostVisibility {
   VIP
 }
 
-// Post like model
-model PostLike {
-  id        String   @id @default(cuid())
-  postId    String
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  createdAt DateTime @default(now())
-  
-  @@unique([userId, postId])
-  @@index([postId])
-  @@index([userId])
-  @@map("post_likes")
-}
-
-// Post comment model
-model PostComment {
-  id        String   @id @default(cuid())
-  postId    String
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  content   String
-  
-  parentId  String?
-  parent    PostComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies   PostComment[] @relation("CommentReplies")
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  @@index([postId])
-  @@index([userId])
-  @@index([parentId])
-  @@map("post_comments")
-}
-
-// Repost model
-model Repost {
-  id        String   @id @default(cuid())
-  postId    String
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  comment   String?
-  
-  createdAt DateTime @default(now())
-  
-  @@unique([userId, postId])
-  @@index([postId])
-  @@index([userId])
-  @@index([createdAt(sort: Desc)])
-  @@map("reposts")
-}
-
-// Follow relationship model
-model Follow {
-  id          String   @id @default(cuid())
-  followerId  String
-  follower    User     @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
-  followingId String
-  following   User     @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  
-  @@unique([followerId, followingId])
-  @@index([followerId])
-  @@index([followingId])
-  @@map("follows")
-}
-
-// VIP subscription model
-model VIPSubscription {
-  id            String   @id @default(cuid())
-  subscriberId  String
-  subscriber    User     @relation("VIPSubscriber", fields: [subscriberId], references: [id], onDelete: Cascade)
-  creatorId     String
-  creator       User     @relation("VIPCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  
-  priceInSol    Float
-  expiresAt     DateTime
-  autoRenew     Boolean  @default(true)
-  transactionSignature String?
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  @@unique([subscriberId, creatorId])
-  @@index([subscriberId])
-  @@index([creatorId])
-  @@index([expiresAt])
-  @@map("vip_subscriptions")
-}
-
-// User settings model for preferences
-model UserSettings {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  
-  // Notification preferences
-  notifications Json?
-  
-  // Privacy settings
-  privacy       Json?
-  
-  // Security settings
-  security      Json?
-  adminIpWhitelist String[] @default([])
-  
-  // General preferences
-  preferences   Json?
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  // Relations
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@map("user_settings")
-}
-
-// Push notification tokens
-model PushToken {
-  id        String   @id @default(cuid())
-  userId    String
-  token     String
-  platform  String   // ios, android, web
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  // Relations
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@unique([userId, platform])
-  @@index([userId, active])
-  @@map("push_tokens")
-}
-
-// ============================================
-// COPY TRADING MODELS
-// ============================================
-
-// Trader profiles for featured traders
-model TraderProfile {
-  id            String   @id @default(cuid())
-  walletAddress String   @unique
-  username      String?
-  avatarUrl     String?
-  bio           String?
-  
-  // Performance Stats
-  totalFollowers Int      @default(0)
-  totalTrades    Int      @default(0)
-  winRate        Float    @default(0)
-  totalROI       Float    @default(0)
-  avgTradeSize   Float    @default(0)
-  totalVolume    Float    @default(0)
-  
-  // Performance by time period
-  roi7d          Float    @default(0)
-  roi30d         Float    @default(0)
-  roi90d         Float    @default(0)
-  
-  // Featured status
-  isFeatured     Boolean  @default(false)
-  featuredOrder  Int?
-  
-  // Timestamps
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  
-  // Relations
-  copiers        CopyTrading[]
-  monitored      MonitoredWallet[]
-  snapshots     TraderPerformanceSnapshot[]
-  
-  @@index([isFeatured, featuredOrder])
-  @@index([totalROI])
-  @@index([walletAddress])
-  @@index([totalROI(sort: Desc), isFeatured])
-  @@map("trader_profiles")
-}
-
-// Trader performance snapshots for historical tracking
-model TraderPerformanceSnapshot {
-  id             String   @id @default(cuid())
-  traderId       String
-  
-  // Snapshot Data
-  date           DateTime
-  roi            Float
-  totalPnL       Float
-  totalTrades    Int
-  totalFollowers Int
-  winRate        Float
-  
-  // Timestamps
-  createdAt      DateTime @default(now())
-  
-  // Relations
-  trader         TraderProfile @relation(fields: [traderId], references: [id], onDelete: Cascade)
-  
-  @@unique([traderId, date])
-  @@index([traderId, date])
-  @@map("trader_performance_snapshots")
-}
-
-// Copy trading relationships
-model CopyTrading {
-  id            String   @id @default(cuid())
-  userId        String
-  traderId      String
-  
-  // User Settings
-  isActive      Boolean  @default(true)
-  totalBudget   Float
-  amountPerTrade Float
-  stopLoss      Float?
-  takeProfit    Float?
-  maxSlippage   Float    @default(0.5)
-  exitWithTrader Boolean @default(false)
-  
-  // Statistics
-  totalCopied   Int      @default(0)
-  activeTrades  Int      @default(0)
-  totalProfit   Float    @default(0)
-  totalFeesPaid Float    @default(0)
-  
-  // Revenue Sharing Settings
-  minProfitForSharing Float @default(0) // Minimum profit (USDC) before 5% fee applies
-  
-  // Timestamps
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  // Relations
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trader        TraderProfile @relation(fields: [traderId], references: [id], onDelete: Cascade)
-  positions     Position[]
-  
-  @@unique([userId, traderId])
-  @@index([userId, isActive])
-  @@index([traderId, isActive])
-  @@map("copy_trading")
-}
-
-// Position status enum for type safety
 enum PositionStatus {
   OPEN
   CLOSING
   CLOSED
   FAILED
 }
-
-// Individual trade positions
-model Position {
-  id              String   @id @default(cuid())
-  copyTradingId   String
-  
-  // Token Info
-  tokenMint       String
-  tokenSymbol     String
-  tokenName       String
-  
-  // Entry Details
-  entryTxHash     String
-  entryPrice      Float
-  entryAmount     Float
-  entryValue      Float
-  entryTimestamp  DateTime
-  
-  // Exit Details (null if still open)
-  exitTxHash      String?
-  exitPrice       Float?
-  exitAmount      Float?
-  exitValue       Float?
-  exitTimestamp   DateTime?
-  exitReason      String?
-  
-  // Profit/Loss
-  profitLoss      Float?
-  profitLossPercent Float?
-  feeAmount       Float?
-  feeTxHash       String?
-  
-  // Status - using enum for type safety
-  status          PositionStatus @default(OPEN)
-  
-  // SL/TP Processing Lock - prevents duplicate sell orders
-  slTpTriggeredAt DateTime?
-  
-  // Timestamps
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  // Relations
-  copyTrading     CopyTrading @relation(fields: [copyTradingId], references: [id], onDelete: Cascade)
-  
-  @@index([tokenMint, status])
-  @@index([status, updatedAt])
-  @@index([copyTradingId, status, updatedAt(sort: Desc)])
-  @@index([status, exitTimestamp(sort: Desc)])
-  @@index([status, slTpTriggeredAt])
-  // Audit Issue #15: Composite index for copy trading queries
-  @@index([copyTradingId, tokenMint])
-  @@map("positions")
-}
-
-// Monitored wallets for WebSocket tracking
-model MonitoredWallet {
-  id              String   @id @default(cuid())
-  walletAddress   String   @unique
-  traderId        String?
-  
-  // Status
-  isActive        Boolean  @default(true)
-  lastSeenTx      String?
-  lastSeenAt      DateTime?
-  
-  // Stats
-  totalCopiers    Int      @default(0)
-  
-  // Timestamps
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  // Relations
-  trader          TraderProfile? @relation(fields: [traderId], references: [id])
-  transactions    DetectedTransaction[]
-  
-  @@index([walletAddress, isActive])
-  @@map("monitored_wallets")
-}
-
-// Detected transactions from monitored wallets
-model DetectedTransaction {
-  id              String   @id @default(cuid())
-  monitoredWalletId String
-  
-  // Transaction Data
-  txHash          String   @unique
-  type            String
-  tokenMint       String
-  tokenSymbol     String?
-  amount          Float
-  price           Float
-  totalValue      Float
-  
-  // Processing Status
-  processed       Boolean  @default(false)
-  copiesCreated   Int      @default(0)
-  
-  // Timestamps
-  detectedAt      DateTime @default(now())
-  processedAt     DateTime?
-  
-  // Relations
-  monitoredWallet MonitoredWallet @relation(fields: [monitoredWalletId], references: [id])
-  
-  @@index([txHash])
-  @@index([monitoredWalletId, processed])
-  @@index([detectedAt])
-  @@map("detected_transactions")
-}
-
-// Token price cache
-model TokenPrice {
-  id          String   @id @default(cuid())
-  tokenMint   String   @unique
-  tokenSymbol String
-  
-  // Price Data
-  priceUSD    Float
-  priceChange24h Float?
-  volume24h   Float?
-  
-  // Timestamp
-  updatedAt   DateTime @updatedAt
-  
-  @@index([tokenMint])
-  @@map("token_prices")
-}
-
-// Execution queue for trades
-model ExecutionQueue {
-  id              String   @id @default(cuid())
-  
-  // Order Details
-  type            String
-  userId          String
-  copyTradingId   String
-  positionId      String?
-  
-  // Trade Parameters
-  tokenMint       String
-  amount          Float
-  maxSlippage     Float    @default(1)
-  
-  // Execution Status
-  status          String   @default("PENDING")
-  attempts        Int      @default(0)
-  lastError       String?
-  txHash          String?
-  
-  // Priority (higher = execute first)
-  priority        Int      @default(0)
-  
-  // Timestamps
-  createdAt       DateTime @default(now())
-  executedAt      DateTime?
-  
-  @@index([status, priority, createdAt])
-  @@index([userId])
-  @@map("execution_queue")
-}
-
-// ============================================
-// CUSTODIAL WALLET MODEL
-// ============================================
-
-// Custodial wallet for server-side transaction signing
-// Used for copy trading execution where server needs to sign on behalf of user
-model CustodialWallet {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  
-  // Wallet Keys
-  publicKey       String   @unique
-  encryptedKey    String   // AES-256-GCM encrypted private key (base64)
-  keyIv           String   // Initialization vector for decryption (base64)
-  keyTag          String   // Authentication tag for GCM (base64)
-  keySalt         String?  // Unique salt per wallet for PBKDF2 (Audit Issue #1)
-  keyVersion      Int      @default(1) // For key rotation support
-  dataKeyCiphertext String? // Encrypted data key (base64), wrapped by KMS provider
-  dataKeyKeyId      String? // KMS key identifier used to wrap data key
-  
-  // BIP39 Mnemonic Backup (encrypted for recovery capability)
-  encryptedMnemonic String?  // BIP39 mnemonic backup (encrypted with KMS)
-  mnemonicIv        String?  // IV for mnemonic encryption
-  mnemonicTag       String?  // Auth tag for mnemonic encryption
-  
-  // Status
-  isActive        Boolean  @default(true)
-  
-  // Timestamps
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  // Relations
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@index([publicKey])
-  @@index([userId, isActive])
-  @@map("custodial_wallets")
-}
-
-model KeyVersion {
-  id          String   @id @default(cuid())
-  version     Int      @unique
-  algorithm   String
-  kdfConfig   Json
-  kmsKeyId    String
-  createdAt   DateTime @default(now())
-  expiresAt   DateTime?
-  isActive    Boolean  @default(true)
-
-  @@index([version, isActive])
-  @@map("key_versions")
-}
-
-model KeyOperationLog {
-  id          String   @id @default(cuid())
-  operation   String
-  keyVersion  Int
-  userId      String?
-  success     Boolean
-  errorMsg    String?
-  ipAddress   String?
-  metadata    Json?
-  createdAt   DateTime @default(now())
-
-  @@index([operation, createdAt])
-  @@index([userId, createdAt])
-  @@map("key_operation_logs")
-}
-
-model JWTSecretVersion {
-  id          String   @id @default(cuid())
-  secretHash  String   @unique // SHA-256 hash of secret for identification (NOT the secret itself)
-  version     Int      @unique
-  purpose     String   @default("access") // "access" or "refresh"
-  createdAt   DateTime @default(now())
-  expiresAt   DateTime
-  isActive    Boolean  @default(true)
-  rotatedBy   String?  // Admin user ID who triggered rotation
-  
-  @@index([version, isActive])
-  @@index([purpose, isActive])
-  @@index([expiresAt])
-  @@map("jwt_secret_versions")
-}
-
-model FinancialAuditLog {
-  id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Restrict)
-
-  operation    String
-  resourceType String
-  resourceId   String
-
-  amount       Float?
-  currency     String?
-  feeAmount    Float?
-
-  metadata     Json
-  ipAddress    String
-  userAgent    String?
-
-  previousHash String?
-  currentHash  String
-
-  createdAt    DateTime @default(now())
-
-  @@index([userId, createdAt])
-  @@index([operation, createdAt])
-  @@index([resourceType, resourceId])
-  @@index([createdAt])
-  @@map("financial_audit_logs")
-}
-
-model DataDeletionRequest {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  reason      String?
-  status      String   @default("PENDING")
-
-  processedAt DateTime?
-  processedBy String?
-  deletedData Json?
-
-  ipAddress   String
-  userAgent   String?
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([userId, status])
-  @@index([status, createdAt])
-  @@map("data_deletion_requests")
-}
-
-model DataExportRequest {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  format      String   @default("JSON")
-  status      String   @default("PENDING")
-
-  fileUrl     String?
-  fileSize    Int?
-  expiresAt   DateTime?
-
-  processedAt DateTime?
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([userId, status])
-  @@index([status, createdAt])
-  @@map("data_export_requests")
-}
-
-model ConsentLog {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  consentType String
-  version     String
-  granted     Boolean
-
-  ipAddress   String
-  userAgent   String?
-
-  createdAt   DateTime @default(now())
-
-  @@index([userId, consentType])
-  @@index([consentType, createdAt])
-  @@map("consent_logs")
-}
-
-model KYCVerification {
-  id               String   @id @default(cuid())
-  userId           String   @unique
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  status           String   @default("PENDING")
-  tier             Int      @default(1)
-
-  encryptedData    String?
-  dataKeyCiphertext String?
-  dataKeyKeyId      String?
-  keyIv            String?
-  keyTag           String?
-  keySalt          String?
-  keyVersion       Int?
-
-  verifiedAt       DateTime?
-  verifiedBy       String?
-  rejectionReason  String?
-
-  riskScore        Float?
-  riskLevel        String?
-
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@index([status, tier])
-  @@index([userId])
-  @@map("kyc_verifications")
-}
-
-model AMLAlert {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Restrict)
-
-  alertType       String
-  severity        String
-  description     String
-
-  transactionId   String?
-  transactionHash String?
-  amount          Float?
-  currency        String?
-
-  status          String   @default("OPEN")
-  assignedTo      String?
-  resolution      String?
-  resolvedAt      DateTime?
-
-  metadata        Json?
-
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([userId, status])
-  @@index([alertType, severity])
-  @@index([status, createdAt])
-  @@map("aml_alerts")
-}
-
-model RegulatoryReport {
-  id          String   @id @default(cuid())
-
-  reportType  String
-  period      String
-
-  fileUrl     String
-  fileSize    Int
-  fileHash    String
-
-  recordCount Int
-  generatedBy String?
-
-  createdAt   DateTime @default(now())
-
-  @@index([reportType, period])
-  @@index([createdAt])
-  @@map("regulatory_reports")
-}
-
-// Plan7: Dead Letter Queue for failed transaction recovery
-model DeadLetterQueueItem {
-  id          String    @id @default(cuid())
-  
-  operation   String    // 'SWAP', 'SEND', 'COPY_TRADE', 'WITHDRAWAL'
-  payload     Json      // Original request data
-  error       String    // Error message (max 1000 chars)
-  
-  retryCount  Int       @default(0)
-  lastRetryAt DateTime?
-  nextRetryAt DateTime?
-  
-  createdAt   DateTime  @default(now())
-  resolvedAt  DateTime?
-  
-  status      String    @default("PENDING") // PENDING, RETRYING, RESOLVED, FAILED, MANUAL_REVIEW
-  
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@index([status, createdAt])
-  @@index([status, nextRetryAt])
-  @@index([userId])
-  @@map("dead_letter_queue")
-}
-
-// ============================================
-// WEBHOOK SYSTEM (Plan: Phase 5)
-// ============================================
-
-// Webhook registration for external integrations
-model Webhook {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  url       String   // Endpoint URL to receive webhook events
-  events    String[] // Array of event types: ['trade.executed', 'position.opened', ...]
-  secret    String   // HMAC secret for signature verification (min 32 chars)
-  active    Boolean  @default(true)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  // Delivery tracking
-  deliveries WebhookDelivery[]
-  
-  @@index([userId, active])
-  @@map("webhooks")
-}
-
-// Webhook delivery attempts and status tracking
-model WebhookDelivery {
-  id           String   @id @default(cuid())
-  webhookId    String
-  webhook      Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
-  
-  event        String   // Event type that triggered the delivery
-  payload      Json?    // Payload sent to webhook
-  status       String   // SUCCESS, FAILED, PENDING
-  responseCode Int?     // HTTP response code from webhook endpoint
-  error        String?  // Error message if delivery failed
-  attempt      Int      @default(1) // Retry attempt number
-  
-  createdAt    DateTime @default(now())
-  
-  @@index([webhookId, createdAt])
-  @@index([status, createdAt])
-  @@map("webhook_deliveries")
-}
-

@@ -21,6 +21,8 @@ export type CacheKey =
   | `birdeye:price:${string}`
   | `birdeye:wallet:pnl:${string}`
   | `birdeye:wallet:tokens:${string}`
+  | 'birdeye:trending:daily'
+  | 'birdeye:soulmarket:hourly'
   | `traders:top:${string}`
   | `portfolio:snapshot:${string}`
   | 'portfolio:sol:price'

@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { StyleSheet, Text, View, Image, Pressable, Alert } from 'react-native';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, Image, Pressable, Alert, Animated } from 'react-native';
 import { MessageSquare, Heart, Zap, Copy } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
@@ -49,6 +49,109 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   const [currentLikes, setCurrentLikes] = useState(likes);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Calculate post age in minutes for iBuy button coloring
+  const postAgeMinutes = useMemo(() => {
+    try {
+      // Handle various timestamp formats
+      if (!timestamp || timestamp.trim() === '') return 0; // Empty = just created = green
+
+      const lowerTs = timestamp.toLowerCase().trim();
+
+      // Handle "Just now" or "just now" - treat as 0 minutes
+      if (lowerTs === 'just now' || lowerTs === 'now') {
+        return 0;
+      }
+
+      // Handle relative time like "2m ago", "1h ago", "0m ago"
+      if (lowerTs.includes('ago')) {
+        const match = timestamp.match(/(\d+)\s*(m|h|d)/i);
+        if (match) {
+          const value = parseInt(match[1], 10);
+          const unit = match[2].toLowerCase();
+          if (unit === 'm') return value;
+          if (unit === 'h') return value * 60;
+          if (unit === 'd') return value * 60 * 24;
+        }
+        // "ago" but no number match - could be "a few seconds ago"
+        if (lowerTs.includes('second') || lowerTs.includes('moment')) {
+          return 0;
+        }
+        return 999; // Unknown "ago" format, treat as old
+      }
+
+      // Handle ISO date strings
+      const postDate = new Date(timestamp);
+      if (isNaN(postDate.getTime())) return 999;
+      return Math.floor((Date.now() - postDate.getTime()) / 60000);
+    } catch {
+      return 0; // Default to GREEN if parsing fails (benefit of the doubt for new posts)
+    }
+  }, [timestamp]);
+
+  // Determine iBuy button color based on age
+  const ibuyColorState: 'green' | 'yellow' | 'red' = useMemo(() => {
+    if (postAgeMinutes < 1) return 'green';
+    if (postAgeMinutes < 10) return 'yellow';
+    return 'red';
+  }, [postAgeMinutes]);
+
+  // Animated glow effect for yellow/red states
+  const glowAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (ibuyColorState === 'green') {
+      glowAnim.setValue(0);
+      return;
+    }
+
+    // Create pulsing glow animation for yellow/red
+    const pulseAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: false,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0,
+          duration: 800,
+          useNativeDriver: false,
+        }),
+      ])
+    );
+
+    pulseAnimation.start();
+    return () => pulseAnimation.stop();
+  }, [ibuyColorState, glowAnim]);
+
+  // Get dynamic iBuy button styles based on age
+  const getIbuyButtonStyle = useMemo(() => {
+    const baseStyle = styles.buyButton;
+
+    if (ibuyColorState === 'green') {
+      return baseStyle; // Default green style
+    }
+
+    if (ibuyColorState === 'yellow') {
+      return {
+        ...baseStyle,
+        backgroundColor: COLORS.warning + '20',
+      };
+    }
+
+    // Red for 10+ minutes
+    return {
+      ...baseStyle,
+      backgroundColor: COLORS.error + '20',
+    };
+  }, [ibuyColorState]);
+
+  const getIbuyColor = () => {
+    if (ibuyColorState === 'green') return COLORS.success;
+    if (ibuyColorState === 'yellow') return COLORS.warning;
+    return COLORS.error;
+  };
 
   // Truncate content if too long
   const MAX_CONTENT_LENGTH = 200;
@@ -252,21 +355,39 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
           </View>
 
           {mentionedToken && (
-            <Pressable
-              style={styles.buyButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                if (onBuyPress) {
-                  onBuyPress();
-                } else {
-                  // Navigate to coin details page for quick buy
-                  router.push(`/coin/${mentionedToken.toLowerCase()}`);
-                }
-              }}
+            <Animated.View
+              style={[
+                getIbuyButtonStyle,
+                ibuyColorState !== 'green' && {
+                  shadowColor: ibuyColorState === 'yellow' ? COLORS.warning : COLORS.error,
+                  shadowOpacity: glowAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.3, 0.8],
+                  }),
+                  shadowRadius: glowAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [4, 12],
+                  }),
+                  shadowOffset: { width: 0, height: 0 },
+                  elevation: 8,
+                },
+              ]}
             >
-              <Zap size={16} color={COLORS.success} />
-              <Text style={styles.buyText}>Ibuy</Text>
-            </Pressable>
+              <Pressable
+                style={{ flexDirection: 'row', alignItems: 'center' }}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  if (onBuyPress) {
+                    onBuyPress();
+                  } else {
+                    router.push(`/coin/${mentionedToken.toLowerCase()}`);
+                  }
+                }}
+              >
+                <Zap size={16} color={getIbuyColor()} />
+                <Text style={[styles.buyText, { color: getIbuyColor() }]}>Ibuy</Text>
+              </Pressable>
+            </Animated.View>
           )}
 
           {walletAddress && onCopyPress && (

@@ -17,6 +17,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Star,
   Copy,
@@ -34,6 +35,7 @@ import { NeonCard } from '../../components/NeonCard';
 import { NeonButton } from '../../components/NeonButton';
 import { GlowingText } from '../../components/GlowingText';
 import { trpc } from '../../lib/trpc';
+import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '../../lib/priceFormatter';
 
 type Timeframe = '1h' | '1d' | '1w' | '1m' | '1y';
 type ChartTimeframe = '5m' | '15m' | '1h' | '4h' | '1d';
@@ -59,6 +61,7 @@ interface CoinData {
   age: string;
   pairAge?: number | null;
   logo?: string | null;
+  banner?: string | null; // Banner/header image from DexScreener
   description?: string | null;
   website?: string | null;
   twitter?: string | null;
@@ -68,26 +71,6 @@ interface CoinData {
     sells: number;
     total: number;
   };
-}
-
-interface Transaction {
-  id: string;
-  type: 'buy' | 'sell';
-  amount: number;
-  price: number;
-  timestamp: string;
-  wallet: string;
-  txHash: string;
-}
-
-interface TopTrader {
-  id: string;
-  wallet: string;
-  username?: string;
-  pnl: number;
-  winRate: number;
-  trades: number;
-  avatar?: string;
 }
 
 export default function CoinDetailsScreen() {
@@ -124,7 +107,7 @@ export default function CoinDetailsScreen() {
   const {
     data: apiData,
     isLoading: isLoadingApi,
-    error: apiError,
+    error: _apiError,
     refetch: refetchApi
   } = trpc.market.getTokenDetails.useQuery(
     { symbol: symbol?.toUpperCase() || '' },
@@ -158,6 +141,8 @@ export default function CoinDetailsScreen() {
         pairAge: apiData.pairAge,
         // Use passed logo from home screen for consistency
         logo: passedLogo || apiData.logo,
+        // Banner/header image
+        banner: apiData.banner || null,
         description: apiData.description,
         website: apiData.website,
         twitter: apiData.twitter,
@@ -165,7 +150,7 @@ export default function CoinDetailsScreen() {
         txns24h: apiData.txns24h,
       };
     }
-    
+
     // Fallback: Create coinData from passed params if we have pairAddress or contractAddress
     // This ensures TokenInfo always loads if DexScreener data was passed
     if (passedPairAddress || passedContractAddress) {
@@ -174,26 +159,16 @@ export default function CoinDetailsScreen() {
         name: passedName || 'Unknown Token',
         price: passedPrice ?? 0,
         change24h: passedChange ?? 0,
-        priceChange1h: undefined,
-        priceChange7d: undefined,
         marketCap: 0,
-        fdv: undefined,
         volume24h: 0,
         liquidity: 0,
         holders: 0,
         contractAddress: passedContractAddress || passedPairAddress || '',
         verified: false,
         age: 'Unknown',
-        pairAge: null,
-        logo: passedLogo || null,
-        description: null,
-        website: null,
-        twitter: null,
-        telegram: null,
-        txns24h: undefined,
       };
     }
-    
+
     if (symbol?.toUpperCase() === 'SOL') {
       return {
         symbol: 'SOL',
@@ -430,20 +405,9 @@ export default function CoinDetailsScreen() {
     void Linking.openURL(url);
   };
 
-  const formatPrice = (price: number) => {
-    if (price < 0.000001) return price.toExponential(2);
-    if (price < 0.01) return price.toFixed(6);
-    if (price < 1) return price.toFixed(4);
-    if (price < 1000) return price.toFixed(2);
-    return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  };
+  const formatPrice = formatSubscriptPrice;
 
-  const formatLargeNumber = (num: number) => {
-    if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B`;
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-    return num.toFixed(0);
-  };
+  const formatLargeNumber = formatLargeNum;
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -500,6 +464,21 @@ export default function CoinDetailsScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        {/* Banner Image (if available from DexScreener) */}
+        {coinData.banner && (
+          <View style={styles.bannerContainer}>
+            <Image
+              source={{ uri: coinData.banner }}
+              style={styles.bannerImage}
+              resizeMode="cover"
+            />
+            <LinearGradient
+              colors={['transparent', COLORS.background]}
+              style={styles.bannerGradient}
+            />
+          </View>
+        )}
+
         {/* Header */}
         <NeonCard style={styles.headerCard}>
           <View style={styles.tokenHeader}>
@@ -628,18 +607,6 @@ export default function CoinDetailsScreen() {
                       </Text>
                     </View>
                   </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Holders</Text>
-                    <View style={styles.statValueRow}>
-                      <Text style={styles.statValue}>{formatLargeNumber(coinData.holders)}</Text>
-                      <Text style={[
-                        styles.statDelta,
-                        { color: statChanges.holders >= 0 ? COLORS.success : COLORS.error },
-                      ]}>
-                        {statChanges.holders >= 0 ? '+' : ''}{statChanges.holders.toFixed(1)}%
-                      </Text>
-                    </View>
-                  </View>
                 </View>
               </>
             ) : (
@@ -656,10 +623,6 @@ export default function CoinDetailsScreen() {
                   <View style={styles.statItem}>
                     <Text style={styles.statLabel}>Liquidity</Text>
                     <Text style={styles.statValue}>${formatLargeNumber(coinData.liquidity)}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Holders</Text>
-                    <Text style={styles.statValue}>{formatLargeNumber(coinData.holders)}</Text>
                   </View>
                 </View>
 
@@ -902,7 +865,7 @@ export default function CoinDetailsScreen() {
         {coinData.description && (
           <NeonCard style={styles.aboutCard}>
             <Text style={styles.sectionTitle}>About</Text>
-            <Text 
+            <Text
               style={styles.aboutText}
               numberOfLines={3}
               ellipsizeMode="tail"
@@ -1109,8 +1072,9 @@ const styles = StyleSheet.create({
     padding: SPACING.s,
   },
   headerCard: {
-    margin: SPACING.m,
-    marginBottom: SPACING.s,
+    marginHorizontal: SPACING.xs,
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.xs,
   },
   tokenHeader: {
     flexDirection: 'row',
@@ -1183,9 +1147,9 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.xs,
   },
   statsCard: {
-    margin: SPACING.m,
+    marginHorizontal: SPACING.xs,
     marginTop: 0,
-    marginBottom: SPACING.s,
+    marginBottom: SPACING.xs,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1245,9 +1209,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   contractCard: {
-    margin: SPACING.m,
+    marginHorizontal: SPACING.xs,
     marginTop: 0,
-    marginBottom: SPACING.s,
+    marginBottom: SPACING.xs,
   },
   sentimentContainer: {
     width: 260,
@@ -1784,5 +1748,22 @@ const styles = StyleSheet.create({
     color: COLORS.solana,
     fontSize: 14,
     marginLeft: SPACING.xs,
+  },
+  // Banner styles
+  bannerContainer: {
+    width: '100%',
+    height: 150,
+    marginBottom: -SPACING.m, // Overlap with header card
+  },
+  bannerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  bannerGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 60,
   },
 });

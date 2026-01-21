@@ -69,7 +69,19 @@ export default function SolanaSetupScreen() {
       setGeneratedWallet(wallet);
       setMode('create');
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'Failed to create wallet. Please try again.');
+      // Provide more specific error messages
+      const errorMessage = error?.message || '';
+      let alertMessage = 'Failed to create wallet. Please try again.';
+
+      if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+        alertMessage = 'Wallet created locally but could not sync to server. You can still use your wallet.';
+      } else if (errorMessage.includes('password') || errorMessage.includes('encrypt')) {
+        alertMessage = 'Error encrypting wallet. Please try a different password.';
+      } else if (errorMessage) {
+        alertMessage = errorMessage;
+      }
+
+      Alert.alert('Error', alertMessage);
       if (__DEV__) logger.error('Create wallet error:', error);
     }
   };

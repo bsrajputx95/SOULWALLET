@@ -32,7 +32,7 @@ const isExpoGo = Constants.appOwnership === 'expo';
 const PLATFORM_URLS: Record<string, string> = {
   dexscreener: 'https://dexscreener.com/solana',
   raydium: 'https://raydium.io/swap/',
-  bonk: 'https://bonkbot.io/',
+  bonk: 'https://bonk.fun/',
   pumpfun: 'https://pump.fun/',
   orca: 'https://www.orca.so/',
 };
@@ -65,7 +65,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
   const platformName = PLATFORM_NAMES[platform] || platform;
 
   // Handle WebView navigation state changes
-  const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
+  const handleNavigationStateChange = useCallback((_navState: WebViewNavigation) => {
     // Simple navigation tracking (no token detection)
   }, []);
 
@@ -228,9 +228,9 @@ const styles = StyleSheet.create({
   },
   platformTitle: {
     ...FONTS.orbitronBold,
-    fontSize: 24,
+    fontSize: 16,
     color: COLORS.textPrimary,
-    marginBottom: SPACING.s,
+    marginBottom: 0,
   },
   description: {
     ...FONTS.sfProRegular,
@@ -368,8 +368,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: SPACING.xs,
     backgroundColor: COLORS.cardBackground,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
@@ -380,9 +380,9 @@ const styles = StyleSheet.create({
     gap: SPACING.s,
   },
   actionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',

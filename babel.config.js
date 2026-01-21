@@ -37,6 +37,8 @@ module.exports = function (api) {
               root: ['./'],
               alias: {
                 '@': './',
+                'stream': 'stream-browserify',
+                'crypto': 'react-native-crypto',
               },
               extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
             },

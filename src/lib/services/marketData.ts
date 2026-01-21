@@ -118,8 +118,7 @@ class MarketDataService {
 
   /**
    * Get SoulMarket tokens from DexScreener's boosted tokens API
-   * Simple: Return top 30 Solana trending tokens, refreshed hourly
-   * No complex filters - show what DexScreener considers trending
+   * Then enriches with full pair data to get proper logos, prices, volumes
    */
   async getSoulMarket() {
     const key = 'soulmarket' as const;
@@ -129,8 +128,8 @@ class MarketDataService {
     return this.trendingBreaker.exec(
       async () => {
         try {
-          // Use DexScreener's boosted tokens API - these are trending/promoted tokens
-          const { data } = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
+          // Step 1: Get boosted token addresses from DexScreener
+          const { data: boostedData } = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
             timeout: EXTERNAL_CALL_TIMEOUT,
             headers: {
               'Accept': 'application/json',
@@ -139,29 +138,57 @@ class MarketDataService {
           });
 
           // Filter for Solana chain only, take top 30
-          const solanaTokens = (data || [])
+          const solanaTokenAddresses = (boostedData || [])
             .filter((token: any) => token.chainId === 'solana')
             .slice(0, 30)
-            .map((token: any) => ({
-              // Format to match expected structure
-              baseToken: {
-                address: token.tokenAddress,
-                symbol: token.description?.split(' ')[0] || 'TOKEN',
-                name: token.description || 'Unknown',
-              },
-              chainId: 'solana',
-              url: token.url,
-              // Standardize logo: use info.imageUrl for consistency with frontend
-              info: {
-                imageUrl: token.icon ? `https://cdn.dexscreener.com/icons/${token.icon}` : undefined,
-              },
-              header: token.header,
-              links: token.links || [],
-              boostAmount: token.totalAmount,
-            }));
+            .map((token: any) => token.tokenAddress)
+            .filter((addr: string) => addr);
 
-          const soulMarket = { pairs: solanaTokens };
+          if (solanaTokenAddresses.length === 0) {
+            return { pairs: [] };
+          }
+
+          // Step 2: Fetch full pair data for each token (in batches of 10)
+          const allPairs: any[] = [];
+          const batchSize = 10;
+
+          for (let i = 0; i < solanaTokenAddresses.length; i += batchSize) {
+            const batch = solanaTokenAddresses.slice(i, i + batchSize);
+            const batchPromises = batch.map(async (tokenAddress: string) => {
+              try {
+                const { data } = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, {
+                  timeout: EXTERNAL_CALL_TIMEOUT,
+                  headers: {
+                    'Accept': 'application/json',
+                    'User-Agent': 'SoulWallet/1.0'
+                  }
+                });
+                // Get the best Solana pair (highest liquidity)
+                const solanaPairs = (data?.pairs || [])
+                  .filter((p: any) => p.chainId === 'solana')
+                  .sort((a: any, b: any) =>
+                    parseFloat(b.liquidity?.usd || '0') - parseFloat(a.liquidity?.usd || '0')
+                  );
+                return solanaPairs[0] || null;
+              } catch (err) {
+                logger.warn(`Failed to fetch pair for token ${tokenAddress}`);
+                return null;
+              }
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            allPairs.push(...batchResults.filter(p => p !== null));
+
+            // Small delay between batches to avoid rate limiting
+            if (i + batchSize < solanaTokenAddresses.length) {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+          }
+
+          // Now we have full pair data with proper logos, prices, etc.
+          const soulMarket = { pairs: allPairs };
           await redisCache.set(key, soulMarket, 3600); // Cache for 1 hour
+          logger.info(`SoulMarket cached with ${allPairs.length} pairs`);
           return soulMarket;
         } catch (error) {
           logger.error('Failed to fetch SoulMarket tokens:', error);
@@ -178,6 +205,7 @@ class MarketDataService {
 
   /**
    * Get daily trending tokens from DexScreener
+   * Enriches with full pair data for proper logos, prices, volumes
    * Cached until next 15:00 UTC (daily snapshot)
    */
   async trending() {
@@ -188,8 +216,8 @@ class MarketDataService {
     return this.trendingBreaker.exec(
       async () => {
         try {
-          // Use DexScreener's token profiles for Solana - shows trending
-          const { data } = await axios.get('https://api.dexscreener.com/token-profiles/latest/v1', {
+          // Step 1: Get token profiles (trending tokens)
+          const { data: profilesData } = await axios.get('https://api.dexscreener.com/token-profiles/latest/v1', {
             timeout: EXTERNAL_CALL_TIMEOUT,
             headers: {
               'Accept': 'application/json',
@@ -197,28 +225,45 @@ class MarketDataService {
             }
           });
 
-          // Filter for Solana chain, take top 10 by boost amount
-          const solanaTokens = (data || [])
+          // Filter for Solana chain, take top 10
+          const solanaTokenAddresses = (profilesData || [])
             .filter((token: any) => token.chainId === 'solana')
             .slice(0, 10)
-            .map((token: any) => ({
-              baseToken: {
-                address: token.tokenAddress,
-                symbol: token.description?.split(' ')[0] || 'TOKEN',
-                name: token.description || 'Unknown',
-              },
-              chainId: 'solana',
-              url: token.url,
-              // Standardize logo: prefer imageUrl, fallback to CDN icon
-              info: {
-                imageUrl: token.icon ? `https://cdn.dexscreener.com/icons/${token.icon}` : undefined,
-              },
-              header: token.header,
-              links: token.links || [],
-              boostAmount: token.totalAmount,
-            }));
+            .map((token: any) => token.tokenAddress)
+            .filter((addr: string) => addr);
 
-          const trending = { pairs: solanaTokens };
+          if (solanaTokenAddresses.length === 0) {
+            return { pairs: [] };
+          }
+
+          // Step 2: Fetch full pair data for each token
+          const allPairs: any[] = [];
+          const batchPromises = solanaTokenAddresses.map(async (tokenAddress: string) => {
+            try {
+              const { data } = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, {
+                timeout: EXTERNAL_CALL_TIMEOUT,
+                headers: {
+                  'Accept': 'application/json',
+                  'User-Agent': 'SoulWallet/1.0'
+                }
+              });
+              // Get the best Solana pair (highest liquidity)
+              const solanaPairs = (data?.pairs || [])
+                .filter((p: any) => p.chainId === 'solana')
+                .sort((a: any, b: any) =>
+                  parseFloat(b.liquidity?.usd || '0') - parseFloat(a.liquidity?.usd || '0')
+                );
+              return solanaPairs[0] || null;
+            } catch (err) {
+              logger.warn(`Failed to fetch trending pair for token ${tokenAddress}`);
+              return null;
+            }
+          });
+
+          const results = await Promise.all(batchPromises);
+          allPairs.push(...results.filter(p => p !== null));
+
+          const trending = { pairs: allPairs };
 
           // Calculate seconds until next 15:00 UTC
           const now = new Date();
@@ -231,7 +276,7 @@ class MarketDataService {
           const ttlSeconds = Math.max(60, Math.floor((next1500UTC.getTime() - now.getTime()) / 1000));
 
           await redisCache.set(key, trending, ttlSeconds);
-          logger.info(`Trending cached for ${Math.floor(ttlSeconds / 3600)}h until 15:00 UTC`);
+          logger.info(`Trending cached with ${allPairs.length} pairs for ${Math.floor(ttlSeconds / 3600)}h until 15:00 UTC`);
           return trending;
         } catch (error) {
           logger.error('Failed to fetch trending tokens:', error);

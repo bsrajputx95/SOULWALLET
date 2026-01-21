@@ -6,7 +6,9 @@ import * as CryptoJS from 'crypto-js';
 import { logger } from './client-logger';
 
 // Native crypto for PBKDF2 (Comment 3 fix)
+// TEMPORARILY DISABLED - Testing if native module causes crash
 let QuickCrypto: typeof import('react-native-quick-crypto') | null = null;
+/*
 try {
   // Dynamic import to handle platforms where native module isn't available
   if (Platform.OS !== 'web') {
@@ -15,6 +17,9 @@ try {
 } catch (e) {
   logger.warn('react-native-quick-crypto not available, using CryptoJS fallback');
 }
+*/
+// Force use of CryptoJS fallback for now
+logger.info('Using CryptoJS fallback for PBKDF2 (QuickCrypto disabled for testing)');
 
 /**
  * Secure Storage Utility
@@ -27,10 +32,11 @@ try {
  * - Using off-main-thread execution via InteractionManager for smooth UX
  */
 
-// PBKDF2 iteration count - increased for modern security baseline
-// Native crypto allows higher values without performance issues
-const PBKDF2_ITERATIONS = 310000;
-const PBKDF2_ITERATIONS_WEB = 250000; // Lower for web fallback (JS performance)
+// PBKDF2 iteration count - REDUCED significantly for mobile stability
+// Using pure JavaScript implementation (CryptoJS) which is slower
+// Lower iterations prevent app freezing and crashes
+const PBKDF2_ITERATIONS = 50000; // Reduced for mobile stability (still secure)
+const PBKDF2_ITERATIONS_WEB = 50000; // Consistent with mobile
 
 const SECURE_KEYS = [
   'wallet_private_key',
@@ -98,12 +104,23 @@ function runOffMainThread<T>(fn: () => T): Promise<T> {
  * Derive key using native PBKDF2 (if available) or CryptoJS fallback
  * Native crypto provides significant performance improvement for high iteration counts
  */
-function deriveKeyNative(password: string, saltBuffer: Buffer, keyBytes: number, iterations: number): Buffer {
+async function deriveKeyNative(password: string, saltBuffer: Buffer, keyBytes: number, iterations: number): Promise<Buffer> {
   if (!QuickCrypto) {
     throw new Error('Native crypto not available');
   }
   try {
-    return QuickCrypto.pbkdf2Sync(password, saltBuffer, iterations, keyBytes, 'sha256');
+    // Use async version to avoid blocking main thread
+    return await new Promise<Buffer>((resolve, reject) => {
+      QuickCrypto.pbkdf2(password, saltBuffer, iterations, keyBytes, 'sha256', (err, derivedKey) => {
+        if (err) {
+          reject(err);
+        } else if (!derivedKey) {
+          reject(new Error('PBKDF2 returned undefined'));
+        } else {
+          resolve(derivedKey as unknown as Buffer);
+        }
+      });
+    });
   } catch (error: any) {
     logger.error('Native PBKDF2 failed, will fallback to JS:', error?.message);
     throw new Error('Native crypto operation failed');
@@ -124,66 +141,96 @@ function deriveKeyJS(password: string, saltHex: string, keyBytes: number, iterat
  * Returns { aesKey, macKey } as CryptoJS WordArrays for compatibility with AES encrypt/decrypt
  */
 async function deriveKeys(password: string, saltHex: string, iterations: number): Promise<{ aesKey: CryptoJS.lib.WordArray; macKey: CryptoJS.lib.WordArray }> {
-  // Use native crypto if available (much faster for high iterations)
-  if (QuickCrypto && Platform.OS !== 'web') {
-    try {
-      const saltBuffer = Buffer.from(saltHex, 'hex');
-      const derivedBuffer = await runOffMainThread(() =>
-        deriveKeyNative(password, saltBuffer, 64, iterations)
-      );
-      // Convert Buffer to CryptoJS WordArray
-      const derivedHex = derivedBuffer.toString('hex');
-      const derived = fromHex(derivedHex);
-      return {
-        aesKey: CryptoJS.lib.WordArray.create(derived.words.slice(0, 8), 32),
-        macKey: CryptoJS.lib.WordArray.create(derived.words.slice(8, 16), 32),
-      };
-    } catch (error) {
-      // Native crypto failed - fall through to JS implementation
-      logger.warn('Native crypto failed, falling back to CryptoJS:', error);
+  try {
+    logger.info('[KeyDerivation] Starting key derivation with', iterations, 'iterations');
+    
+    // Use native crypto if available (much faster for high iterations)
+    if (QuickCrypto && Platform.OS !== 'web') {
+      try {
+        logger.info('[KeyDerivation] Using native crypto (QuickCrypto)');
+        const saltBuffer = Buffer.from(saltHex, 'hex');
+        // Now properly async - won't block main thread
+        const derivedBuffer = await deriveKeyNative(password, saltBuffer, 64, iterations);
+        // Convert Buffer to CryptoJS WordArray
+        const derivedHex = derivedBuffer.toString('hex');
+        const derived = fromHex(derivedHex);
+        logger.info('[KeyDerivation] Native key derivation complete');
+        return {
+          aesKey: CryptoJS.lib.WordArray.create(derived.words.slice(0, 8), 32),
+          macKey: CryptoJS.lib.WordArray.create(derived.words.slice(8, 16), 32),
+        };
+      } catch (error) {
+        // Native crypto failed - fall through to JS implementation
+        logger.warn('[KeyDerivation] Native crypto failed, falling back to CryptoJS:', error);
+      }
     }
-  }
 
-  // Fallback to CryptoJS for web or if native failed
-  const jsIterations = Math.min(iterations, PBKDF2_ITERATIONS_WEB); // Use lower iterations for JS
-  const derived = await runOffMainThread(() =>
-    deriveKeyJS(password, saltHex, 64, jsIterations)
-  );
-  return {
-    aesKey: CryptoJS.lib.WordArray.create(derived.words.slice(0, 8), 32),
-    macKey: CryptoJS.lib.WordArray.create(derived.words.slice(8, 16), 32),
-  };
+    // Fallback to CryptoJS for web or if native failed
+    logger.info('[KeyDerivation] Using CryptoJS fallback');
+    const jsIterations = Math.min(iterations, PBKDF2_ITERATIONS_WEB); // Use lower iterations for JS
+    const derived = await runOffMainThread(() =>
+      deriveKeyJS(password, saltHex, 64, jsIterations)
+    );
+    logger.info('[KeyDerivation] CryptoJS key derivation complete');
+    return {
+      aesKey: CryptoJS.lib.WordArray.create(derived.words.slice(0, 8), 32),
+      macKey: CryptoJS.lib.WordArray.create(derived.words.slice(8, 16), 32),
+    };
+  } catch (error) {
+    logger.error('[KeyDerivation] Key derivation failed:', error);
+    throw error;
+  }
 }
 
 async function encryptWithPassword(plaintext: string, password: string): Promise<string> {
-  // SECURITY: 310,000 iterations with native crypto (Comment 3 fix)
-  // Uses react-native-quick-crypto for hardware-accelerated PBKDF2
-  // Falls back to 200k iterations with CryptoJS on web
-  const isNative = QuickCrypto && Platform.OS !== 'web';
-  const iter = isNative ? PBKDF2_ITERATIONS : PBKDF2_ITERATIONS_WEB;
-  const saltHex = randomHex(16);
-  const ivHex = randomHex(16);
+  try {
+    logger.info('[Encryption] Starting encryption...');
+    
+    // SECURITY: 310,000 iterations with native crypto (Comment 3 fix)
+    // Uses react-native-quick-crypto for hardware-accelerated PBKDF2
+    // Falls back to 200k iterations with CryptoJS on web
+    const isNative = QuickCrypto && Platform.OS !== 'web';
+    const iter = isNative ? PBKDF2_ITERATIONS : PBKDF2_ITERATIONS_WEB;
+    
+    logger.info('[Encryption] Generating salt and IV...');
+    const saltHex = randomHex(16);
+    const ivHex = randomHex(16);
+    logger.info('[Encryption] Salt and IV generated');
 
-  // Derive keys using best available crypto
-  const { aesKey, macKey } = await deriveKeys(password, saltHex, iter);
+    // Derive keys using best available crypto
+    logger.info('[Encryption] Deriving keys with', iter, 'iterations...');
+    const { aesKey, macKey } = await deriveKeys(password, saltHex, iter);
+    logger.info('[Encryption] Keys derived successfully');
 
-  const iv = fromHex(ivHex);
-  const cipherParams = CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(plaintext), aesKey, { iv });
-  const ctWordArray = cipherParams.ciphertext;
-  const dataForMac = iv.clone().concat(ctWordArray);
-  const mac = CryptoJS.HmacSHA256(dataForMac, macKey);
-  const payload = {
-    v: 4, // Bumped version to indicate 310k native / 200k web iterations
-    kdf: 'PBKDF2',
-    algo: 'AES-256-CBC-HMAC-SHA256',
-    native: isNative, // Track whether native crypto was used
-    iter,
-    salt: saltHex,
-    iv: ivHex,
-    ct: ctWordArray.toString(CryptoJS.enc.Base64),
-    mac: toHex(mac),
-  } as const;
-  return JSON.stringify(payload);
+    logger.info('[Encryption] Encrypting data...');
+    const iv = fromHex(ivHex);
+    const cipherParams = CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(plaintext), aesKey, { iv });
+    const ctWordArray = cipherParams.ciphertext;
+    logger.info('[Encryption] Data encrypted');
+    
+    logger.info('[Encryption] Computing MAC...');
+    const dataForMac = iv.clone().concat(ctWordArray);
+    const mac = CryptoJS.HmacSHA256(dataForMac, macKey);
+    logger.info('[Encryption] MAC computed');
+    
+    const payload = {
+      v: 4, // Bumped version to indicate 310k native / 200k web iterations
+      kdf: 'PBKDF2',
+      algo: 'AES-256-CBC-HMAC-SHA256',
+      native: isNative, // Track whether native crypto was used
+      iter,
+      salt: saltHex,
+      iv: ivHex,
+      ct: ctWordArray.toString(CryptoJS.enc.Base64),
+      mac: toHex(mac),
+    } as const;
+    
+    logger.info('[Encryption] Encryption complete');
+    return JSON.stringify(payload);
+  } catch (error) {
+    logger.error('[Encryption] Encryption failed:', error);
+    throw error;
+  }
 }
 
 async function decryptWithPassword(payloadStr: string, password: string): Promise<string> {
