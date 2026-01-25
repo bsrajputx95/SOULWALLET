@@ -110,15 +110,26 @@ export const swapRouter = router({
           throw new Error('Could not get swap quote');
         }
 
-        // In production, we would execute the swap here
-        // For now, create a simulated transaction
-        const signature = `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Get real swap transaction from Jupiter for client-side signing
+        const swapTx = await jupiterSwap.getSwapTransaction({
+          quoteResponse: quote,
+          userPublicKey: user.walletAddress,
+          wrapAndUnwrapSol: true,
+          asLegacyTransaction: true, // Use legacy for better mobile compatibility
+        });
 
-        // Save transaction to database
+        if (!swapTx?.swapTransaction) {
+          throw new Error('Could not get swap transaction from Jupiter');
+        }
+
+        // Generate a pending signature for tracking (real signature comes from client after signing)
+        const pendingSignature = `pending_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Save transaction to database as PENDING (will be updated after client sends)
         const transaction = await prisma.transaction.create({
           data: {
             userId: ctx.user.id,
-            signature,
+            signature: pendingSignature,
             type: 'SWAP',
             amount: input.amount,
             token: input.fromMint,
@@ -143,7 +154,7 @@ export const swapRouter = router({
           currency: tokenSymbol,
           feeAmount: 0.00005,
           metadata: {
-            signature,
+            pendingSignature,
             fromMint: input.fromMint,
             toMint: input.toMint,
             slippage: input.slippage,
@@ -158,7 +169,10 @@ export const swapRouter = router({
         // AML monitoring removed for beta
 
         return {
-          signature,
+          // Return the real swap transaction for client-side signing
+          swapTransaction: swapTx.swapTransaction,
+          lastValidBlockHeight: swapTx.lastValidBlockHeight,
+          transactionId: transaction.id,
           inputAmount: input.amount,
           outputAmount: parseFloat(quote.outAmount || '0') / 1_000_000,
           priceImpact: quote.priceImpactPct || 0,

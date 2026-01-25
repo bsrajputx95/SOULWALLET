@@ -174,29 +174,58 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
     return acc;
   }, {} as Record<string, { price: number; value: number }>) || {};
 
+  // SOL token metadata constants
+  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+  const SOL_LOGO = 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
+
   // Transform tokens data with metadata, REAL prices, and optimistic updates
-  const tokens: Token[] = tokensQuery.data?.tokens.map(token => {
-    const metadata = metadataMap[token.mint];
-    const priceData = assetPriceMap[token.mint];
-    const optimisticUpdate = optimisticUpdates.get(token.mint);
+  // Now includes SOL as the first token
+  const tokens: Token[] = useMemo(() => {
+    // Create SOL token from backend sol balance
+    const solBalance = tokensQuery.data?.sol || 0;
+    const solOptimisticUpdate = optimisticUpdates.get(SOL_MINT);
+    const adjustedSolBalance = solOptimisticUpdate
+      ? solOptimisticUpdate.originalBalance + solOptimisticUpdate.pendingDelta
+      : solBalance;
 
-    // Apply optimistic balance if pending
-    const balance = optimisticUpdate
-      ? optimisticUpdate.originalBalance + optimisticUpdate.pendingDelta
-      : token.balance;
-    const price = priceData?.price || 0;
+    const solToken: Token | null = solBalance > 0 || adjustedSolBalance > 0 ? {
+      id: SOL_MINT,
+      symbol: 'SOL',
+      name: 'Solana',
+      price: solPrice,
+      change24h: 0,
+      balance: adjustedSolBalance,
+      value: adjustedSolBalance * solPrice,
+      logo: SOL_LOGO,
+    } : null;
 
-    return {
-      id: token.mint,
-      symbol: metadata?.symbol || 'UNKNOWN',
-      name: metadata?.name || 'Unknown Token',
-      price,                                    // ✅ Real price from DexScreener
-      change24h: 0,                             // Would need historical data
-      balance,                                  // ✅ With optimistic updates
-      value: balance * price,                   // ✅ Recalculated with optimistic balance
-      logo: metadata?.logoURI,
-    };
-  }) || [];
+    // Map SPL tokens
+    const splTokens: Token[] = tokensQuery.data?.tokens.map(token => {
+      const metadata = metadataMap[token.mint];
+      const priceData = assetPriceMap[token.mint];
+      const optimisticUpdate = optimisticUpdates.get(token.mint);
+
+      // Apply optimistic balance if pending
+      const balance = optimisticUpdate
+        ? optimisticUpdate.originalBalance + optimisticUpdate.pendingDelta
+        : token.balance;
+      const price = priceData?.price || 0;
+
+      return {
+        id: token.mint,
+        symbol: metadata?.symbol || 'UNKNOWN',
+        name: metadata?.name || 'Unknown Token',
+        price,                                    // ✅ Real price from DexScreener
+        change24h: 0,                             // Would need historical data
+        balance,                                  // ✅ With optimistic updates
+        value: balance * price,                   // ✅ Recalculated with optimistic balance
+        logo: metadata?.logoURI,
+      };
+    }) || [];
+
+    // Return SOL first, then SPL tokens
+    return solToken ? [solToken, ...splTokens] : splTokens;
+  }, [tokensQuery.data, metadataMap, assetPriceMap, optimisticUpdates, solPrice]);
 
   // ✅ Memoize copiedWallets transformation
   const copiedWallets: CopiedWallet[] = useMemo(() => {

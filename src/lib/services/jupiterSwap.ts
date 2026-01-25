@@ -239,7 +239,7 @@ export class JupiterSwap {
    * Get the swap transaction from Jupiter API
    * Comment 1+2+5: Wrapped with circuit breaker, retry, and 5s timeout
    */
-  private async getSwapTransaction(params: SwapTransactionParams): Promise<SwapResponse | null> {
+  async getSwapTransaction(params: SwapTransactionParams): Promise<SwapResponse | null> {
     return this.swapBreaker.exec(
       async () => {
         return retryWithBackoff(async () => {

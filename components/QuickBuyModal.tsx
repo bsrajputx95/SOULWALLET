@@ -31,6 +31,10 @@ interface TokenInfo {
     logoURI?: string;
     decimals: number;
     price?: number;
+    // Verification status
+    verified?: boolean; // true if from Jupiter strict list
+    source?: 'jupiter' | 'quote' | 'generic'; // where the metadata came from
+    hasMetadata?: boolean; // whether full metadata is available
 }
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -62,7 +66,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address.trim());
     };
 
-    // Verify token using Jupiter API
+    // Verify token using multiple methods with fallback chain
     const handleVerifyToken = async () => {
         if (!tokenAddress.trim()) {
             setError('Please enter a token address');
@@ -78,34 +82,89 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         setError(null);
         setTokenInfo(null);
 
-        try {
-            // Fetch token info from Jupiter token list
-            const response = await fetch(`https://tokens.jup.ag/token/${tokenAddress.trim()}`);
+        const address = tokenAddress.trim();
 
-            if (!response.ok) {
-                throw new Error('Token not found');
+        try {
+            // Step 1: Try Jupiter strict token list (verified tokens with full metadata)
+            logger.info(`[QuickBuy] Trying Jupiter strict list for ${address.slice(0, 8)}...`);
+            const strictResponse = await fetch(`https://tokens.jup.ag/token/${address}`);
+
+            if (strictResponse.ok) {
+                const data = await strictResponse.json();
+
+                // Get price from Jupiter
+                let price = 0;
+                try {
+                    const priceResponse = await fetch(`https://price.jup.ag/v6/price?ids=${address}`);
+                    const priceData = await priceResponse.json();
+                    price = priceData?.data?.[address]?.price || 0;
+                } catch { /* price is optional */ }
+
+                logger.info(`[QuickBuy] Token verified via Jupiter strict list: ${data.symbol}`);
+                setTokenInfo({
+                    address: data.address,
+                    symbol: data.symbol,
+                    name: data.name,
+                    logoURI: data.logoURI,
+                    decimals: data.decimals,
+                    price,
+                    verified: true,
+                    source: 'jupiter',
+                    hasMetadata: true,
+                });
+                return;
             }
 
-            const data = await response.json();
-
-            // Get current price from Jupiter
-            const priceResponse = await fetch(
-                `https://price.jup.ag/v6/price?ids=${tokenAddress.trim()}`
+            // Step 2: Try Jupiter quote API (if quote succeeds, token is tradeable)
+            logger.info(`[QuickBuy] Token not in strict list, trying quote API...`);
+            const quoteResponse = await fetch(
+                `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${address}&amount=10000000&slippageBps=100`
             );
-            const priceData = await priceResponse.json();
-            const price = priceData?.data?.[tokenAddress.trim()]?.price || 0;
+            const quoteData = await quoteResponse.json();
 
-            setTokenInfo({
-                address: data.address,
-                symbol: data.symbol,
-                name: data.name,
-                logoURI: data.logoURI,
-                decimals: data.decimals,
-                price,
-            });
+            if (quoteResponse.ok && quoteData && !quoteData.error && quoteData.outAmount) {
+                // Token is tradeable! Extract what info we can from quote
+                const decimals = quoteData.outputDecimals ?? 9;
+
+                // Try to get price estimate from quote
+                const solAmount = 10000000 / 1e9; // 0.01 SOL
+                const outAmount = parseFloat(quoteData.outAmount) / Math.pow(10, decimals);
+                const estimatedPrice = outAmount > 0 ? solAmount / outAmount : 0;
+
+                logger.info(`[QuickBuy] Token tradeable via quote, decimals: ${decimals}`);
+
+                // Use address substring for symbol if no metadata
+                const shortAddress = `${address.slice(0, 4)}...${address.slice(-4)}`;
+
+                setTokenInfo({
+                    address: address,
+                    symbol: shortAddress,
+                    name: 'Unknown Token',
+                    decimals: decimals,
+                    price: estimatedPrice,
+                    verified: false,
+                    source: 'quote',
+                    hasMetadata: false,
+                });
+                return;
+            }
+
+            // Step 3: All methods failed - token has no liquidity or doesn't exist
+            logger.warn(`[QuickBuy] Token verification failed - no liquidity or invalid token`);
+
+            if (quoteData?.error) {
+                if (quoteData.error.includes('Could not find any route')) {
+                    setError('Token has no liquidity on any DEX. Cannot trade.');
+                } else {
+                    setError(`Token not tradeable: ${quoteData.error}`);
+                }
+            } else {
+                setError('Token not found or has no liquidity. Verify the address is correct.');
+            }
+
         } catch (err: any) {
-            logger.error('Token verification failed:', err);
-            setError('Token not found or not tradeable on Jupiter');
+            logger.error('[QuickBuy] Token verification failed:', err);
+            setError('Unable to verify token. Check your connection and try again.');
         } finally {
             setIsVerifying(false);
         }
@@ -265,7 +324,10 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
 
                         {/* Token Info Card */}
                         {tokenInfo && (
-                            <View style={styles.tokenCard}>
+                            <View style={[
+                                styles.tokenCard,
+                                !tokenInfo.verified && styles.tokenCardUnverified
+                            ]}>
                                 <View style={styles.tokenInfo}>
                                     {tokenInfo.logoURI ? (
                                         <Image source={{ uri: tokenInfo.logoURI }} style={styles.tokenLogo} />
@@ -285,8 +347,22 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                             </Text>
                                         ) : null}
                                     </View>
-                                    <CheckCircle size={20} color={COLORS.success} />
+                                    {tokenInfo.verified ? (
+                                        <CheckCircle size={20} color={COLORS.success} />
+                                    ) : (
+                                        <AlertCircle size={20} color={COLORS.warning || '#FFB800'} />
+                                    )}
                                 </View>
+                            </View>
+                        )}
+
+                        {/* Warning for unverified tokens */}
+                        {tokenInfo && !tokenInfo.verified && (
+                            <View style={styles.warningContainer}>
+                                <AlertCircle size={16} color={COLORS.warning || '#FFB800'} />
+                                <Text style={styles.warningText}>
+                                    ⚠️ Unverified token. Verify the contract address on Solscan before trading.
+                                </Text>
                             </View>
                         )}
 
@@ -640,5 +716,25 @@ const styles = StyleSheet.create({
         fontSize: 11,
         textAlign: 'center',
         marginBottom: SPACING.xl,
+    },
+    tokenCardUnverified: {
+        borderColor: (COLORS.warning || '#FFB800') + '50',
+    },
+    warningContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.s,
+        backgroundColor: (COLORS.warning || '#FFB800') + '20',
+        borderRadius: BORDER_RADIUS.small,
+        padding: SPACING.m,
+        marginBottom: SPACING.l,
+        borderWidth: 1,
+        borderColor: (COLORS.warning || '#FFB800') + '40',
+    },
+    warningText: {
+        ...FONTS.phantomRegular,
+        color: COLORS.warning || '#FFB800',
+        fontSize: 12,
+        flex: 1,
     },
 });

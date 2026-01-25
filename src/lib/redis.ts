@@ -28,6 +28,7 @@ export type CacheKey =
   | 'portfolio:sol:price'
   | `ibuy:quote:${string}:${string}` // iBuy quote cache: tokenMint:inputMint
   | `ibuy:job:${string}` // iBuy job status cache
+  | `ibuy:retry:${string}` // iBuy retry progress for status polling
 
 type RedisClient = Redis | Cluster
 

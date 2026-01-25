@@ -124,6 +124,14 @@ interface SolanaWalletState {
 
 const STORAGE_KEY = 'solana_wallet_private_key';
 const ENCRYPTED_MARKER_KEY = 'wallet_is_encrypted';
+const SESSION_KEY = 'wallet_session';
+const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface WalletSession {
+  passwordHash: string; // Store hashed password for session verification
+  unlockedAt: number;   // Timestamp when unlocked
+  expiresAt: number;    // Timestamp when session expires
+}
 
 // Popular Solana tokens with their mint addresses
 const POPULAR_TOKENS = {
@@ -185,12 +193,118 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     }
   };
 
-  // Load wallet from secure storage
+  // Simple hash function for session password verification
+  const hashPassword = (password: string): string => {
+    // Use a simple hash for session verification (not for encryption)
+    let hash = 0;
+    for (let i = 0; i < password.length; i++) {
+      const char = password.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString(36);
+  };
+
+  // Save wallet session after successful unlock
+  const saveSession = async (password: string) => {
+    try {
+      const session: WalletSession = {
+        passwordHash: hashPassword(password),
+        unlockedAt: Date.now(),
+        expiresAt: Date.now() + SESSION_EXPIRY_MS,
+      };
+      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      // Also store the password securely for auto-restore (encrypted in SecureStore)
+      await setSecureItem('wallet_session_pwd', password);
+      logger.info('Wallet session saved, expires in 24 hours');
+    } catch (error) {
+      logger.warn('Failed to save wallet session:', error);
+    }
+  };
+
+  // Get valid session if exists
+  const getValidSession = async (): Promise<{ session: WalletSession; password: string } | null> => {
+    try {
+      const sessionStr = await AsyncStorage.getItem(SESSION_KEY);
+      if (!sessionStr) return null;
+
+      const session: WalletSession = JSON.parse(sessionStr);
+
+      // Check if session is expired
+      if (Date.now() > session.expiresAt) {
+        logger.info('Wallet session expired, clearing');
+        await clearSession();
+        return null;
+      }
+
+      // Get the stored password
+      const password = await getSecureItem('wallet_session_pwd');
+      if (!password) {
+        logger.info('No session password found, clearing session');
+        await clearSession();
+        return null;
+      }
+
+      return { session, password };
+    } catch (error) {
+      logger.warn('Failed to get wallet session:', error);
+      return null;
+    }
+  };
+
+  // Clear wallet session
+  const clearSession = async () => {
+    try {
+      await AsyncStorage.removeItem(SESSION_KEY);
+      await deleteSecureItem('wallet_session_pwd');
+      logger.info('Wallet session cleared');
+    } catch (error) {
+      logger.warn('Failed to clear wallet session:', error);
+    }
+  };
+
+  // Load wallet from secure storage - now with session restore
   const loadWallet = async () => {
     try {
       setState(prev => ({ ...prev, isLoading: true }));
       const isEncrypted = await AsyncStorage.getItem(ENCRYPTED_MARKER_KEY);
+
       if (isEncrypted === 'true') {
+        // Check for valid session - auto-restore if exists
+        const sessionData = await getValidSession();
+
+        if (sessionData) {
+          try {
+            logger.info('Valid session found, auto-restoring wallet...');
+            const privateKeyString = await SecureStorage.getDecryptedPrivateKey(sessionData.password);
+
+            if (privateKeyString) {
+              const privateKeyBytes = bs58.decode(privateKeyString);
+              const wallet = Keypair.fromSecretKey(privateKeyBytes);
+              const publicKey = wallet.publicKey.toString();
+
+              setState(prev => ({
+                ...prev,
+                wallet,
+                publicKey,
+                isLoading: false,
+                needsUnlock: false
+              }));
+
+              logger.info('Wallet auto-restored from session:', publicKey);
+
+              // Sync and refresh in background
+              void syncWalletAddressToBackend(publicKey);
+              void refreshBalances(wallet);
+              return;
+            }
+          } catch (error) {
+            logger.warn('Session restore failed, requiring unlock:', error);
+            await clearSession();
+          }
+        }
+
+        // No valid session or restore failed - require unlock
         setState(prev => ({ ...prev, isLoading: false, needsUnlock: true }));
         return;
       }
@@ -214,6 +328,10 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       const wallet = Keypair.fromSecretKey(privateKeyBytes);
       const publicKey = wallet.publicKey.toString();
       setState(prev => ({ ...prev, wallet, publicKey, isLoading: false, needsUnlock: false }));
+
+      // Save session for persistence across app restarts
+      await saveSession(password);
+
       await syncWalletAddressToBackend(publicKey);
       await refreshBalances(wallet);
       return wallet;
@@ -667,6 +785,8 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       await deleteSecureItem(STORAGE_KEY);
       await SecureStorage.deleteEncryptedPrivateKey();
       await AsyncStorage.removeItem(ENCRYPTED_MARKER_KEY);
+      // Clear wallet session
+      await clearSession();
 
       setState({
         wallet: null,
@@ -734,34 +854,21 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       if (typeof swapTransactionBase64OrParams === 'string') {
         transactionBase64 = swapTransactionBase64OrParams;
       } else {
-        // Build swap transaction via Jupiter API
+        // Get swap transaction via backend (avoids CORS/network issues on mobile)
         const params = swapTransactionBase64OrParams;
         outputMint = params.outputMint;
 
-        // Get quote from Jupiter
-        const quoteResponse = await fetch(
-          `https://quote-api.jup.ag/v6/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${params.slippageBps || 50}`
-        );
-        const quote = await quoteResponse.json();
-
-        if (!quote || quote.error) {
-          throw new Error(quote?.error || 'Failed to get Jupiter quote');
-        }
-
-        // Get swap transaction
-        const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            quoteResponse: quote,
-            userPublicKey: state.wallet.publicKey.toString(),
-            wrapAndUnwrapSol: true,
-          }),
+        // Call backend to get swap transaction from Jupiter
+        // Note: This requires 2FA - the calling component should pass totpCode if needed
+        const swapResult = await trpcClient.swap.swap.mutate({
+          fromMint: params.inputMint,
+          toMint: params.outputMint,
+          amount: params.amount / 1e9, // Convert from lamports to SOL-equivalent units
+          slippage: (params.slippageBps || 50) / 100, // Convert bps to percent
         });
-        const swapResult = await swapResponse.json();
 
         if (!swapResult.swapTransaction) {
-          throw new Error('Failed to get swap transaction');
+          throw new Error('Failed to get swap transaction from backend');
         }
 
         transactionBase64 = swapResult.swapTransaction;

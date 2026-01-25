@@ -13,6 +13,7 @@ import { LockService } from './lockService'
 import { priceMonitor } from './priceMonitor'
 import { jitoService } from './jitoService'
 import { redisCache, type CacheKey } from '../redis'
+import { IBUY_CONFIG } from '../../../constants/timeouts'
 
 // USDC mint address on Solana mainnet
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -466,7 +467,7 @@ class ExecutionQueue {
         }
       }
 
-      // Try to get cached quote first (10s TTL)
+      // Try to get cached quote first (extended TTL for retries)
       const quoteCacheKey: CacheKey = `ibuy:quote:${tokenMint}:${inputMint}`
       let quote = await redisCache.get<any>(quoteCacheKey)
 
@@ -476,22 +477,53 @@ class ExecutionQueue {
           ? Math.round(amountUsd * LAMPORTS_PER_SOL / 100) // Rough USD to SOL
           : Math.round(amountUsd * 1e6) // USDC has 6 decimals
 
-        quote = await jupiterSwap.getQuote({
-          inputMint,
-          outputMint: tokenMint,
-          amount: amountIn,
-          slippageBps: Math.min(slippageBps, MAX_SLIPPAGE_BPS),
-          asLegacyTransaction: false,
-        })
+        // Progressive retry for quote fetching (handles new tokens not yet indexed)
+        let lastError: Error | null = null
 
-        if (quote) {
-          // Cache quote for 10 seconds
-          await redisCache.set(quoteCacheKey, quote, 10)
+        for (let attempt = 0; attempt < IBUY_CONFIG.MAX_RETRY_ATTEMPTS; attempt++) {
+          // Wait before retry (first attempt is immediate)
+          const delayMs = IBUY_CONFIG.RETRY_DELAYS_MS[attempt] || 0
+          if (delayMs > 0) {
+            logger.info(`[iBuy Queue] Retry ${attempt + 1}/${IBUY_CONFIG.MAX_RETRY_ATTEMPTS} in ${delayMs / 1000}s for token ${tokenMint.slice(0, 8)}...`)
+            await new Promise(resolve => setTimeout(resolve, delayMs))
+          }
+
+          // Progressively increase slippage for new tokens
+          const attemptSlippage = Math.min(
+            slippageBps + (attempt * 100), // Increase slippage by 1% each attempt
+            IBUY_CONFIG.MAX_SLIPPAGE_NEW_TOKEN_BPS
+          )
+
+          // Try with different routing strategies
+          const useDirectRoutes = attempt < 2 // First 2 attempts use all routes
+
+          try {
+            quote = await jupiterSwap.getQuote({
+              inputMint,
+              outputMint: tokenMint,
+              amount: amountIn,
+              slippageBps: Math.min(attemptSlippage, MAX_SLIPPAGE_BPS),
+              asLegacyTransaction: false,
+              onlyDirectRoutes: useDirectRoutes,
+            })
+
+            if (quote) {
+              // Cache quote with extended TTL
+              await redisCache.set(quoteCacheKey, quote, IBUY_CONFIG.QUOTE_CACHE_TTL_SECONDS)
+              logger.info(`[iBuy Queue] Got quote on attempt ${attempt + 1} for token ${tokenMint.slice(0, 8)}...`)
+              break // Success, exit retry loop
+            }
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error))
+            logger.warn(`[iBuy Queue] Quote attempt ${attempt + 1} failed:`, lastError.message)
+          }
         }
-      }
 
-      if (!quote) {
-        throw new Error('Failed to get quote from Jupiter')
+        if (!quote) {
+          // All retries exhausted
+          const errorMsg = lastError?.message || 'Token not available for trading'
+          throw new Error(`Failed to get quote after ${IBUY_CONFIG.MAX_RETRY_ATTEMPTS} attempts. Token may be too new or have insufficient liquidity. ${errorMsg}`)
+        }
       }
 
       // Use Jito MEV protection for trades >= $50
@@ -1014,14 +1046,18 @@ class ExecutionQueue {
   }
 
   /**
-   * Get iBuy job status for polling
+   * Get iBuy job status for polling - enhanced with retry status
    */
   async getIBuyJobStatus(jobId: string): Promise<{
-    status: 'pending' | 'active' | 'completed' | 'failed';
+    status: 'pending' | 'active' | 'completed' | 'failed' | 'retrying';
     result?: IBuyJobResult;
     error?: string;
+    message?: string;
+    currentAttempt?: number;
+    maxAttempts?: number;
+    estimatedTimeRemainingMs?: number;
   }> {
-    // Check cache first
+    // Check cache first (may contain retry progress)
     const cacheKey: CacheKey = `ibuy:job:${jobId}`
     const cached = await redisCache.get<any>(cacheKey)
     if (cached) {
@@ -1031,21 +1067,53 @@ class ExecutionQueue {
     // Check job directly
     const job = await this.ibuyQueue.getJob(jobId)
     if (!job) {
-      return { status: 'failed', error: 'Job not found' }
+      return { status: 'failed', error: 'Job not found', message: 'Order not found' }
     }
 
     const state = await job.getState()
     if (state === 'completed') {
       const result = job.returnvalue as IBuyJobResult
-      return { status: 'completed', result }
+      return {
+        status: 'completed',
+        result,
+        message: result.success ? 'Purchase completed!' : 'Purchase failed'
+      }
     }
     if (state === 'failed') {
-      return { status: 'failed', error: job.failedReason || 'Unknown error' }
+      const errorMsg = job.failedReason || 'Unknown error'
+      // Provide user-friendly message based on error
+      let message = 'Purchase failed'
+      if (errorMsg.includes('too new') || errorMsg.includes('liquidity')) {
+        message = 'Token too new or has insufficient liquidity. Try again in a minute.'
+      } else if (errorMsg.includes('Insufficient')) {
+        message = 'Insufficient balance for this purchase.'
+      } else if (errorMsg.includes('attempts')) {
+        message = 'Token not available for trading yet. It may be too new.'
+      }
+      return { status: 'failed', error: errorMsg, message }
     }
     if (state === 'active') {
-      return { status: 'active' }
+      // Check if there's retry progress stored
+      const retryKey: CacheKey = `ibuy:retry:${jobId}`
+      const retryStatus = await redisCache.get<{ attempt: number; nextRetryMs: number }>(retryKey)
+
+      if (retryStatus && retryStatus.attempt > 0) {
+        const estimatedTime = IBUY_CONFIG.RETRY_DELAYS_MS
+          .slice(retryStatus.attempt)
+          .reduce((sum, delay) => sum + delay, 0)
+
+        return {
+          status: 'retrying',
+          message: `Fetching quote (attempt ${retryStatus.attempt + 1} of ${IBUY_CONFIG.MAX_RETRY_ATTEMPTS})...`,
+          currentAttempt: retryStatus.attempt + 1,
+          maxAttempts: IBUY_CONFIG.MAX_RETRY_ATTEMPTS,
+          estimatedTimeRemainingMs: estimatedTime,
+        }
+      }
+
+      return { status: 'active', message: 'Executing purchase...' }
     }
-    return { status: 'pending' }
+    return { status: 'pending', message: 'Queued for execution...' }
   }
 
   async getQueueStats() {
