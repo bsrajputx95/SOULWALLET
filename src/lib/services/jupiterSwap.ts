@@ -263,7 +263,14 @@ export class JupiterSwap {
               throw new Error(`Swap transaction fetch failed: ${error}`);
             }
 
-            const swapResponse = await response.json() as SwapResponse;
+            const rawResponse = await response.json();
+
+            // Convert potential BigInt/string numeric fields safely
+            const swapResponse: SwapResponse = {
+              swapTransaction: rawResponse.swapTransaction,
+              lastValidBlockHeight: Number(rawResponse.lastValidBlockHeight) || 0,
+              prioritizationFeeLamports: rawResponse.prioritizationFeeLamports ? Number(rawResponse.prioritizationFeeLamports) : undefined,
+            };
             return swapResponse;
           } finally {
             clearTimeout(timeout);

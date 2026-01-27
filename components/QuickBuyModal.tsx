@@ -18,6 +18,7 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { useSolanaWallet } from '../hooks/solana-wallet-store';
 import { logger } from '../lib/client-logger';
+import { trpcClient } from '../lib/trpc';
 
 interface QuickBuyModalProps {
     visible: boolean;
@@ -85,86 +86,39 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         const address = tokenAddress.trim();
 
         try {
-            // Step 1: Try Jupiter strict token list (verified tokens with full metadata)
-            logger.info(`[QuickBuy] Trying Jupiter strict list for ${address.slice(0, 8)}...`);
-            const strictResponse = await fetch(`https://tokens.jup.ag/token/${address}`);
+            // Use backend proxy to verify token (avoids CORS/mobile network issues)
+            logger.info(`[QuickBuy] Verifying token via backend: ${address.slice(0, 8)}...`);
 
-            if (strictResponse.ok) {
-                const data = await strictResponse.json();
+            const result = await trpcClient.market.verifyToken.query({ tokenAddress: address });
 
-                // Get price from Jupiter
-                let price = 0;
-                try {
-                    const priceResponse = await fetch(`https://price.jup.ag/v6/price?ids=${address}`);
-                    const priceData = await priceResponse.json();
-                    price = priceData?.data?.[address]?.price || 0;
-                } catch { /* price is optional */ }
-
-                logger.info(`[QuickBuy] Token verified via Jupiter strict list: ${data.symbol}`);
-                setTokenInfo({
-                    address: data.address,
-                    symbol: data.symbol,
-                    name: data.name,
-                    logoURI: data.logoURI,
-                    decimals: data.decimals,
-                    price,
-                    verified: true,
-                    source: 'jupiter',
-                    hasMetadata: true,
-                });
-                return;
-            }
-
-            // Step 2: Try Jupiter quote API (if quote succeeds, token is tradeable)
-            logger.info(`[QuickBuy] Token not in strict list, trying quote API...`);
-            const quoteResponse = await fetch(
-                `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${address}&amount=10000000&slippageBps=100`
-            );
-            const quoteData = await quoteResponse.json();
-
-            if (quoteResponse.ok && quoteData && !quoteData.error && quoteData.outAmount) {
-                // Token is tradeable! Extract what info we can from quote
-                const decimals = quoteData.outputDecimals ?? 9;
-
-                // Try to get price estimate from quote
-                const solAmount = 10000000 / 1e9; // 0.01 SOL
-                const outAmount = parseFloat(quoteData.outAmount) / Math.pow(10, decimals);
-                const estimatedPrice = outAmount > 0 ? solAmount / outAmount : 0;
-
-                logger.info(`[QuickBuy] Token tradeable via quote, decimals: ${decimals}`);
-
-                // Use address substring for symbol if no metadata
-                const shortAddress = `${address.slice(0, 4)}...${address.slice(-4)}`;
-
-                setTokenInfo({
-                    address: address,
-                    symbol: shortAddress,
-                    name: 'Unknown Token',
-                    decimals: decimals,
-                    price: estimatedPrice,
-                    verified: false,
-                    source: 'quote',
-                    hasMetadata: false,
-                });
-                return;
-            }
-
-            // Step 3: All methods failed - token has no liquidity or doesn't exist
-            logger.warn(`[QuickBuy] Token verification failed - no liquidity or invalid token`);
-
-            if (quoteData?.error) {
-                if (quoteData.error.includes('Could not find any route')) {
-                    setError('Token has no liquidity on any DEX. Cannot trade.');
-                } else {
-                    setError(`Token not tradeable: ${quoteData.error}`);
-                }
-            } else {
-                setError('Token not found or has no liquidity. Verify the address is correct.');
-            }
+            logger.info(`[QuickBuy] Token verified: ${result.symbol}, source: ${result.source}`);
+            setTokenInfo({
+                address: address,
+                symbol: result.symbol,
+                name: result.name,
+                logoURI: result.logoURI || undefined,
+                decimals: result.decimals,
+                price: result.price || 0,
+                verified: result.verified,
+                source: result.source,
+                hasMetadata: result.hasMetadata,
+            });
 
         } catch (err: any) {
             logger.error('[QuickBuy] Token verification failed:', err);
-            setError('Unable to verify token. Check your connection and try again.');
+
+            // Extract meaningful error message from tRPC error
+            const errorMessage = err?.message || err?.data?.message || 'Unknown error';
+
+            if (errorMessage.includes('no liquidity')) {
+                setError('Token has no liquidity on any DEX. Cannot trade.');
+            } else if (errorMessage.includes('not tradeable') || errorMessage.includes('NOT_FOUND')) {
+                setError('Token not found or has no liquidity. Verify the address is correct.');
+            } else if (errorMessage.includes('timed out') || errorMessage.includes('TIMEOUT')) {
+                setError('Token verification timed out. Please try again.');
+            } else {
+                setError('Unable to verify token. Check your connection and try again.');
+            }
         } finally {
             setIsVerifying(false);
         }
@@ -214,54 +168,46 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         setError(null);
 
         try {
-            // Convert SOL to lamports
-            const lamports = Math.floor(amount * 1e9);
-
-            // Get quote from Jupiter
-            const quoteResponse = await fetch(
-                `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${tokenInfo.address}&amount=${lamports}&slippageBps=${slippageBps}`
-            );
-            const quote = await quoteResponse.json();
-
-            if (!quote || quote.error) {
-                throw new Error(quote?.error || 'Failed to get quote from Jupiter');
-            }
-
-            // Get swap transaction
-            const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    quoteResponse: quote,
-                    userPublicKey: publicKey,
-                    wrapAndUnwrapSol: true,
-                }),
+            // 1. Fetch quote from backend (optional, mainly for price impact/output preview)
+            const quote = await trpcClient.swap.getQuote.query({
+                inputMint: SOL_MINT,
+                outputMint: tokenInfo.address,
+                amount,
+                slippage: parseFloat(slippage),
             });
-            const swapData = await swapResponse.json();
 
-            if (!swapData.swapTransaction) {
-                throw new Error('Failed to get swap transaction');
+            // 2. Request swap transaction from backend
+            const swapRes = await trpcClient.swap.swap.mutate({
+                fromMint: SOL_MINT,
+                toMint: tokenInfo.address,
+                amount,
+                slippage: parseFloat(slippage),
+            });
+
+            if (!swapRes.swapTransaction) {
+                throw new Error('Failed to get swap transaction from server');
             }
 
-            // Execute the swap
-            const result = await executeSwap(swapData.swapTransaction);
+            // 3. Sign & send transaction locally
+            const { signature } = await executeSwap(swapRes.swapTransaction);
 
-            if (result?.signature) {
-                // Refresh balances
-                await refreshBalances();
+            // 4. Notify backend of signature
+            await (trpcClient.swap as any).confirmSwap.mutate({ transactionId: swapRes.transactionId, signature });
 
-                // Calculate output amount for display
-                const outputAmount = quote.outAmount / Math.pow(10, tokenInfo.decimals);
+            // 5. Refresh balances
+            await refreshBalances();
 
-                Alert.alert(
-                    '🎉 Purchase Successful!',
-                    `Bought ${outputAmount.toFixed(4)} ${tokenInfo.symbol}\nfor ${amount} SOL`,
-                    [
-                        { text: 'View on Solscan', onPress: () => { } },
-                        { text: 'Done', onPress: onClose }
-                    ]
-                );
-            }
+            // Calculate output amount for display
+            const outputAmount = quote.quote.outAmount / Math.pow(10, tokenInfo.decimals);
+
+            Alert.alert(
+                '🎉 Purchase Successful!',
+                `Bought ${outputAmount.toFixed(4)} ${tokenInfo.symbol}\nfor ${amount} SOL`,
+                [
+                    { text: 'View on Solscan', onPress: () => {} },
+                    { text: 'Done', onPress: onClose }
+                ]
+            );
         } catch (err: any) {
             logger.error('Quick buy failed:', err);
             setError(err.message || 'Transaction failed. Please try again.');

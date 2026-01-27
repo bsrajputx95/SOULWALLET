@@ -4,13 +4,11 @@ import { TRPCError } from '@trpc/server';
 import { logger } from '../../lib/logger';
 import { getFeatureFlags } from '../../lib/featureFlags';
 import prisma from '../../lib/prisma';
-import { jupiterSwap } from '../../lib/services/jupiterSwap';
-import { verifyTotpForUser } from '../../lib/middleware/auth'
+import { swapService } from '../../lib/services/swapService';
 import { auditLogService } from '../../lib/services/auditLog'
-import { DECIMALS, FEES } from '@/constants'
+import { DECIMALS, FEES } from '../../../constants'
+import { sanitizeBigInt, toSafeNumber } from '../../lib/utils/sanitize'
 
-// Jupiter API base URL
-const JUPITER_API_URL = 'https://quote-api.jup.ag/v6';
 
 export const swapRouter = router({
   /**
@@ -24,39 +22,21 @@ export const swapRouter = router({
       slippage: z.number().min(FEES.SWAP.SLIPPAGE_PERCENT.MIN).max(FEES.SWAP.SLIPPAGE_PERCENT.MAX).default(FEES.SWAP.SLIPPAGE_PERCENT.DEFAULT),
     }))
     .query(async ({ input }) => {
-      try {
-        // Convert amount to smallest unit (assuming 6 decimals for most tokens)
-        const amountInSmallestUnit = Math.floor(input.amount * DECIMALS.MICRO_LAMPORTS);
-
-        const params = new URLSearchParams({
-          inputMint: input.inputMint === 'SOL' ? 'So11111111111111111111111111111111111111112' : input.inputMint,
-          outputMint: input.outputMint === 'SOL' ? 'So11111111111111111111111111111111111111112' : input.outputMint,
-          amount: amountInSmallestUnit.toString(),
-          slippageBps: Math.floor(input.slippage * 100).toString(),
-        });
-
-        const response = await fetch(`${JUPITER_API_URL}/quote?${params}`);
-
-        if (!response.ok) {
-          throw new Error(`Jupiter API error: ${response.status}`);
-        }
-
-        const quote = await response.json() as any;
-
-        return {
-          quote,
-          inputAmount: input.amount,
-          outputAmount: parseFloat(quote.outAmount || '0') / 1_000_000,
-          priceImpact: quote.priceImpactPct || 0,
-          route: quote.routePlan || [],
-        };
-      } catch (error) {
-        logger.error('Get quote error:', error);
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to get swap quote',
-        });
-      }
+      const quote = await swapService.getQuote({
+        inputMint: input.inputMint,
+        outputMint: input.outputMint,
+        amount: input.amount,
+        slippageBps: Math.floor(input.slippage * 100),
+      });
+      const outputAmount = toSafeNumber(quote.outAmount) / 1_000_000;
+      const priceImpact = toSafeNumber(quote.priceImpactPct);
+      return {
+        quote,
+        inputAmount: input.amount,
+        outputAmount,
+        priceImpact,
+        route: quote.routePlan || [],
+      };
     }),
 
   /**
@@ -68,7 +48,6 @@ export const swapRouter = router({
       toMint: z.string(),
       amount: z.number().positive(),
       slippage: z.number().min(0).max(5).default(0.5),
-      totpCode: z.string().length(6).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const { swapEnabled } = getFeatureFlags();
@@ -93,13 +72,9 @@ export const swapRouter = router({
       }
 
       try {
-        if (!input.totpCode) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
-        }
-        await verifyTotpForUser(ctx.user.id, input.totpCode)
 
-        // Get quote from Jupiter
-        const quote = await jupiterSwap.getQuote({
+        // Get quote via service (cached)
+        const quote = await swapService.getQuote({
           inputMint: input.fromMint,
           outputMint: input.toMint,
           amount: Math.floor(input.amount * DECIMALS.MICRO_LAMPORTS),
@@ -111,11 +86,13 @@ export const swapRouter = router({
         }
 
         // Get real swap transaction from Jupiter for client-side signing
-        const swapTx = await jupiterSwap.getSwapTransaction({
-          quoteResponse: quote,
-          userPublicKey: user.walletAddress,
-          wrapAndUnwrapSol: true,
-          asLegacyTransaction: true, // Use legacy for better mobile compatibility
+        const swapTx = await swapService.prepareSwap({
+          inputMint: input.fromMint,
+          outputMint: input.toMint,
+          amount: input.amount,
+          slippageBps: Math.floor(input.slippage * 100),
+          userId: ctx.user.id,
+          walletAddress: user.walletAddress,
         });
 
         if (!swapTx?.swapTransaction) {
@@ -168,14 +145,21 @@ export const swapRouter = router({
 
         // AML monitoring removed for beta
 
+        // Sanitize response objects to strip BigInt before serialization
+        const sanitizedQuote = sanitizeBigInt(quote)
+        const sanitizedSwapTx = sanitizeBigInt(swapTx)
+
+        const outputAmount = toSafeNumber(sanitizedQuote.outAmount) / 1_000_000
+        const priceImpact = toSafeNumber(sanitizedQuote.priceImpactPct)
+        const lastValidBlockHeight = toSafeNumber(sanitizedSwapTx.lastValidBlockHeight)
+
         return {
-          // Return the real swap transaction for client-side signing
-          swapTransaction: swapTx.swapTransaction,
-          lastValidBlockHeight: swapTx.lastValidBlockHeight,
+          swapTransaction: sanitizedSwapTx.swapTransaction,
+          lastValidBlockHeight,
           transactionId: transaction.id,
-          inputAmount: input.amount,
-          outputAmount: parseFloat(quote.outAmount || '0') / 1_000_000,
-          priceImpact: quote.priceImpactPct || 0,
+          inputAmount: toSafeNumber(input.amount),
+          outputAmount,
+          priceImpact,
           fee: 0.00005,
         };
       } catch (error) {
@@ -262,12 +246,14 @@ export const swapRouter = router({
         }
         logger.error('Execute swap error:', error);
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to execute swap',
-        });
-      }
     }),
-  */
+
+  /**
+   * Poll swap status
+   */
+  getSwapStatus: protectedProcedure
+    .input(z.object({ transactionId: z.string() }))
+    .query(async ({ input }) => swapService.getSwapStatus(input.transactionId)),
 
   /**
    * Get supported tokens for swapping

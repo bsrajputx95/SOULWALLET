@@ -221,4 +221,146 @@ export const marketRouter = router({
         });
       }
     }),
+
+  // Verify token via Jupiter API (backend proxy to avoid CORS issues on mobile)
+  verifyToken: publicProcedure
+    .input(z.object({ tokenAddress: z.string().min(32).max(44) }))
+    .query(async ({ input }) => {
+      const address = input.tokenAddress.trim();
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+      try {
+        // Step 1: Try Jupiter strict token list (verified tokens with full metadata)
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const strictResponse = await fetch(`https://tokens.jup.ag/token/${address}`, {
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+
+          if (strictResponse.ok) {
+            const data = await strictResponse.json() as any;
+
+            // Get price from Jupiter
+            let price = 0;
+            try {
+              const priceResponse = await fetch(`https://price.jup.ag/v6/price?ids=${address}`);
+              const priceData = await priceResponse.json() as any;
+              price = priceData?.data?.[address]?.price || 0;
+            } catch { /* price is optional */ }
+
+            return {
+              verified: true,
+              symbol: data.symbol,
+              name: data.name,
+              decimals: data.decimals,
+              logoURI: data.logoURI || null,
+              price: Number(price) || 0,
+              source: 'jupiter' as const,
+              hasMetadata: true,
+            };
+          }
+        } catch (fetchError: any) {
+          clearTimeout(timeout);
+          if (fetchError.name === 'AbortError') {
+            throw new TRPCError({ code: 'TIMEOUT', message: 'Token verification timed out' });
+          }
+          // Continue to quote API fallback
+        }
+
+        // Step 2: Try Jupiter quote API (if quote succeeds, token is tradeable)
+        const quoteController = new AbortController();
+        const quoteTimeout = setTimeout(() => quoteController.abort(), 5000);
+
+        try {
+          const quoteResponse = await fetch(
+            `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${address}&amount=10000000&slippageBps=100`,
+            { signal: quoteController.signal }
+          );
+          clearTimeout(quoteTimeout);
+
+          const quoteData = await quoteResponse.json() as any;
+
+          if (quoteResponse.ok && quoteData && !quoteData.error && quoteData.outAmount) {
+            // Token is tradeable!
+            const decimals = quoteData.outputDecimals ?? 9;
+
+            // Try to get price estimate from quote
+            const solAmount = 10000000 / 1e9; // 0.01 SOL
+            const outAmount = parseFloat(quoteData.outAmount) / Math.pow(10, decimals);
+            const estimatedPrice = outAmount > 0 ? solAmount / outAmount : 0;
+
+            // Use address substring for symbol if no metadata
+            const shortAddress = `${address.slice(0, 4)}...${address.slice(-4)}`;
+
+            return {
+              verified: false,
+              symbol: shortAddress,
+              name: 'Unknown Token',
+              decimals: Number(decimals),
+              logoURI: null,
+              price: Number(estimatedPrice) || 0,
+              source: 'quote' as const,
+              hasMetadata: false,
+            };
+          }
+
+          // Token has no liquidity or doesn't exist
+          if (quoteData?.error) {
+            if (quoteData.error.includes('Could not find any route')) {
+              throw new TRPCError({ code: 'NOT_FOUND', message: 'Token has no liquidity on any DEX. Cannot trade.' });
+            }
+            throw new TRPCError({ code: 'NOT_FOUND', message: `Token not tradeable: ${quoteData.error}` });
+          }
+
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Token not found or has no liquidity.' });
+
+        } catch (quoteError: any) {
+          clearTimeout(quoteTimeout);
+          if (quoteError.name === 'AbortError') {
+            throw new TRPCError({ code: 'TIMEOUT', message: 'Token verification timed out' });
+          }
+          if (quoteError instanceof TRPCError) throw quoteError;
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Unable to verify token' });
+        }
+
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Unable to verify token. Check your connection and try again.',
+        });
+      }
+    }),
+
+  // Get token price from Jupiter Price API
+  getTokenPrice: protectedProcedure
+    .input(z.object({ tokenAddress: z.string().min(32).max(44) }))
+    .query(async ({ input }) => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(`https://price.jup.ag/v6/price?ids=${input.tokenAddress}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          return { price: null };
+        }
+
+        const data = await response.json() as any;
+        const price = data?.data?.[input.tokenAddress]?.price;
+
+        return { price: price ? Number(price) : null };
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          throw new TRPCError({ code: 'TIMEOUT', message: 'Price fetch timed out' });
+        }
+        return { price: null };
+      }
+    }),
 });
