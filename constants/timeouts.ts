@@ -14,6 +14,11 @@ export const TIMEOUTS = {
     PORTFOLIO: 300,
     TOKEN_METADATA: 3_600,
   },
+  TOKEN_VERIFICATION: {
+    TIMEOUT_MS: 10_000,
+    MAX_RETRIES: 3,
+    INITIAL_DELAY_MS: 1_000,
+  },
   REDIS: {
     POOL_MIN: 2,
     POOL_MAX: 10,

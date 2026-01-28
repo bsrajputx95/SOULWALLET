@@ -21,4 +21,8 @@ export const logger = {
   debug: (...args: any[]) => {
     if (isDev) console.log('[DEBUG]', ...args);
   },
+
+  logCritical: (...args: any[]) => {
+    console.error('[CRITICAL]', ...args);
+  }
 };

@@ -153,7 +153,7 @@ export const swapRouter = router({
         const priceImpact = toSafeNumber(sanitizedQuote.priceImpactPct)
         const lastValidBlockHeight = toSafeNumber(sanitizedSwapTx.lastValidBlockHeight)
 
-        return {
+        const rawResponse = {
           swapTransaction: sanitizedSwapTx.swapTransaction,
           lastValidBlockHeight,
           transactionId: transaction.id,
@@ -161,12 +161,20 @@ export const swapRouter = router({
           outputAmount,
           priceImpact,
           fee: 0.00005,
-        };
-      } catch (error) {
-        logger.error('Swap failed:', error);
+        }
+
+        // Deep sanitize once more to catch any nested BigInt
+        const sanitizedResponse = sanitizeBigInt(rawResponse)
+        return sanitizedResponse;
+      } catch (error: any) {
+        logger.error('Swap failed:', {
+          error: error?.message || String(error),
+          stack: error?.stack,
+          inputMints: { from: input.fromMint, to: input.toMint },
+        });
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: 'Swap failed',
+          message: 'Swap failed. Please try again.',
         });
       }
     }),

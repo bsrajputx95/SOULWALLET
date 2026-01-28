@@ -67,14 +67,14 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address.trim());
     };
 
-    // Verify token using multiple methods with fallback chain
+    // Verify token with retry logic (max 3 attempts)
     const handleVerifyToken = async () => {
-        if (!tokenAddress.trim()) {
+        const addr = tokenAddress.trim();
+        if (!addr) {
             setError('Please enter a token address');
             return;
         }
-
-        if (!isValidSolanaAddress(tokenAddress)) {
+        if (!isValidSolanaAddress(addr)) {
             setError('Invalid Solana token address format');
             return;
         }
@@ -84,44 +84,35 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         setTokenInfo(null);
 
         const address = tokenAddress.trim();
-
-        try {
-            // Use backend proxy to verify token (avoids CORS/mobile network issues)
-            logger.info(`[QuickBuy] Verifying token via backend: ${address.slice(0, 8)}...`);
-
-            const result = await trpcClient.market.verifyToken.query({ tokenAddress: address });
-
-            logger.info(`[QuickBuy] Token verified: ${result.symbol}, source: ${result.source}`);
-            setTokenInfo({
-                address: address,
-                symbol: result.symbol,
-                name: result.name,
-                logoURI: result.logoURI || undefined,
-                decimals: result.decimals,
-                price: result.price || 0,
-                verified: result.verified,
-                source: result.source,
-                hasMetadata: result.hasMetadata,
-            });
-
-        } catch (err: any) {
-            logger.error('[QuickBuy] Token verification failed:', err);
-
-            // Extract meaningful error message from tRPC error
-            const errorMessage = err?.message || err?.data?.message || 'Unknown error';
-
-            if (errorMessage.includes('no liquidity')) {
-                setError('Token has no liquidity on any DEX. Cannot trade.');
-            } else if (errorMessage.includes('not tradeable') || errorMessage.includes('NOT_FOUND')) {
-                setError('Token not found or has no liquidity. Verify the address is correct.');
-            } else if (errorMessage.includes('timed out') || errorMessage.includes('TIMEOUT')) {
-                setError('Token verification timed out. Please try again.');
-            } else {
-                setError('Unable to verify token. Check your connection and try again.');
+        const MAX_ATTEMPTS = 3;
+        let lastError: unknown = null;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                logger.info(`[QuickBuy] Verifying token (attempt ${attempt}) via backend`);
+                const res = await trpcClient.market.verifyToken.query({ tokenAddress: address });
+                setTokenInfo({
+                    address,
+                    symbol: res.symbol,
+                    name: res.name,
+                    logoURI: res.logoURI || undefined,
+                    decimals: res.decimals,
+                    price: res.price || 0,
+                    verified: res.verified,
+                    source: res.source,
+                    hasMetadata: res.hasMetadata,
+                });
+                setIsVerifying(false);
+                return;
+            } catch (err) {
+                lastError = err;
+                if (attempt < MAX_ATTEMPTS) {
+                    await new Promise(r => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+                }
             }
-        } finally {
-            setIsVerifying(false);
         }
+        logger.error('[QuickBuy] Token verification failed:', lastError as Error);
+        setError('Unable to verify token after multiple attempts.');
+        setIsVerifying(false);
     };
 
     // Auto-verify when address looks complete

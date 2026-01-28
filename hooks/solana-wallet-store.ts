@@ -213,10 +213,23 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
         unlockedAt: Date.now(),
         expiresAt: Date.now() + SESSION_EXPIRY_MS,
       };
-      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
-      // Also store the password securely for auto-restore (encrypted in SecureStore)
-      await setSecureItem('wallet_session_pwd', password);
-      logger.info('Wallet session saved, expires in 24 hours');
+      // Redundant storage: AsyncStorage + SecureStore backup
+      await Promise.all([
+        AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session)),
+        setSecureItem('wallet_session_pwd', password),
+        setSecureItem('wallet_session_backup', JSON.stringify(session)),
+      ]);
+
+      // Validation: read back to ensure persistence
+      const [savedSession, savedPassword] = await Promise.all([
+        AsyncStorage.getItem(SESSION_KEY),
+        getSecureItem('wallet_session_pwd'),
+      ]);
+      if (!savedSession || !savedPassword) {
+        logger.warn('Session save validation failed - storage may not persist');
+      } else {
+        logger.info('Wallet session saved and validated, expires in 24 hours');
+      }
     } catch (error) {
       logger.warn('Failed to save wallet session:', error);
     }
@@ -225,26 +238,31 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
   // Get valid session if exists
   const getValidSession = async (): Promise<{ session: WalletSession; password: string } | null> => {
     try {
-      const sessionStr = await AsyncStorage.getItem(SESSION_KEY);
-      if (!sessionStr) return null;
+      // Primary storage
+      let sessionStr = await AsyncStorage.getItem(SESSION_KEY);
+      let password = await getSecureItem('wallet_session_pwd');
+
+      // Fallback to backups
+      if (!sessionStr) {
+        logger.info('Primary session not found, trying backup...');
+        sessionStr = await getSecureItem('wallet_session_backup');
+      }
+
+      if (!sessionStr || !password) {
+        logger.info('No session found in any storage location');
+        return null;
+      }
 
       const session: WalletSession = JSON.parse(sessionStr);
 
-      // Check if session is expired
+      // Expiry check
       if (Date.now() > session.expiresAt) {
         logger.info('Wallet session expired, clearing');
         await clearSession();
         return null;
       }
 
-      // Get the stored password
-      const password = await getSecureItem('wallet_session_pwd');
-      if (!password) {
-        logger.info('No session password found, clearing session');
-        await clearSession();
-        return null;
-      }
-
+      logger.info('Valid session restored from storage');
       return { session, password };
     } catch (error) {
       logger.warn('Failed to get wallet session:', error);
@@ -255,9 +273,12 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
   // Clear wallet session
   const clearSession = async () => {
     try {
-      await AsyncStorage.removeItem(SESSION_KEY);
-      await deleteSecureItem('wallet_session_pwd');
-      logger.info('Wallet session cleared');
+      await Promise.all([
+        AsyncStorage.removeItem(SESSION_KEY),
+        deleteSecureItem('wallet_session_pwd'),
+        deleteSecureItem('wallet_session_backup'),
+      ]);
+      logger.info('Wallet session cleared from all storage locations');
     } catch (error) {
       logger.warn('Failed to clear wallet session:', error);
     }
@@ -965,7 +986,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
         logger.info('Reverted optimistic update for swap output after failure');
       }
 
-      logger.error('Error executing swap:', error);
+      logger.logCritical('Swap execution failed:', error);
       setState(prev => ({ ...prev, isLoading: false }));
 
       // Identify and throw appropriate error based on failure type

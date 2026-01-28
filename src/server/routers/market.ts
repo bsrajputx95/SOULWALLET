@@ -3,6 +3,8 @@ import { router, protectedProcedure, publicProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { marketData } from '../../lib/services/marketData';
 import { redisCache } from '../../lib/redis';
+import { retryWithBackoff } from '../../lib/utils/retry';
+import { TIMEOUTS } from '../../../constants';
 
 // Well-known token logos for popular Solana tokens as fallback
 const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
@@ -231,16 +233,22 @@ export const marketRouter = router({
 
       try {
         // Step 1: Try Jupiter strict token list (verified tokens with full metadata)
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
+        const strictResponse = await retryWithBackoff(async () => {
+          const controller = new AbortController();
+          const _timeout = setTimeout(() => controller.abort(), TIMEOUTS.TOKEN_VERIFICATION.TIMEOUT_MS);
+          try {
+            const res = await fetch(`https://tokens.jup.ag/token/${address}`, { signal: controller.signal });
+            return res;
+          } catch (err) {
+            throw err;
+          }
+        }, {
+          maxRetries: TIMEOUTS.TOKEN_VERIFICATION.MAX_RETRIES,
+          initialDelayMs: TIMEOUTS.TOKEN_VERIFICATION.INITIAL_DELAY_MS,
+          maxDelayMs: TIMEOUTS.TOKEN_VERIFICATION.TIMEOUT_MS * 2,
+        });
 
-        try {
-          const strictResponse = await fetch(`https://tokens.jup.ag/token/${address}`, {
-            signal: controller.signal,
-          });
-          clearTimeout(timeout);
-
-          if (strictResponse.ok) {
+        if (strictResponse.ok) {
             const data = await strictResponse.json() as any;
 
             // Get price from Jupiter
@@ -262,26 +270,24 @@ export const marketRouter = router({
               hasMetadata: true,
             };
           }
-        } catch (fetchError: any) {
-          clearTimeout(timeout);
-          if (fetchError.name === 'AbortError') {
-            throw new TRPCError({ code: 'TIMEOUT', message: 'Token verification timed out' });
-          }
-          // Continue to quote API fallback
-        }
 
         // Step 2: Try Jupiter quote API (if quote succeeds, token is tradeable)
-        const quoteController = new AbortController();
-        const quoteTimeout = setTimeout(() => quoteController.abort(), 5000);
+        const quoteResponse = await retryWithBackoff(async () => {
+          const c = new AbortController();
+          const _t = setTimeout(() => c.abort(), TIMEOUTS.TOKEN_VERIFICATION.TIMEOUT_MS);
+          try {
+            const res = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${address}&amount=10000000&slippageBps=100`, { signal: c.signal });
+            return res;
+          } catch (err) {
+            throw err;
+          }
+        }, {
+          maxRetries: TIMEOUTS.TOKEN_VERIFICATION.MAX_RETRIES,
+          initialDelayMs: TIMEOUTS.TOKEN_VERIFICATION.INITIAL_DELAY_MS,
+          maxDelayMs: TIMEOUTS.TOKEN_VERIFICATION.TIMEOUT_MS * 2,
+        });
 
-        try {
-          const quoteResponse = await fetch(
-            `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${address}&amount=10000000&slippageBps=100`,
-            { signal: quoteController.signal }
-          );
-          clearTimeout(quoteTimeout);
-
-          const quoteData = await quoteResponse.json() as any;
+        const quoteData = await quoteResponse.json() as any;
 
           if (quoteResponse.ok && quoteData && !quoteData.error && quoteData.outAmount) {
             // Token is tradeable!
@@ -317,15 +323,6 @@ export const marketRouter = router({
 
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Token not found or has no liquidity.' });
 
-        } catch (quoteError: any) {
-          clearTimeout(quoteTimeout);
-          if (quoteError.name === 'AbortError') {
-            throw new TRPCError({ code: 'TIMEOUT', message: 'Token verification timed out' });
-          }
-          if (quoteError instanceof TRPCError) throw quoteError;
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Unable to verify token' });
-        }
-
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         throw new TRPCError({
@@ -346,7 +343,6 @@ export const marketRouter = router({
         const response = await fetch(`https://price.jup.ag/v6/price?ids=${input.tokenAddress}`, {
           signal: controller.signal,
         });
-        clearTimeout(timeout);
 
         if (!response.ok) {
           return { price: null };
