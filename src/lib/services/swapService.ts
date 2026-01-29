@@ -1,6 +1,6 @@
 import { TIMEOUTS } from '../../../constants/timeouts';
 import { redisCache } from '../redis';
-import { sanitizeBigInt, toSafeNumber } from '../utils/sanitize';
+// BigInt sanitization removed - SuperJSON handles serialization
 import { jupiterSwap } from './jupiterSwap';
 import prisma from '../prisma';
 import logger from '../logger';
@@ -23,7 +23,7 @@ export interface SwapPrepareParams extends QuoteParams {
 export type SwapStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
 
 export class SwapService {
-  
+
   private quoteCacheKey(p: QuoteParams): string {
     return `swap:quote:${p.inputMint}:${p.outputMint}:${p.amount}`;
   }
@@ -53,8 +53,7 @@ export class SwapService {
         { signal: controller.signal });
       clearTimeout(timeout);
       if (!resp.ok) throw new Error(`Jupiter quote error: ${resp.status}`);
-      const raw = await resp.json();
-      const quote = sanitizeBigInt(raw);
+      const quote = await resp.json();
       await redisCache.set(cacheKey as any, JSON.stringify(quote), QUOTE_CACHE_TTL);
       return quote;
     } catch (err) {
@@ -91,7 +90,7 @@ export class SwapService {
 
       return {
         swapTransaction: swapTx.swapTransaction,
-        lastValidBlockHeight: toSafeNumber(swapTx.lastValidBlockHeight),
+        lastValidBlockHeight: swapTx.lastValidBlockHeight,
         transactionId: txn.id,
         quote,
       };

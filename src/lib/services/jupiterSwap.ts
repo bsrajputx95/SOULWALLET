@@ -1,9 +1,10 @@
 import 'reflect-metadata';
 import type { Keypair } from '@solana/web3.js';
 import { Transaction, VersionedTransaction } from '@solana/web3.js';
+// inject is used decoratively on constructor params
 import { injectable, inject } from 'tsyringe';
 import { logger } from '../logger'
-import { sanitizeBigInt, toSafeNumber } from '../utils/sanitize';
+// BigInt sanitization removed - SuperJSON handles serialization
 import type { RpcManager } from './rpcManager';
 import type { FeeManager } from './feeManager';
 import type { TransactionSimulator, SimulationResult } from './transactionSimulator';
@@ -148,8 +149,7 @@ export class JupiterSwap {
             throw new Error(`Quote fetch failed: ${error}`);
           }
 
-          const rawQuote = await response.json();
-          const quote = sanitizeBigInt(rawQuote) as QuoteResponse;
+          const quote = await response.json() as QuoteResponse;
 
           // Calculate price (output/input)
           const inputAmount = parseFloat(quote.inAmount);
@@ -266,12 +266,11 @@ export class JupiterSwap {
             }
 
             const rawResponse = await response.json();
-            const sanitizedResponse = sanitizeBigInt(rawResponse);
 
             const swapResponse: SwapResponse = {
-              swapTransaction: sanitizedResponse.swapTransaction,
-              lastValidBlockHeight: toSafeNumber(sanitizedResponse.lastValidBlockHeight),
-              prioritizationFeeLamports: sanitizedResponse.prioritizationFeeLamports !== undefined ? toSafeNumber(sanitizedResponse.prioritizationFeeLamports) : undefined,
+              swapTransaction: rawResponse.swapTransaction,
+              lastValidBlockHeight: rawResponse.lastValidBlockHeight,
+              prioritizationFeeLamports: rawResponse.prioritizationFeeLamports,
             };
             return swapResponse;
           } finally {

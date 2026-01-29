@@ -154,7 +154,6 @@ export const transactionDurationSeconds = new Histogram({
     registers: [register],
 });
 
-// =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
 
@@ -162,7 +161,7 @@ export const transactionDurationSeconds = new Histogram({
  * Record an authentication attempt
  */
 export function recordAuthAttempt(
-    method: 'login' | 'register' | 'logout' | 'refresh' | '2fa',
+    method: 'login' | 'register' | 'logout' | 'refresh',
     success: boolean,
     durationMs: number,
     failureReason?: string

@@ -12,7 +12,6 @@ import { logger } from '../logger';
 const ENCRYPTED_FIELDS: Record<string, string[]> = {
     User: ['email', 'walletAddress'],
     CustodialWallet: ['encryptedKey'],
-    KYCVerification: ['encryptedData'],
 };
 
 // Fields that need deterministic lookup hashes (for WHERE clause filtering)

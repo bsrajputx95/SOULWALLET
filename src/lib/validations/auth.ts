@@ -27,11 +27,10 @@ const usernameSchema = z
     'Username can only contain letters, numbers, and underscores'
   );
 
-// OTP validation
-const otpSchema = z
+// Token validation for password reset
+const resetTokenSchema = z
   .string()
-  .length(6, 'OTP must be exactly 6 digits')
-  .regex(/^\d{6}$/, 'OTP must contain only numbers');
+  .min(1, 'Reset token is required');
 
 // Signup validation schema
 export const signupSchema = z.object({
@@ -58,10 +57,10 @@ export const passwordResetRequestSchema = z.object({
   captchaToken: z.string().optional(),
 });
 
-// Reset password schema
+// Reset password schema (token-based)
 export const resetPasswordSchema = z.object({
   email: emailSchema,
-  otp: otpSchema,
+  token: resetTokenSchema,
   newPassword: passwordSchema,
   confirmPassword: z.string(),
 }).refine((data) => data.newPassword === data.confirmPassword, {
@@ -69,11 +68,7 @@ export const resetPasswordSchema = z.object({
   path: ["confirmPassword"],
 });
 
-// Verify OTP schema
-export const verifyOtpSchema = z.object({
-  email: emailSchema,
-  otp: otpSchema,
-});
+// OTP verification removed - using token-based password reset
 
 // Change password schema (for authenticated users)
 export const changePasswordSchema = z.object({
@@ -134,7 +129,7 @@ export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type PasswordResetRequestInput = z.infer<typeof passwordResetRequestSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
-export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
+// VerifyOtpInput removed - OTP no longer used
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type TokenInput = z.infer<typeof tokenSchema>;
 export type SessionInput = z.infer<typeof sessionSchema>;

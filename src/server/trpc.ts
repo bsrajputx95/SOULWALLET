@@ -257,32 +257,12 @@ export const protectedProcedure = t.procedure
   }))
   .use(errorHandlingMiddleware());
 
-const require2FAMiddleware = middleware(async ({ ctx, next }) => {
-  const auth = requireAuth(ctx)
-  const settings = await prisma.userSettings.findUnique({
-    where: { userId: auth.user.id },
-    select: { security: true },
-  })
-  const security = settings?.security as any
-  if (!security?.twoFactorEnabled) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: '2FA is required for this operation. Please enable 2FA in your account settings.',
-    })
-  }
-  return next({
-    ctx: {
-      ...ctx,
-      user: auth.user,
-      session: auth.session,
-    },
-  })
-})
+// require2FAMiddleware removed - 2FA functionality removed from application
 
 export const financialProcedure = t.procedure
   .use(sanitizationMiddleware)
   .use(authMiddleware)
-  .use(require2FAMiddleware)
+  // require2FAMiddleware removed - 2FA functionality removed from application
   .use(middleware(async ({ ctx, next }) => {
     const enabled = process.env.CSRF_ENABLED === 'true';
     if (enabled) {

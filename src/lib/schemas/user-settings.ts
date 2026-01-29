@@ -29,19 +29,14 @@ export const privacySchema = z.object({
 
 /**
  * Security settings schema
+ * 2FA/TOTP fields removed - using password-based authentication only
  */
 export const securitySchema = z.object({
-    twoFactorEnabled: z.boolean().optional(),
+    // twoFactorEnabled, totpSecret, totpEnabled, totpEnabledAt, backupCodes,
+    // backupCodesGeneratedAt, pendingTotpSecret, pendingBackupCodes removed
     biometricEnabled: z.boolean().optional(),
-    totpSecret: z.string().optional(),
-    totpEnabled: z.boolean().optional(),
-    totpEnabledAt: z.string().optional(),
-    backupCodes: z.array(z.string()).optional(),
-    backupCodesGeneratedAt: z.string().optional(),
     passwordChangedAt: z.string().optional(),
     recoveryEmail: z.string().email().optional(),
-    pendingTotpSecret: z.string().optional(),
-    pendingBackupCodes: z.array(z.string()).optional(),
 }).strict();
 
 /**

@@ -15,9 +15,9 @@ export interface RateLimitConfig {
 
 export interface RateLimitOptions {
   useRedis?: boolean;
-  redisUrl?: string;
+  redisUrl?: string | undefined;
   defaultConfig?: RateLimitConfig;
-  redisClient?: Redis;
+  redisClient?: Redis | undefined;
 }
 
 /**
@@ -43,12 +43,7 @@ export const RATE_LIMIT_CONFIGS = {
     blockDuration: 7200, // block for 2 hours (escalated)
     keyPrefix: 'password_reset',
   },
-  verifyOtp: {
-    points: 5, // 5 attempts
-    duration: 600, // per 10 minutes
-    blockDuration: 1200, // block for 20 minutes (escalated)
-    keyPrefix: 'verify_otp',
-  },
+  // verifyOtp config removed - OTP feature fully removed
   resetPassword: {
     points: 2, // Comment 4: 2 attempts per hour (stricter, alias for passwordReset)
     duration: 3600, // per hour
@@ -164,11 +159,11 @@ export const RATE_LIMIT_CONFIGS = {
 export class RateLimitService {
   private limiters: Map<string, RateLimiterMemory | RateLimiterRedis> = new Map();
   private useRedis: boolean;
-  private redisClient?: Redis;
+  private redisClient: Redis | undefined;
 
   constructor(options: RateLimitOptions = {}) {
     this.useRedis = options.useRedis || false;
-    this.redisClient = options.redisClient;
+    this.redisClient = options.redisClient ?? undefined;
     this.initializeLimiters(options);
   }
 
@@ -491,20 +486,20 @@ export async function initializeRateLimiting(options: RateLimitOptions = {}): Pr
         const delays = Array.from({ length: retryAttempts }, (_, i) => baseDelay * Math.pow(2, i));
         while (!connected && attempt < retryAttempts) {
           try {
-            await redisClient.connect();
-            await redisClient.ping();
+            await redisClient!.connect();
+            await redisClient!.ping();
             connected = true;
             logger.info('✅ Redis connection established for rate limiting');
           } catch (error) {
             attempt++;
             if (attempt < retryAttempts) {
               const delay = delays[attempt - 1];
-              logger.warn(`Redis connection attempt ${attempt} failed, retrying in ${delay}ms:`, error.message);
+              logger.warn(`Redis connection attempt ${attempt} failed, retrying in ${delay}ms:`, (error as Error).message);
               await new Promise(resolve => setTimeout(resolve, delay));
             } else {
               logger.warn('Redis connection failed after retries, falling back to memory-based rate limiting');
               try {
-                redisClient.disconnect();
+                redisClient!.disconnect();
               } catch {
                 void 0;
               }
@@ -518,13 +513,13 @@ export async function initializeRateLimiting(options: RateLimitOptions = {}): Pr
           redisUrl = process.env.REDIS_URL;
         }
       } catch (error) {
-        logger.warn('Failed to initialize Redis for rate limiting:', error.message);
+        logger.warn('Failed to initialize Redis for rate limiting:', (error as Error).message);
       }
     }
 
     logger.info('Rate limiting initialized', { mode: useRedis ? 'redis' : 'memory' });
 
-    rateLimitService = new RateLimitService({ ...options, useRedis, redisUrl, redisClient });
+    rateLimitService = new RateLimitService({ ...options, useRedis, redisUrl, redisClient: redisClient ?? undefined });
   }
   return rateLimitService;
 }
@@ -565,7 +560,8 @@ export async function fastifyRateLimitPlugin(fastify: any, options: RateLimitOpt
       : (typeof xfwdRaw === 'string' ? (xfwdRaw as string) : undefined);
     let ip: string = 'unknown';
     if (xfwdStr && xfwdStr.length > 0) {
-      ip = xfwdStr.split(',')[0].trim();
+      const parts = xfwdStr.split(',');
+      ip = (parts[0] ?? 'unknown').trim();
     } else if (request?.socket?.remoteAddress) {
       ip = request.socket.remoteAddress;
     }
@@ -596,10 +592,7 @@ export async function fastifyRateLimitPlugin(fastify: any, options: RateLimitOpt
           request.url?.includes('/api/trpc/auth.signup') ||
           request.url?.includes('/api/v1/trpc/auth.signup')
         ) endpoint = 'signup';
-        else if (
-          request.url?.includes('/api/trpc/auth.verifyOtp') ||
-          request.url?.includes('/api/v1/trpc/auth.verifyOtp')
-        ) endpoint = 'verifyOtp';
+        // verifyOtp endpoint removed - OTP feature fully removed
         else if (
           request.url?.includes('/api/trpc/auth.resetPassword') ||
           request.url?.includes('/api/v1/trpc/auth.resetPassword')
@@ -643,7 +636,7 @@ export async function fastifyRateLimitPlugin(fastify: any, options: RateLimitOpt
         // Legacy REST-like path fallbacks
         else if (request.url?.includes('/auth/login')) endpoint = 'login';
         else if (request.url?.includes('/auth/signup')) endpoint = 'signup';
-        else if (request.url?.includes('/auth/verify-otp')) endpoint = 'verifyOtp';
+        // verify-otp endpoint removed - OTP feature fully removed
         else if (request.url?.includes('/auth/reset-password')) endpoint = 'resetPassword';
         else if (request.url?.includes('/auth/change-password')) endpoint = 'changePassword';
         else if (request.url?.includes('/wallet/create')) endpoint = 'walletCreate';

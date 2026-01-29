@@ -2,7 +2,7 @@ import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
 import type { Secret } from 'jsonwebtoken';
-import { OTPType, Role } from '@prisma/client';
+import { Role } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../logger';
 import prisma from '../prisma';
@@ -14,7 +14,6 @@ import type {
   LoginInput,
   PasswordResetRequestInput,
   ResetPasswordInput,
-  VerifyOtpInput
 } from '../validations/auth';
 
 // Types for fingerprinting and security
@@ -191,8 +190,7 @@ export class AuthService {
     return jwtSecretCache.getSigningSecret('refresh');
   }
 
-  private static readonly JWT_SECRET_ROTATION_PERIOD_DAYS = parseInt(process.env.JWT_SECRET_ROTATION_PERIOD_DAYS || '90');
-  private static readonly JWT_SECRET_OVERLAP_DAYS = parseInt(process.env.JWT_SECRET_OVERLAP_DAYS || '7');
+  // JWT secret rotation constants removed - not currently used
 
   /**
    * Parse JWT expiration string to seconds (Audit Issue #20)
@@ -219,34 +217,13 @@ export class AuthService {
 
   private static readonly JWT_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_EXPIRES_IN || '7d');
   private static readonly JWT_REFRESH_EXPIRES_IN: number = AuthService.parseJwtExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '365d');
-  private static readonly OTP_EXPIRES_IN = 10 * 60 * 1000; // 10 minutes in milliseconds
+  // OTP_EXPIRES_IN removed - no longer using OTP
   private static readonly MAX_LOGIN_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5');
   private static readonly ACCOUNT_LOCKOUT_DURATION_MINUTES = parseInt(process.env.ACCOUNT_LOCKOUT_DURATION_MINUTES || '30');
   private static readonly MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || '2');
   private static readonly emailService = createEmailService()
 
-  /**
-   * Hash OTP using SHA-256 before storage (Audit Issue #2)
-   * @param otp - Plain text OTP
-   * @returns SHA-256 hash as hex string (64 characters)
-   */
-  static hashOTP(otp: string): string {
-    return crypto.createHash('sha256').update(otp).digest('hex');
-  }
-
-  /**
-   * Verify OTP by comparing hashes (Audit Issue #2)
-   * @param inputOtp - User-provided OTP
-   * @param storedHash - Stored SHA-256 hash
-   * @returns True if OTP matches
-   */
-  static verifyOTPHash(inputOtp: string, storedHash: string): boolean {
-    const inputHash = this.hashOTP(inputOtp);
-    return crypto.timingSafeEqual(
-      Buffer.from(inputHash, 'hex'),
-      Buffer.from(storedHash, 'hex')
-    );
-  }
+  // OTP methods (hashOTP, verifyOTPHash, generateOTP) removed - using token-based password reset
 
   // Log warnings for rotation status (proxy: warn if multiple secrets indicate ongoing rotation)
   static logRotationStatus(): void {
@@ -289,18 +266,6 @@ export class AuthService {
     }
   }
 
-  /**
-   * Generate a cryptographically secure 6-digit OTP
-   * Uses crypto.randomBytes() instead of Math.random() for security
-   */
-  private static generateOTP(): string {
-    // Generate 4 random bytes and convert to a number
-    const randomBytes = crypto.randomBytes(4);
-    const randomNumber = randomBytes.readUInt32BE(0);
-    // Map to 6-digit range (100000-999999)
-    const otp = 100000 + (randomNumber % 900000);
-    return otp.toString();
-  }
 
   /**
    * Change password for authenticated users (no OTP), with session invalidation and activity logging
@@ -357,7 +322,7 @@ export class AuthService {
 
       await Promise.all([
         this.invalidateUserProfileCache(user.id),
-        this.invalidateSessionsCache(user.id, sessions.map((s) => s.id)),
+        this.invalidateSessionsCache(user.id, sessions.map((s: { id: string }) => s.id)),
       ])
 
       return { message: 'Password changed successfully' };
@@ -877,10 +842,10 @@ export class AuthService {
       if (sessionsToRevoke.length > 0) {
         // Delete oldest sessions to make room for new one
         await prisma.session.deleteMany({
-          where: { id: { in: sessionsToRevoke.map(s => s.id) } },
+          where: { id: { in: sessionsToRevoke.map((s: { id: string }) => s.id) } },
         });
 
-        await this.invalidateSessionsCache(u.id, sessionsToRevoke.map((s) => s.id))
+        await this.invalidateSessionsCache(u.id, sessionsToRevoke.map((s: { id: string }) => s.id))
 
         // Log auto-revocations in session activity
         for (const revokedSession of sessionsToRevoke) {
@@ -1014,7 +979,7 @@ export class AuthService {
   }
 
   /**
-   * Request password reset
+   * Request password reset - generates a secure token stored in Redis
    */
   static async requestPasswordReset(input: PasswordResetRequestInput) {
     try {
@@ -1026,40 +991,25 @@ export class AuthService {
       if (!user) {
         // Don't reveal if email exists or not for security
         return {
-          message: 'If an account with this email exists, you will receive a password reset code',
+          message: 'If an account with this email exists, you will receive a password reset link',
         };
       }
 
-      // Delete any existing OTPs for this user
-      await prisma.oTP.deleteMany({
-        where: {
-          email: input.email.toLowerCase(),
-          type: OTPType.RESET_PASSWORD,
-        },
-      });
+      // Generate secure reset token
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
 
-      // Generate OTP
-      const otp = this.generateOTP();
-      const expiresAt = new Date(Date.now() + this.OTP_EXPIRES_IN);
+      // Store token hash in Redis with 15 minute TTL
+      const redisKey = `password-reset:${input.email.toLowerCase()}` as CacheKey;
+      await redisCache.set(redisKey, tokenHash, 15 * 60); // 15 minutes
 
-      // Hash OTP before storage (Audit Issue #2)
-      const hashedOtp = this.hashOTP(otp);
-
-      // Save hashed OTP
-      await prisma.oTP.create({
-        data: {
-          email: input.email.toLowerCase(),
-          code: hashedOtp, // Store hash, not plain text
-          type: OTPType.RESET_PASSWORD,
-          expiresAt,
-        },
-      });
-
-      // OTP will be sent via email service in the router
-      // Do not log OTP for security reasons
+      // Token will be included in email link sent by the router
+      // Format: https://app.soulwallet.com/reset-password?token={resetToken}&email={email}
 
       return {
-        message: 'If an account with this email exists, you will receive a password reset code',
+        message: 'If an account with this email exists, you will receive a password reset link',
+        // Only return token in development for testing
+        ...(process.env.NODE_ENV === 'development' ? { _devToken: resetToken } : {}),
       };
     } catch (error) {
       throw new TRPCError({
@@ -1070,83 +1020,39 @@ export class AuthService {
   }
 
   /**
-   * Verify OTP (Audit Issue #2: Compare hashes)
-   * Note: This marks the OTP as verified but not fully used.
-   * The OTP can still be used for password reset within its expiry window.
-   * Full "used" status is set during password reset to prevent replay attacks.
+   * Validate password reset token
    */
-  static async verifyOTP(input: VerifyOtpInput) {
+  static async validateResetToken(email: string, token: string): Promise<boolean> {
     try {
-      // Hash input OTP for comparison (Audit Issue #2)
-      const hashedInput = this.hashOTP(input.otp);
+      const redisKey = `password-reset:${email.toLowerCase()}` as CacheKey;
+      const storedHash = await redisCache.get<string>(redisKey);
 
-      // Find valid OTP by hash
-      const otpRecord = await prisma.oTP.findFirst({
-        where: {
-          email: input.email.toLowerCase(),
-          code: hashedInput, // Compare hashes
-          type: OTPType.RESET_PASSWORD,
-          expiresAt: { gt: new Date() },
-          used: false,
-        },
-      });
-
-      if (!otpRecord) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Invalid or expired OTP',
-        });
+      if (!storedHash) {
+        return false;
       }
 
-      // Mark OTP as verified (but not fully used yet)
-      // This prevents the same OTP from being verified multiple times
-      // while still allowing the password reset to complete
-      await prisma.oTP.update({
-        where: { id: otpRecord.id },
-        data: {
-          // Set a short verification window (5 minutes) for password reset
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-        },
-      });
-
-      return {
-        message: 'OTP verified successfully',
-        isValid: true,
-      };
-    } catch (error) {
-      if (error instanceof TRPCError) {
-        throw error;
-      }
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to verify OTP',
-      });
+      const inputHash = crypto.createHash('sha256').update(token).digest('hex');
+      return crypto.timingSafeEqual(
+        Buffer.from(inputHash, 'hex'),
+        Buffer.from(storedHash, 'hex')
+      );
+    } catch {
+      return false;
     }
   }
 
   /**
-   * Reset password with activity logging (Audit Issue #2: Compare hashes)
+   * Reset password with token (replaces OTP-based reset)
    */
   static async resetPassword(input: ResetPasswordInput) {
     try {
-      // Hash input OTP for comparison (Audit Issue #2)
-      const hashedInput = this.hashOTP(input.otp);
+      // Validate reset token
+      const isValid = await this.validateResetToken(input.email, input.token || '');
 
-      // Find and verify OTP by hash
-      const otpRecord = await prisma.oTP.findFirst({
-        where: {
-          email: input.email.toLowerCase(),
-          code: hashedInput, // Compare hashes
-          type: OTPType.RESET_PASSWORD,
-          expiresAt: { gt: new Date() },
-          used: false,
-        },
-      });
-
-      if (!otpRecord) {
+      if (!isValid) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Invalid or expired OTP',
+          message: 'Invalid or expired reset token',
         });
       }
 
@@ -1171,7 +1077,7 @@ export class AuthService {
         select: { id: true },
       });
 
-      // Update password and mark OTP as used
+      // Update password and invalidate all sessions
       await prisma.$transaction([
         prisma.user.update({
           where: { id: user.id },
@@ -1181,15 +1087,15 @@ export class AuthService {
             lockedUntil: null,
           },
         }),
-        prisma.oTP.update({
-          where: { id: otpRecord.id },
-          data: { used: true },
-        }),
         // Invalidate all existing sessions
         prisma.session.deleteMany({
           where: { userId: user.id },
         }),
       ]);
+
+      // Delete the reset token from Redis
+      const redisKey = `password-reset:${input.email.toLowerCase()}` as CacheKey;
+      await redisCache.del(redisKey);
 
       // Log password reset activity for each invalidated session
       for (const session of userSessions) {
@@ -1198,13 +1104,13 @@ export class AuthService {
           userId: user.id,
           action: 'PASSWORD_RESET',
           ipAddress: 'unknown',
-          metadata: { reason: 'Password reset via OTP' },
+          metadata: { reason: 'Password reset via token' },
         });
       }
 
       await Promise.all([
         this.invalidateUserProfileCache(user.id),
-        this.invalidateSessionsCache(user.id, userSessions.map((s) => s.id)),
+        this.invalidateSessionsCache(user.id, userSessions.map((s: { id: string }) => s.id)),
       ])
 
       return {
@@ -1220,6 +1126,7 @@ export class AuthService {
       });
     }
   }
+
 
   /**
    * Get current user by session with fingerprint validation
@@ -1391,10 +1298,7 @@ export class AuthService {
         prisma.session.deleteMany({
           where: { expiresAt: { lt: new Date() } },
         }),
-        // Delete expired OTPs
-        prisma.oTP.deleteMany({
-          where: { expiresAt: { lt: new Date() } },
-        }),
+        // OTP cleanup removed - OTP model no longer exists
         // Delete old login attempts (30 days)
         prisma.loginAttempt.deleteMany({
           where: { createdAt: { lt: thirtyDaysAgo } },
@@ -1407,9 +1311,8 @@ export class AuthService {
 
       const stats = {
         expiredSessions: results[0].count,
-        expiredOTPs: results[1].count,
-        oldLoginAttempts: results[2].count,
-        oldSessionActivities: results[3].count,
+        oldLoginAttempts: results[1].count,
+        oldSessionActivities: results[2].count,
       };
 
       logger.info('Cleanup completed:', stats);

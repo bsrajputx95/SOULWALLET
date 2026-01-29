@@ -95,7 +95,7 @@ export const apiMetadata = {
       logout: 'POST /api/v1/trpc/auth.logout',
       requestPasswordReset: 'POST /api/v1/trpc/auth.requestPasswordReset',
       resetPassword: 'POST /api/v1/trpc/auth.resetPassword',
-      verifyOTP: 'POST /api/v1/trpc/auth.verifyOTP',
+      // verifyOTP removed - OTP feature fully removed for beta
       getCurrentUser: 'GET /api/v1/trpc/auth.getCurrentUser',
       refreshToken: 'POST /api/v1/trpc/auth.refreshToken',
       getSessions: 'GET /api/v1/trpc/auth.getSessions',
@@ -147,7 +147,8 @@ export const routerConfig = {
  * Note: 'staging' is treated as production-like but with relaxed email requirements
  */
 export const validateEnvironment = async () => {
-  const nodeEnv = process.env.NODE_ENV || 'development';
+  // Widen type to include 'staging' which is treated as production-like
+  const nodeEnv = (process.env.NODE_ENV || 'development') as 'development' | 'production' | 'test' | 'staging';
   const isProduction = nodeEnv === 'production';
   // Staging is treated as production-like environment
   const isStaging = (process.env.NODE_ENV as string) === 'staging';
@@ -196,7 +197,11 @@ export const validateEnvironment = async () => {
  * Common validations for all environments
  */
 const validateCommon = async () => {
-  const nodeEnv = process.env.NODE_ENV || 'development';
+  // Widen type to include 'staging' for environment checks
+  const nodeEnv = (process.env.NODE_ENV || 'development') as 'development' | 'production' | 'test' | 'staging';
+  // Define environment checks locally for JWT validation
+  const isProduction = nodeEnv === 'production';
+  const isStaging = nodeEnv === 'staging';
   // Status tracking variables  
   let redisAvailable = false;
   let sentryConfigured = false;
@@ -260,14 +265,14 @@ const validateCommon = async () => {
 
   // Validate JWT secrets are strong enough
   if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
-    if (nodeEnv === 'production' || nodeEnv === 'staging') {
+    if (isProduction || isStaging) {
       throw new Error('JWT_SECRET must be at least 32 characters long\nGenerate strong secret: openssl rand -base64 32');
     }
     logger.warn('⚠️  JWT_SECRET should be at least 32 characters for security');
   }
 
   if (process.env.JWT_REFRESH_SECRET && process.env.JWT_REFRESH_SECRET.length < 32) {
-    if (nodeEnv === 'production' || nodeEnv === 'staging') {
+    if (isProduction || isStaging) {
       throw new Error('JWT_REFRESH_SECRET must be at least 32 characters long\nGenerate strong secret: openssl rand -base64 32');
     }
     logger.warn('⚠️  JWT_REFRESH_SECRET should be at least 32 characters for security');
@@ -332,7 +337,7 @@ const validateCommon = async () => {
     LOCKOUT_DURATION_MINUTES: { min: 1, max: 1440, default: 15 }, // Max 24 hours
     SESSION_TIMEOUT_HOURS: { min: 1, max: 168, default: 24 }, // Max 7 days
     PORT: { min: 1000, max: 65535, default: 3001 },
-    OTP_EXPIRES_IN_MINUTES: { min: 1, max: 60, default: 10 },
+    // OTP_EXPIRES_IN_MINUTES removed - OTP feature fully removed for beta
     RATE_LIMIT_MAX: { min: 10, max: 10000, default: 100 },
   };
 

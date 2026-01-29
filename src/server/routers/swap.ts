@@ -7,7 +7,7 @@ import prisma from '../../lib/prisma';
 import { swapService } from '../../lib/services/swapService';
 import { auditLogService } from '../../lib/services/auditLog'
 import { DECIMALS, FEES } from '../../../constants'
-import { sanitizeBigInt, toSafeNumber } from '../../lib/utils/sanitize'
+// BigInt sanitization removed - SuperJSON handles serialization
 
 
 export const swapRouter = router({
@@ -28,8 +28,8 @@ export const swapRouter = router({
         amount: input.amount,
         slippageBps: Math.floor(input.slippage * 100),
       });
-      const outputAmount = toSafeNumber(quote.outAmount) / 1_000_000;
-      const priceImpact = toSafeNumber(quote.priceImpactPct);
+      const outputAmount = Number(quote.outAmount) / 1_000_000;
+      const priceImpact = Number(quote.priceImpactPct);
       return {
         quote,
         inputAmount: input.amount,
@@ -60,7 +60,7 @@ export const swapRouter = router({
 
       // Get user wallet
       const user = await prisma.user.findUnique({
-        where: { id: ctx.user.id },
+        where: { id: ctx.user!.id },
         select: { walletAddress: true },
       });
 
@@ -91,7 +91,7 @@ export const swapRouter = router({
           outputMint: input.toMint,
           amount: input.amount,
           slippageBps: Math.floor(input.slippage * 100),
-          userId: ctx.user.id,
+          userId: ctx.user!.id,
           walletAddress: user.walletAddress,
         });
 
@@ -105,7 +105,7 @@ export const swapRouter = router({
         // Save transaction to database as PENDING (will be updated after client sends)
         const transaction = await prisma.transaction.create({
           data: {
-            userId: ctx.user.id,
+            userId: ctx.user!.id,
             signature: pendingSignature,
             type: 'SWAP',
             amount: input.amount,
@@ -123,7 +123,7 @@ export const swapRouter = router({
         const tokenSymbol = input.fromMint === 'So11111111111111111111111111111111111111112' ? 'SOL' : input.fromMint.slice(0, 8)
 
         await auditLogService.logFinancialOperation({
-          userId: ctx.user.id,
+          userId: ctx.user!.id,
           operation: 'SWAP',
           resourceType: 'Transaction',
           resourceId: transaction.id,
@@ -142,30 +142,16 @@ export const swapRouter = router({
           userAgent,
         })
 
-
-        // AML monitoring removed for beta
-
-        // Sanitize response objects to strip BigInt before serialization
-        const sanitizedQuote = sanitizeBigInt(quote)
-        const sanitizedSwapTx = sanitizeBigInt(swapTx)
-
-        const outputAmount = toSafeNumber(sanitizedQuote.outAmount) / 1_000_000
-        const priceImpact = toSafeNumber(sanitizedQuote.priceImpactPct)
-        const lastValidBlockHeight = toSafeNumber(sanitizedSwapTx.lastValidBlockHeight)
-
-        const rawResponse = {
-          swapTransaction: sanitizedSwapTx.swapTransaction,
-          lastValidBlockHeight,
+        // Return raw values - SuperJSON handles BigInt serialization
+        return {
+          swapTransaction: swapTx.swapTransaction,
+          lastValidBlockHeight: swapTx.lastValidBlockHeight,
           transactionId: transaction.id,
-          inputAmount: toSafeNumber(input.amount),
-          outputAmount,
-          priceImpact,
+          inputAmount: input.amount,
+          outputAmount: Number(quote.outAmount) / 1_000_000,
+          priceImpact: Number(quote.priceImpactPct),
           fee: 0.00005,
-        }
-
-        // Deep sanitize once more to catch any nested BigInt
-        const sanitizedResponse = sanitizeBigInt(rawResponse)
-        return sanitizedResponse;
+        };
       } catch (error: any) {
         logger.error('Swap failed:', {
           error: error?.message || String(error),
@@ -254,6 +240,60 @@ export const swapRouter = router({
         }
         logger.error('Execute swap error:', error);
         throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Swap execution failed',
+        });
+      }
+    }),
+  */
+
+  /**
+   * Confirm swap after client-side signing
+   * Called by frontend after transaction is sent to update status with real signature
+   */
+  confirmSwap: protectedProcedure
+    .input(z.object({
+      transactionId: z.string(),
+      signature: z.string(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      try {
+        // Verify the transaction belongs to this user
+        const transaction = await prisma.transaction.findUnique({
+          where: { id: input.transactionId },
+          select: { userId: true, status: true },
+        });
+
+        if (!transaction) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Transaction not found',
+          });
+        }
+
+        if (transaction.userId !== ctx.user!.id) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Not authorized to update this transaction',
+          });
+        }
+
+        // Update the transaction with the real signature and mark as processing
+        await swapService.updateSwapStatus(input.transactionId, 'PROCESSING', input.signature);
+
+        logger.info(`Swap confirmed: ${input.transactionId} with signature ${input.signature.substring(0, 16)}...`);
+
+        return { success: true, status: 'PROCESSING' };
+      } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        logger.error('Confirm swap error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to confirm swap',
+        });
+      }
     }),
 
   /**
@@ -316,7 +356,7 @@ export const swapRouter = router({
       try {
         const swaps = await prisma.transaction.findMany({
           where: {
-            userId: ctx.user.id,
+            userId: ctx.user!.id,
             type: 'SWAP',
           },
           orderBy: { createdAt: 'desc' },

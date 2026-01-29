@@ -16,7 +16,7 @@ export const accountRouter = router({
     .query(async ({ ctx }) => {
       try {
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: {
             id: true,
             username: true,
@@ -40,7 +40,7 @@ export const accountRouter = router({
 
         // Get additional profile data from user settings
         const settings = await prisma.userSettings.findUnique({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
           select: { preferences: true, security: true },
         });
 
@@ -63,7 +63,8 @@ export const accountRouter = router({
           profileImage: user.profileImage,
           defaultCurrency: preferences.defaultCurrency || 'USD',
           language: preferences.language || 'en',
-          twoFactorEnabled: security.twoFactorEnabled || false,
+          // twoFactorEnabled removed - using password-based auth only
+          biometricEnabled: security.biometricEnabled || false,
           walletAddress: user.walletAddress,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
@@ -108,7 +109,7 @@ export const accountRouter = router({
           const existing = await prisma.user.findFirst({
             where: {
               username: input.username,
-              NOT: { id: ctx.user.id },
+              NOT: { id: ctx.user!.id },
             },
           });
           if (existing) {
@@ -128,7 +129,7 @@ export const accountRouter = router({
         if (name) userUpdate.name = name;
 
         const updated = await prisma.user.update({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           data: userUpdate,
           select: {
             id: true,
@@ -145,7 +146,7 @@ export const accountRouter = router({
         // Update preferences in user settings
         if (input.phone || input.dateOfBirth || input.defaultCurrency || input.language) {
           const existingSettings = await prisma.userSettings.findUnique({
-            where: { userId: ctx.user.id },
+            where: { userId: ctx.user!.id },
           });
 
           const currentPrefs = (existingSettings?.preferences as any) || {};
@@ -158,9 +159,9 @@ export const accountRouter = router({
           };
 
           await prisma.userSettings.upsert({
-            where: { userId: ctx.user.id },
+            where: { userId: ctx.user!.id },
             update: { preferences: newPrefs },
-            create: { userId: ctx.user.id, preferences: newPrefs },
+            create: { userId: ctx.user!.id, preferences: newPrefs },
           });
         }
 
@@ -202,7 +203,7 @@ export const accountRouter = router({
     .query(async ({ ctx }) => {
       try {
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: {
             id: true,
             failedLoginAttempts: true,
@@ -220,7 +221,7 @@ export const accountRouter = router({
 
         // Get user settings for 2FA status
         const settings = await prisma.userSettings.findUnique({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
           select: { security: true },
         });
 
@@ -228,7 +229,8 @@ export const accountRouter = router({
 
         return {
           userId: user.id,
-          twoFactorEnabled: securitySettings.twoFactorEnabled || false,
+          // twoFactorEnabled removed - using password-based auth only
+          biometricEnabled: securitySettings.biometricEnabled || false,
           lastPasswordChange: securitySettings.passwordChangedAt || user.updatedAt,
           loginAttempts: user.failedLoginAttempts || 0,
           lockedUntil: user.lockedUntil,
@@ -249,36 +251,37 @@ export const accountRouter = router({
    */
   updateSecuritySettings: protectedProcedure
     .input(z.object({
-      twoFactorEnabled: z.boolean().optional(),
+      // twoFactorEnabled removed - using password-based auth only
+      biometricEnabled: z.boolean().optional(),
       recoveryEmail: z.string().email().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       try {
         // Update or create user settings
         const existingSettings = await prisma.userSettings.findUnique({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
         });
 
         const currentSecurity = (existingSettings?.security as any) || {};
         const newSecurity = {
           ...currentSecurity,
-          ...(input.twoFactorEnabled !== undefined && { twoFactorEnabled: input.twoFactorEnabled }),
+          ...(input.biometricEnabled !== undefined && { biometricEnabled: input.biometricEnabled }),
           ...(input.recoveryEmail !== undefined && { recoveryEmail: input.recoveryEmail }),
         };
 
         await prisma.userSettings.upsert({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
           update: { security: newSecurity },
           create: {
-            userId: ctx.user.id,
+            userId: ctx.user!.id,
             security: newSecurity,
           },
         });
 
-        await redisCache.del(`user:${ctx.user.id}:profile`)
+        await redisCache.del(`user:${ctx.user!.id}:profile`)
 
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: {
             id: true,
             failedLoginAttempts: true,
@@ -290,8 +293,9 @@ export const accountRouter = router({
         return {
           success: true,
           settings: {
-            userId: ctx.user.id,
-            twoFactorEnabled: newSecurity.twoFactorEnabled || false,
+            userId: ctx.user!.id,
+            // twoFactorEnabled removed - using password-based auth only
+            biometricEnabled: newSecurity.biometricEnabled || false,
             lastPasswordChange: newSecurity.passwordChangedAt || user?.updatedAt || new Date(),
             loginAttempts: user?.failedLoginAttempts || 0,
             lockedUntil: user?.lockedUntil,
@@ -315,7 +319,7 @@ export const accountRouter = router({
     .query(async ({ ctx }) => {
       try {
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: {
             walletAddress: true,
             walletVerifiedAt: true,
@@ -329,7 +333,7 @@ export const accountRouter = router({
 
         // Get wallet backup status from user settings
         const settings = await prisma.userSettings.findUnique({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
           select: { preferences: true },
         });
 
@@ -361,7 +365,7 @@ export const accountRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: { password: true },
         });
 
@@ -386,7 +390,7 @@ export const accountRouter = router({
 
         // Update password
         await prisma.user.update({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           data: {
             password: hashedPassword,
           },
@@ -394,14 +398,14 @@ export const accountRouter = router({
 
         // Store password change timestamp in user settings
         await prisma.userSettings.upsert({
-          where: { userId: ctx.user.id },
+          where: { userId: ctx.user!.id },
           update: {
             security: {
               passwordChangedAt: new Date().toISOString(),
             },
           },
           create: {
-            userId: ctx.user.id,
+            userId: ctx.user!.id,
             security: {
               passwordChangedAt: new Date().toISOString(),
             },
@@ -434,7 +438,7 @@ export const accountRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: { password: true },
         });
 
@@ -483,7 +487,7 @@ export const accountRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: { password: true },
         });
 
@@ -519,56 +523,7 @@ export const accountRouter = router({
       }
     }),
 
-  /**
-   * Generate backup codes for 2FA
-   */
-  generateBackupCodes: protectedProcedure
-    .mutation(async ({ ctx }) => {
-      try {
-        // Generate 10 backup codes
-        const codes: string[] = [];
-        for (let i = 0; i < 10; i++) {
-          const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-          codes.push(code);
-        }
-
-        // Hash and store backup codes in user settings
-        const hashedCodes = await Promise.all(
-          codes.map(code => bcrypt.hash(code, 10))
-        );
-
-        await prisma.userSettings.upsert({
-          where: { userId: ctx.user.id },
-          update: {
-            security: {
-              backupCodes: hashedCodes,
-              backupCodesGeneratedAt: new Date().toISOString(),
-            },
-          },
-          create: {
-            userId: ctx.user.id,
-            security: {
-              backupCodes: hashedCodes,
-              backupCodesGeneratedAt: new Date().toISOString(),
-            },
-          },
-        });
-
-        await redisCache.del(`user:${ctx.user.id}:profile`)
-
-        return {
-          success: true,
-          codes, // Return plain codes to user (only time they'll see them)
-          message: 'Save these codes securely. They can only be shown once.',
-        };
-      } catch (error) {
-        logger.error('Generate backup codes error:', error);
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to generate backup codes',
-        });
-      }
-    }),
+  // generateBackupCodes procedure removed - 2FA feature fully removed for beta
 
   /**
    * Upload profile image
@@ -596,13 +551,13 @@ export const accountRouter = router({
 
         // Update user profile image
         await prisma.user.update({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           data: {
             profileImage: imageUrl,
           },
         });
 
-        logger.info(`Profile image updated for user ${ctx.user.id}`);
+        logger.info(`Profile image updated for user ${ctx.user!.id}`);
 
         return {
           success: true,
@@ -638,7 +593,7 @@ export const accountRouter = router({
         }
 
         const user = await prisma.user.findUnique({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
           select: { password: true },
         });
 
@@ -660,7 +615,7 @@ export const accountRouter = router({
 
         // Delete user and all related data (cascades configured in schema)
         await prisma.user.delete({
-          where: { id: ctx.user.id },
+          where: { id: ctx.user!.id },
         });
 
         return {

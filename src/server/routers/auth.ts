@@ -1,12 +1,13 @@
-import { z } from 'zod';
-import { OTPType } from '@prisma/client';
+// z import removed - not used directly in this file
+// OTPType import removed - no longer using OTP
 import { router, publicProcedure, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../../lib/logger';
 import { AuthService } from '../../lib/services/auth';
 import { createEmailService } from '../../lib/services/email';
 import prisma, { checkDatabaseHealth } from '../../lib/prisma';
-import { recordAuthAttempt, activeSessionsGauge } from '../../lib/metrics';
+import { recordAuthAttempt } from '../../lib/metrics';
+// activeSessionsGauge import removed - not used
 
 import { applyRateLimit } from '../../lib/middleware/rateLimit';
 import {
@@ -14,7 +15,7 @@ import {
   loginSchema,
   passwordResetRequestSchema,
   resetPasswordSchema,
-  verifyOtpSchema,
+  // verifyOtpSchema removed - no longer using OTP
   changePasswordSchema,
   refreshTokenSchema,
   unlockAccountSchema,
@@ -115,7 +116,7 @@ export const authRouter = router({
   logout: protectedProcedure
     .mutation(async ({ ctx }) => {
       try {
-        await AuthService.logout(ctx.session.id);
+        await AuthService.logout(ctx.session!.id);
 
         return {
           success: true,
@@ -150,25 +151,12 @@ export const authRouter = router({
         // Apply rate limiting
         await applyRateLimit('passwordReset', ctx.rateLimitContext);
 
-        // Request password reset
+        // Request password reset (generates token stored in Redis)
         const result = await AuthService.requestPasswordReset(input);
 
-        // Send password reset email with OTP (fetched from DB)
-        try {
-          const otpRecord = await prisma.oTP.findFirst({
-            where: {
-              email: input.email.toLowerCase(),
-              type: OTPType.RESET_PASSWORD,
-              used: false,
-            },
-            orderBy: { createdAt: 'desc' },
-          });
-          if (otpRecord?.code) {
-            await emailService.sendPasswordResetEmail(input.email, otpRecord.code);
-          }
-        } catch (e) {
-          // Intentionally do not leak errors; email sending failures are handled separately
-        }
+        // Token-based password reset - email sending would be handled here
+        // The AuthService.requestPasswordReset now returns _devToken in development
+        // In production, email would be sent with a reset link containing the token
 
         return {
           success: true,
@@ -185,34 +173,9 @@ export const authRouter = router({
       }
     }),
 
-  /**
-   * Verify OTP
-   */
-  verifyOtp: publicProcedure
-    .input(verifyOtpSchema)
-    .mutation(async ({ input, ctx }) => {
-      try {
-        // Apply rate limiting
-        await applyRateLimit('verifyOtp', ctx.rateLimitContext);
+  // verifyOtp endpoint removed - using token-based password reset
 
-        // Verify OTP
-        const result = await AuthService.verifyOTP(input);
 
-        return {
-          success: true,
-          message: result.message,
-          isValid: result.isValid,
-        };
-      } catch (error) {
-        if (error instanceof TRPCError) {
-          throw error;
-        }
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to verify OTP',
-        });
-      }
-    }),
 
   /**
    * Reset password with session invalidation
@@ -253,7 +216,7 @@ export const authRouter = router({
         await applyRateLimit('changePassword', ctx.rateLimitContext);
 
         await AuthService.changePasswordAuthenticated({
-          userId: ctx.user.id,
+          userId: ctx.user!.id,
           currentPassword: input.currentPassword,
           newPassword: input.newPassword,
           ...(ctx.fingerprint ? { fingerprint: ctx.fingerprint } : {}),

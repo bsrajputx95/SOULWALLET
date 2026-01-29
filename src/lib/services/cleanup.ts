@@ -7,7 +7,7 @@ import { logger } from '../logger';
 
 export interface CleanupStats {
   expiredSessions: number;
-  expiredOtps: number;
+  // expiredOtps removed - OTP model no longer exists
   oldLoginAttempts: number;
   oldSessionActivities: number;
   lockedAccountsUnlocked: number;
@@ -16,7 +16,7 @@ export interface CleanupStats {
 
 export interface CleanupConfig {
   sessionExpiryDays: number;
-  otpExpiryHours: number;
+  // otpExpiryHours removed - OTP model no longer exists
   loginAttemptRetentionDays: number;
   sessionActivityRetentionDays: number;
   autoUnlockExpiredAccounts: boolean;
@@ -47,7 +47,7 @@ export class CleanupService {
     }
     this.config = {
       sessionExpiryDays: config.sessionExpiryDays || 30,
-      otpExpiryHours: config.otpExpiryHours || 24,
+      // otpExpiryHours removed - OTP model no longer exists
       loginAttemptRetentionDays: config.loginAttemptRetentionDays || 7,
       sessionActivityRetentionDays: config.sessionActivityRetentionDays || 90,
       autoUnlockExpiredAccounts: config.autoUnlockExpiredAccounts ?? true,
@@ -71,7 +71,7 @@ export class CleanupService {
     }
 
     logger.info(`Starting cleanup service with ${this.config.cleanupIntervalMinutes} minute intervals`);
-    
+
     // Run initial cleanup
     this.runCleanup().catch(error => {
       logger.error('Initial cleanup failed:', error);
@@ -116,7 +116,7 @@ export class CleanupService {
     try {
       const stats: CleanupStats = {
         expiredSessions: 0,
-        expiredOtps: 0,
+        // expiredOtps removed - OTP model no longer exists
         oldLoginAttempts: 0,
         oldSessionActivities: 0,
         lockedAccountsUnlocked: 0,
@@ -126,7 +126,7 @@ export class CleanupService {
       // Run all cleanup operations
       await Promise.all([
         this.cleanupExpiredSessionsInternal(stats),
-        this.cleanupExpiredOtps(stats),
+        // cleanupExpiredOtps removed - OTP model no longer exists
         this.cleanupOldLoginAttemptsInternal(stats),
         this.cleanupOldSessionActivitiesInternal(stats),
         this.unlockExpiredAccountsInternal(stats),
@@ -171,14 +171,7 @@ export class CleanupService {
     stats.expiredSessions = result.count;
   }
 
-  /**
-   * Clean up expired OTPs
-   */
-  async cleanupExpiredOTPs(): Promise<number> {
-    const stats = { expiredOtps: 0 } as CleanupStats;
-    await this.cleanupExpiredOtps(stats);
-    return stats.expiredOtps;
-  }
+  // cleanupExpiredOTPs method removed - OTP model no longer exists
 
   /**
    * Clean up old login attempts
@@ -198,24 +191,7 @@ export class CleanupService {
     return stats.oldSessionActivities;
   }
 
-  /**
-   * Clean up expired OTPs
-   */
-  private async cleanupExpiredOtps(stats: CleanupStats): Promise<void> {
-    const cutoffDate = new Date();
-    cutoffDate.setHours(cutoffDate.getHours() - this.config.otpExpiryHours);
-
-    const result = await this.prisma.oTP.deleteMany({
-      where: {
-        OR: [
-          { expiresAt: { lt: new Date() } },
-          { createdAt: { lt: cutoffDate } },
-        ],
-      },
-    });
-
-    stats.expiredOtps = result.count;
-  }
+  // cleanupExpiredOtps internal method removed - OTP model no longer exists
 
   /**
    * Clean up old login attempts
@@ -269,9 +245,9 @@ export class CleanupService {
     const now = new Date();
     const lockedUsers = await this.prisma.user.findMany({
       where: {
-        lockedUntil: { 
+        lockedUntil: {
           not: null,
-          lt: now 
+          lt: now
         },
       },
       select: { id: true, email: true },
@@ -339,7 +315,7 @@ export class CleanupService {
    */
   async getCleanupStats(): Promise<{
     expiredSessions: number;
-    expiredOtps: number;
+    // expiredOtps removed - OTP model no longer exists
     oldLoginAttempts: number;
     oldSessionActivities: number;
     lockedAccountsToUnlock: number;
@@ -347,8 +323,7 @@ export class CleanupService {
     const sessionCutoff = new Date();
     sessionCutoff.setDate(sessionCutoff.getDate() - this.config.sessionExpiryDays);
 
-    const otpCutoff = new Date();
-    otpCutoff.setHours(otpCutoff.getHours() - this.config.otpExpiryHours);
+    // OTP cutoff removed - OTP model no longer exists
 
     const loginAttemptCutoff = new Date();
     loginAttemptCutoff.setDate(loginAttemptCutoff.getDate() - this.config.loginAttemptRetentionDays);
@@ -358,7 +333,6 @@ export class CleanupService {
 
     const [
       expiredSessions,
-      expiredOtps,
       oldLoginAttempts,
       oldSessionActivities,
       lockedAccountsToUnlock,
@@ -371,14 +345,7 @@ export class CleanupService {
           ],
         },
       }),
-      this.prisma.oTP.count({
-        where: {
-          OR: [
-            { expiresAt: { lt: new Date() } },
-            { createdAt: { lt: otpCutoff } },
-          ],
-        },
-      }),
+      // OTP count removed - OTP model no longer exists
       this.prisma.loginAttempt.count({
         where: {
           createdAt: { lt: loginAttemptCutoff },
@@ -391,9 +358,9 @@ export class CleanupService {
       }),
       this.prisma.user.count({
         where: {
-          lockedUntil: { 
+          lockedUntil: {
             not: null,
-            lt: new Date() 
+            lt: new Date()
           },
         },
       }),
@@ -401,7 +368,7 @@ export class CleanupService {
 
     return {
       expiredSessions,
-      expiredOtps,
+      // expiredOtps removed - OTP model no longer exists
       oldLoginAttempts,
       oldSessionActivities,
       lockedAccountsToUnlock,
@@ -411,10 +378,10 @@ export class CleanupService {
   /**
    * Force cleanup of specific data types
    */
-  async forceCleanup(types: ('sessions' | 'otps' | 'loginAttempts' | 'sessionActivities' | 'lockedAccounts')[]): Promise<CleanupStats> {
+  async forceCleanup(types: ('sessions' | 'loginAttempts' | 'sessionActivities' | 'lockedAccounts')[]): Promise<CleanupStats> {
     const stats: CleanupStats = {
       expiredSessions: 0,
-      expiredOtps: 0,
+      // expiredOtps removed - OTP model no longer exists
       oldLoginAttempts: 0,
       oldSessionActivities: 0,
       lockedAccountsUnlocked: 0,
@@ -426,9 +393,7 @@ export class CleanupService {
     if (types.includes('sessions')) {
       cleanupPromises.push(this.cleanupExpiredSessionsInternal(stats));
     }
-    if (types.includes('otps')) {
-      cleanupPromises.push(this.cleanupExpiredOtps(stats));
-    }
+    // 'otps' cleanup removed - OTP model no longer exists
     if (types.includes('loginAttempts')) {
       cleanupPromises.push(this.cleanupOldLoginAttemptsInternal(stats));
     }
@@ -448,7 +413,7 @@ export class CleanupService {
    */
   updateConfig(newConfig: Partial<CleanupConfig>): void {
     this.config = { ...this.config, ...newConfig };
-    
+
     // Restart service if interval changed and service is running
     if (this.isRunning && newConfig.cleanupIntervalMinutes) {
       this.stop();
@@ -473,7 +438,7 @@ export const createCleanupService = (
 ): CleanupService => {
   const cleanupConfig: Partial<CleanupConfig> = {
     sessionExpiryDays: process.env.SESSION_EXPIRY_DAYS ? parseInt(process.env.SESSION_EXPIRY_DAYS) : 30,
-    otpExpiryHours: process.env.OTP_EXPIRY_HOURS ? parseInt(process.env.OTP_EXPIRY_HOURS) : 24,
+    // otpExpiryHours removed - OTP model no longer exists
     loginAttemptRetentionDays: process.env.LOGIN_ATTEMPT_RETENTION_DAYS ? parseInt(process.env.LOGIN_ATTEMPT_RETENTION_DAYS) : 7,
     sessionActivityRetentionDays: process.env.SESSION_ACTIVITY_RETENTION_DAYS ? parseInt(process.env.SESSION_ACTIVITY_RETENTION_DAYS) : 90,
     autoUnlockExpiredAccounts: process.env.AUTO_UNLOCK_EXPIRED_ACCOUNTS !== 'false',

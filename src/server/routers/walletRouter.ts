@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { router, protectedProcedure, financialProcedure } from '../trpc';
 import { WalletService } from '../../services/walletService';
 import { TRPCError } from '@trpc/server';
-import { verifyTotpForUser } from '../../lib/middleware/auth';
+// 2FA removed - password-based auth only
 import { withIdempotency, deleteIdempotencyRecord } from '../../lib/middleware/idempotency';
 import { deadLetterQueueService } from '../../lib/services/deadLetterQueue';
 
@@ -86,24 +86,22 @@ export const walletRouter = router({
       }
     }),
 
-  // Send transaction (Comment 3+4 fix: requires 2FA + audit/AML logging + idempotency + DLQ)
+  // Send transaction (idempotency + DLQ, 2FA removed)
   sendTransaction: financialProcedure
     .input(z.object({
       recipientAddress: z.string(),
       amount: z.number().positive(),
       tokenMint: z.string().optional(),
-      totpCode: z.string().length(6, '2FA code must be 6 digits'),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Comment 3: Apply idempotency to prevent duplicate transactions
+      // Apply idempotency to prevent duplicate transactions
       const { data: result, fromCache } = await withIdempotency(
         ctx.user.id,
         'wallet.sendTransaction',
         input,
         async () => {
           try {
-            // Verify TOTP code before executing transaction
-            await verifyTotpForUser(ctx.user.id, input.totpCode);
+            // 2FA verification removed - using password-based auth only
 
             const txResult = await WalletService.sendTransaction({
               userId: ctx.user.id,
@@ -112,10 +110,10 @@ export const walletRouter = router({
               tokenMint: input.tokenMint,
             });
 
-            // Comment 3 fix: Log to audit trail after successful send
+            // Log to audit trail after successful send
             try {
               const { auditLogService } = await import('../../lib/services/auditLog');
-              const { amlService } = await import('../../lib/services/kyc');
+              // AML monitoring removed for beta
 
               await auditLogService.logFinancialOperation({
                 userId: ctx.user.id,
@@ -133,15 +131,8 @@ export const walletRouter = router({
                 ipAddress: ctx.rateLimitContext?.ip || '0.0.0.0',
                 userAgent: ctx.rateLimitContext?.userAgent,
               });
-
-              await amlService.monitorTransaction(
-                ctx.user.id,
-                txResult.signature || 'unknown',
-                input.amount,
-                input.tokenMint || 'SOL'
-              );
             } catch (auditError) {
-              console.error('Audit/AML logging failed:', auditError);
+              console.error('Audit logging failed:', auditError);
             }
 
             return txResult;
@@ -178,25 +169,23 @@ export const walletRouter = router({
       return result;
     }),
 
-  // Swap tokens (Comment 3+4 fix: requires 2FA + audit/AML logging + idempotency + DLQ)
+  // Swap tokens (idempotency + DLQ, 2FA removed)
   swapTokens: financialProcedure
     .input(z.object({
       fromMint: z.string(),
       toMint: z.string(),
       amount: z.number().positive(),
       slippage: z.number().min(0).max(5).default(0.5),
-      totpCode: z.string().length(6, '2FA code must be 6 digits'),
     }))
     .mutation(async ({ ctx, input }) => {
-      // Comment 3: Apply idempotency to prevent duplicate swaps
+      // Apply idempotency to prevent duplicate swaps
       const { data: result, fromCache } = await withIdempotency(
         ctx.user.id,
         'wallet.swapTokens',
         input,
         async () => {
           try {
-            // Verify TOTP code before executing swap
-            await verifyTotpForUser(ctx.user.id, input.totpCode);
+            // 2FA verification removed - using password-based auth only
 
             const swapResult = await WalletService.swapTokens({
               userId: ctx.user.id,
@@ -206,10 +195,10 @@ export const walletRouter = router({
               slippage: input.slippage,
             });
 
-            // Comment 3 fix: Log to audit trail after successful swap
+            // Log to audit trail after successful swap
             try {
               const { auditLogService } = await import('../../lib/services/auditLog');
-              const { amlService } = await import('../../lib/services/kyc');
+              // AML monitoring removed for beta
 
               await auditLogService.logFinancialOperation({
                 userId: ctx.user.id,
@@ -229,15 +218,8 @@ export const walletRouter = router({
                 ipAddress: ctx.rateLimitContext?.ip || '0.0.0.0',
                 userAgent: ctx.rateLimitContext?.userAgent,
               });
-
-              await amlService.monitorTransaction(
-                ctx.user.id,
-                swapResult.signature || 'unknown',
-                input.amount,
-                input.fromMint
-              );
             } catch (auditError) {
-              console.error('Audit/AML logging failed:', auditError);
+              console.error('Audit logging failed:', auditError);
             }
 
             return swapResult;

@@ -40,7 +40,7 @@ export class EmailService {
           },
         });
         break;
-      
+
       case 'sendgrid':
         this.transporter = nodemailer.createTransport({
           service: 'SendGrid',
@@ -50,12 +50,12 @@ export class EmailService {
           },
         });
         break;
-      
+
       case 'resend':
         // For Resend, we'll use their API directly
         // This is a simplified implementation
         break;
-      
+
       case 'console':
         // For development - just log to console
         break;
@@ -65,9 +65,9 @@ export class EmailService {
   /**
    * Generate password reset email template
    */
-  private generatePasswordResetTemplate(otp: string, email: string): EmailTemplate {
+  private generatePasswordResetTemplate(resetCode: string, email: string): EmailTemplate {
     const subject = 'Password Reset Code - Soul Wallet';
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -96,9 +96,9 @@ export class EmailService {
               <h2>Hello!</h2>
               <p>We received a request to reset the password for your Soul Wallet account associated with <strong>${email}</strong>.</p>
               
-              <div class="otp-code">
+                <div class="otp-code">
                 <p>Your verification code is:</p>
-                <div class="otp-number">${otp}</div>
+                <div class="otp-number">${resetCode}</div>
               </div>
               
               <p>This code will expire in <strong>10 minutes</strong> for security reasons.</p>
@@ -130,7 +130,7 @@ Hello!
 
 We received a request to reset the password for your Soul Wallet account associated with ${email}.
 
-Your verification code is: ${otp}
+Your verification code is: ${resetCode}
 
 This code will expire in 10 minutes for security reasons.
 
@@ -153,7 +153,7 @@ This is an automated message, please do not reply to this email.
    */
   private generateWelcomeTemplate(email: string): EmailTemplate {
     const subject = 'Welcome to Soul Wallet! 🎉';
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -310,16 +310,16 @@ If this wasn't you, please change your password immediately and review your rece
    * Generate suspicious login alert email template
    */
   private generateSuspiciousLoginTemplate(
-    email: string, 
-    ipAddress: string, 
-    userAgent: string, 
+    email: string,
+    ipAddress: string,
+    userAgent: string,
     location?: string,
     timestamp?: Date
   ): EmailTemplate {
     const subject = '🚨 Suspicious Login Detected - Soul Wallet Security Alert';
     const formattedTime = timestamp ? timestamp.toLocaleString() : new Date().toLocaleString();
     const deviceInfo = this.parseUserAgent(userAgent);
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -374,7 +374,7 @@ If this wasn't you, please change your password immediately and review your rece
               <ul>
                 <li><strong>If this was you:</strong> No action needed, but consider enabling additional security measures</li>
                 <li><strong>If this wasn't you:</strong> Immediately change your password and review your account activity</li>
-                <li><strong>Enable 2FA:</strong> Add an extra layer of security to your account</li>
+                <li><strong>Enable additional security:</strong> Keep your password strong and consider reviewing your devices regularly</li>
                 <li><strong>Review devices:</strong> Check and remove any unfamiliar devices from your account</li>
               </ul>
               
@@ -408,7 +408,7 @@ Login Details:
 What should you do?
 - If this was you: No action needed, but consider enabling additional security measures
 - If this wasn't you: Immediately change your password and review your account activity
-- Enable 2FA: Add an extra layer of security to your account
+- Enable additional security: Keep your password strong and consider reviewing your devices regularly
 - Review devices: Check and remove any unfamiliar devices from your account
 
 Need help? Contact our security team immediately if you believe your account has been compromised.
@@ -431,7 +431,7 @@ This is an automated security alert. Please do not reply to this email.
   ): EmailTemplate {
     const subject = '🔒 Account Temporarily Locked - Soul Wallet Security';
     const unlockTime = new Date(Date.now() + lockoutDuration * 60 * 1000);
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -488,7 +488,7 @@ This is an automated security alert. Please do not reply to this email.
               <h3>Security Tips:</h3>
               <ul>
                 <li>Use a strong, unique password for your Soul Wallet account</li>
-                <li>Enable two-factor authentication (2FA) for added security</li>
+                <li>Use a strong, unique password for your Soul Wallet account</li>
                 <li>Never share your login credentials with anyone</li>
                 <li>Regularly review your account activity</li>
               </ul>
@@ -524,7 +524,7 @@ What happens next?
 
 Security Tips:
 - Use a strong, unique password for your Soul Wallet account
-- Enable two-factor authentication (2FA) for added security
+- Use a strong, unique password for your Soul Wallet account
 - Never share your login credentials with anyone
 - Regularly review your account activity
 
@@ -547,7 +547,7 @@ This is an automated security notification. Please do not reply to this email.
       user: 'by you using the secure unlock process',
       admin: 'by an administrator'
     }[unlockedBy];
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -581,7 +581,7 @@ This is an automated security notification. Please do not reply to this email.
               
               <ul>
                 <li>Change your password if you suspect it may have been compromised</li>
-                <li>Enable two-factor authentication (2FA) if not already active</li>
+                <li>Use a strong password and keep your account secure</li>
                 <li>Review your recent account activity</li>
                 <li>Remove any unfamiliar devices from your account</li>
               </ul>
@@ -608,7 +608,7 @@ Your Soul Wallet account (${email}) has been unlocked ${unlockedByText}.
 
 You can now log in to your account normally. For your security, we recommend:
 - Change your password if you suspect it may have been compromised
-- Enable two-factor authentication (2FA) if not already active
+- Use a strong password and keep your account secure
 - Review your recent account activity
 - Remove any unfamiliar devices from your account
 
@@ -627,28 +627,28 @@ This is an automated notification. Please do not reply to this email.
   private parseUserAgent(userAgent: string): { device: string; browser: string; os: string } {
     // Simple user agent parsing - in production, consider using a library like ua-parser-js
     const device = /Mobile|Android|iPhone|iPad/.test(userAgent) ? 'Mobile Device' : 'Desktop/Laptop';
-    
+
     let browser = 'Unknown Browser';
     if (userAgent.includes('Chrome')) browser = 'Google Chrome';
     else if (userAgent.includes('Firefox')) browser = 'Mozilla Firefox';
     else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browser = 'Safari';
     else if (userAgent.includes('Edge')) browser = 'Microsoft Edge';
-    
+
     let os = 'Unknown OS';
     if (userAgent.includes('Windows')) os = 'Windows';
     else if (userAgent.includes('Mac OS')) os = 'macOS';
     else if (userAgent.includes('Linux')) os = 'Linux';
     else if (userAgent.includes('Android')) os = 'Android';
     else if (userAgent.includes('iOS')) os = 'iOS';
-    
+
     return { device, browser, os };
   }
 
   /**
    * Send password reset email
    */
-  async sendPasswordResetEmail(email: string, otp: string): Promise<void> {
-    const template = this.generatePasswordResetTemplate(otp, email);
+  async sendPasswordResetEmail(email: string, resetCode: string): Promise<void> {
+    const template = this.generatePasswordResetTemplate(resetCode, email);
     await this.sendEmail(email, template);
   }
 
@@ -735,7 +735,7 @@ This is an automated notification. Please do not reply to this email.
           if (!this.transporter) {
             throw new Error('Email transporter not initialized');
           }
-          
+
           await this.transporter.sendMail({
             from: `${this.config.fromName} <${this.config.fromEmail}>`,
             to,

@@ -15,10 +15,7 @@ import {
   createTestUser,
   cleanupTestUser,
   expectTRPCError,
-  sleep,
   waitForServer,
-  httpRequest,
-  BASE_URL,
 } from '../utils/test-helpers';
 import { createMockUser, invalidData, testTimeouts } from '../utils/test-fixtures';
 
@@ -43,7 +40,7 @@ describeIntegration('Auth Router Integration Tests', () => {
   describe('Signup Flow', () => {
     it('should successfully create a new user account', async () => {
       const mockData = createMockUser();
-      
+
       const result = await trpcRequest('auth.signup', {
         email: mockData.email,
         password: mockData.password,
@@ -54,7 +51,7 @@ describeIntegration('Auth Router Integration Tests', () => {
       expect(result.token).toBeDefined();
       expect(result.refreshToken).toBeDefined();
       expect(result.user).toBeDefined();
-      
+
       // Store for cleanup
       testUser = {
         email: mockData.email,
@@ -157,7 +154,7 @@ describeIntegration('Auth Router Integration Tests', () => {
       expect(result.token).toBeDefined();
       expect(result.refreshToken).toBeDefined();
       expect(result.user).toBeDefined();
-      
+
       // Update token
       testUser.token = result.token;
       testUser.refreshToken = result.refreshToken;
@@ -224,7 +221,6 @@ describeIntegration('Auth Router Integration Tests', () => {
 
   describe('Password Reset Flow', () => {
     let resetTestUser: typeof testUser;
-    const newPassword = 'ResetPassword789!';
 
     beforeAll(async () => {
       resetTestUser = await createTestUser();
@@ -253,30 +249,8 @@ describeIntegration('Auth Router Integration Tests', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should reject invalid OTP', async () => {
-      await expectTRPCError(
-        trpcRequest('auth.verifyOtp', {
-          email: resetTestUser.email,
-          otp: '000000',
-        }),
-        'BAD_REQUEST'
-      );
-    });
-
-    it('should reject reset password with invalid OTP', async () => {
-      await expectTRPCError(
-        trpcRequest('auth.resetPassword', {
-          email: resetTestUser.email,
-          otp: '000000',
-          newPassword: newPassword,
-          confirmPassword: newPassword,
-        }),
-        'BAD_REQUEST'
-      );
-    });
-
-    // Note: Full happy-path reset requires valid OTP from email/database
-    // In test environment, this would need OTP bypass or direct DB access
+    // OTP verification and reset password with OTP tests removed - OTP feature fully removed for beta
+    // Full happy-path reset requires valid reset token from email/database
   });
 
   describe('Change Password Flow', () => {
@@ -333,7 +307,7 @@ describeIntegration('Auth Router Integration Tests', () => {
 
       expect(result.success).toBe(true);
       expect(result.token).toBeDefined();
-      
+
       // Update token for subsequent tests
       changePasswordUser.token = result.token;
       changePasswordUser.password = newPassword;
@@ -489,7 +463,7 @@ describeIntegration('Auth Router Integration Tests', () => {
 
       expect(attempts.success).toBe(true);
       expect(attempts.attempts.length).toBeGreaterThan(0);
-      
+
       // Verify some attempts are marked as unsuccessful
       const failedAttempts = attempts.attempts.filter((a: any) => !a.successful);
       expect(failedAttempts.length).toBeGreaterThan(0);

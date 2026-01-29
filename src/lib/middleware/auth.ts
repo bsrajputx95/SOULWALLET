@@ -19,8 +19,8 @@ function shouldLogApiRequestActivity(): boolean {
 
 // Types for fingerprinting
 export interface Fingerprint {
-  ipAddress?: string;
-  userAgent?: string;
+  ipAddress: string;
+  userAgent: string | undefined;
 }
 
 export interface AuthContext {
@@ -69,10 +69,12 @@ export function extractFingerprint(
   if (Array.isArray(xffRaw)) {
     const first = xffRaw[0];
     if (typeof first === 'string' && first.length > 0) {
-      ipAddress = first.split(',')[0].trim();
+      const parts = first.split(',');
+      ipAddress = (parts[0] ?? 'unknown').trim();
     }
   } else if (typeof xffRaw === 'string' && xffRaw.length > 0) {
-    ipAddress = xffRaw.split(',')[0].trim();
+    const parts = xffRaw.split(',');
+    ipAddress = (parts[0] ?? 'unknown').trim();
   } else if (typeof (headers as any)['x-real-ip'] === 'string') {
     ipAddress = (headers as any)['x-real-ip'] as string;
   } else {
@@ -142,7 +144,7 @@ function extractTokenFromHeader(authorization?: string): string | null {
   return parts[1] ?? null;
 }
 
-function extractApiKeyFromHeader(authorization?: string): string | null {
+function _extractApiKeyFromHeader(authorization?: string): string | null {
   if (!authorization) return null
   const parts = authorization.split(' ')
   if (parts.length !== 2 || parts[0] !== 'ApiKey') return null
@@ -155,8 +157,8 @@ function extractApiKeyFromHeader(authorization?: string): string | null {
 export async function createAuthContext(
   opts: CreateNextContextOptions | CreateFastifyContextOptions
 ): Promise<AuthContext> {
-  // Extract fingerprint from request
-  const fingerprint = extractFingerprint(opts);
+  // Extract fingerprint from request - cast to RequestOptions for compatibility
+  const fingerprint = extractFingerprint(opts as unknown as RequestOptions);
 
   const defaultContext: AuthContext = {
     fingerprint,
@@ -266,7 +268,8 @@ export function createRateLimitContext(
   opts: CreateNextContextOptions | CreateFastifyContextOptions,
   userId?: string
 ): RateLimitContext {
-  const fingerprint = extractFingerprint(opts);
+  // Cast to RequestOptions for compatibility with extractFingerprint
+  const fingerprint = extractFingerprint(opts as unknown as RequestOptions);
 
   return {
     ip: fingerprint.ipAddress || 'unknown',
@@ -393,7 +396,8 @@ export const authMiddleware = {
   verified: async (ctx: AuthContext) => {
     const auth = requireAuth(ctx);
     // Check if email has been verified (emailVerifiedAt exists from Prisma User model)
-    if (!auth.user.emailVerifiedAt) {
+    // user is guaranteed to exist after requireAuth
+    if (!auth.user!.emailVerifiedAt) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Email verification required. Please verify your email to access this feature.',
@@ -408,7 +412,8 @@ export const authMiddleware = {
   verifiedWallet: async (ctx: AuthContext) => {
     const auth = requireAuth(ctx);
     // Check if wallet has been verified (walletVerifiedAt exists from Prisma User model)
-    if (!auth.user.walletVerifiedAt) {
+    // user is guaranteed to exist after requireAuth
+    if (!auth.user!.walletVerifiedAt) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Wallet verification required. Please verify your wallet to access this feature.',
@@ -478,12 +483,5 @@ export async function securityHeadersPlugin(fastify: any) {
   });
 }
 
-/**
- * Stub function for TOTP verification - disabled for beta
- * 2FA feature was removed as part of simplification
- */
-export async function verifyTotpForUser(_userId: string, _code: string): Promise<void> {
-  // No-op stub - 2FA disabled for beta
-  // In production, this would verify TOTP codes
-}
+// verifyTotpForUser function removed - 2FA feature fully removed for beta
 

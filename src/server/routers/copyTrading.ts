@@ -9,7 +9,7 @@ import { TRANSACTION_LIMITS } from '../../lib/services/custodialWallet';
 import type { CustodialWalletService } from '../../lib/services/custodialWallet';
 import { PublicKey } from '@solana/web3.js';
 import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
-import { verifyTotpForUser } from '../../lib/middleware/auth'
+// verifyTotpForUser import removed - 2FA feature fully removed for beta
 import type { RpcManager } from '../../lib/services/rpcManager';
 import { MAX_SLIPPAGE_PERCENT, validateSlippage } from '../../lib/validation'
 import { auditLogService } from '../../lib/services/auditLog'
@@ -75,7 +75,7 @@ export const copyTradingRouter = router({
   // ================================================
   setupCustodialWallet: protectedProcedure
     .mutation(async ({ ctx }) => {
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       try {
         // Create or get existing custodial wallet
@@ -102,7 +102,7 @@ export const copyTradingRouter = router({
   // ================================================
   getCustodialBalance: protectedProcedure
     .query(async ({ ctx }) => {
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       try {
         // Check if user has a custodial wallet
@@ -272,11 +272,11 @@ export const copyTradingRouter = router({
       maxSlippage: z.number().positive().max(5).optional(),
       exitWithTrader: z.boolean().default(false),
       minProfitForSharing: z.number().nonnegative().max(1000).optional(), // Minimum profit (USDC) for 5% fee
-      totpCode: z.string().length(6).optional(),
+      // totpCode removed - 2FA feature fully removed for beta
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
-      const userId = ctx.user.id
+      const userId = ctx.user!.id
       const lockKey = `copy-trade:${userId}:${input.walletAddress}`
 
       // 2FA removed - allow copy trading without verification
@@ -463,11 +463,11 @@ export const copyTradingRouter = router({
       takeProfit: z.number().positive().max(1000).optional(),
       maxSlippage: z.number().positive().max(5).optional(),
       exitWithTrader: z.boolean().optional(),
-      totpCode: z.string().length(6).optional(),
+      // totpCode removed - 2FA feature fully removed for beta
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
-      const userId = ctx.user.id
+      const userId = ctx.user!.id
       const lockKey = `copy-trade:update:${userId}`
       const { copyTradingId, ...rawUpdates } = input
 
@@ -555,17 +555,14 @@ export const copyTradingRouter = router({
   stopCopying: createOwnershipProcedure('CopyTrading', 'copyTradingId')
     .input(z.object({
       copyTradingId: z.string(),
-      totpCode: z.string().length(6).optional(),
+      // totpCode removed - 2FA feature fully removed for beta
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
-      const userId = ctx.user.id
+      const userId = ctx.user!.id
       const lockKey = `copy-trade:stop:${userId}`
 
-      if (!input.totpCode) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
-      }
-      await verifyTotpForUser(userId, input.totpCode)
+      // 2FA verification removed - feature fully removed for beta
 
       // Verify ownership
       const copyTrading = await prisma.copyTrading.findUnique({
@@ -620,7 +617,7 @@ export const copyTradingRouter = router({
   // ================================================
   getMyCopyTrades: protectedProcedure
     .query(async ({ ctx }) => {
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       const copyTrades = await prisma.copyTrading.findMany({
         where: { userId },
@@ -654,7 +651,7 @@ export const copyTradingRouter = router({
       copyTradingId: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       const positions = await prisma.position.findMany({
         where: {
@@ -703,7 +700,7 @@ export const copyTradingRouter = router({
       cursor: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       const where = {
         status: 'CLOSED',
@@ -768,17 +765,14 @@ export const copyTradingRouter = router({
   closePosition: createOwnershipProcedure('Position', 'positionId')
     .input(z.object({
       positionId: z.string(),
-      totpCode: z.string().length(6).optional(),
+      // totpCode removed - 2FA feature fully removed for beta
     }))
     .mutation(async ({ ctx, input }) => {
       await applyRateLimit('strict', ctx.rateLimitContext)
-      const userId = ctx.user.id
+      const userId = ctx.user!.id
       const lockKey = `copy-trade:close:${userId}`
 
-      if (!input.totpCode) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: '2FA code is required' })
-      }
-      await verifyTotpForUser(userId, input.totpCode)
+      // 2FA verification removed - feature fully removed for beta
 
       // Get position
       const position = await prisma.position.findUnique({
@@ -848,7 +842,7 @@ export const copyTradingRouter = router({
       copyTradingId: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       const whereClause: any = {
         copyTrading: {

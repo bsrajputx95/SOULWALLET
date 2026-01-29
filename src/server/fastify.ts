@@ -32,7 +32,7 @@ async function geoBlockMiddleware(_ip: string): Promise<void> {
   // No-op - geo-blocking disabled for beta
 }
 // Business metrics for low-cardinality route normalization and counters
-import { normalizeRoute, getBusinessMetricsRegistry } from '../lib/metrics';
+import { normalizeRoute } from '../lib/metrics';
 
 // Initialize Sentry for backend error tracking
 let sentryInitialized = false;
@@ -1100,7 +1100,9 @@ export async function createServer(): Promise<FastifyInstance> {
       healthCache.set('full', { data, timestamp: Date.now() })
       return data
     })
-    return { ...data, requestId }
+    // Ensure data is an object before spreading
+    const result = typeof data === 'object' && data !== null ? { ...data, requestId } : { requestId };
+    return result;
   });
 
   // ============================================
@@ -1181,8 +1183,8 @@ export async function createServer(): Promise<FastifyInstance> {
         return reply.code(400).send({ error: 'Max 20 users per request' });
       }
 
-      const { redisCache, getCacheTtls } = await import('../lib/redis');
-      const ttls = getCacheTtls();
+      const { redisCache } = await import('../lib/redis');
+      // getCacheTtls imported but not used in this endpoint
 
       const portfolios = await Promise.all(
         userIds.map(async (userId: string) => {
@@ -1464,7 +1466,8 @@ export async function createServer(): Promise<FastifyInstance> {
           result = await cleanupService.cleanupExpiredSessions();
           break;
         case 'otps':
-          result = await cleanupService.cleanupExpiredOTPs();
+          // OTP cleanup removed - OTP model no longer exists
+          result = { message: 'OTP feature removed' };
           break;
         case 'login-attempts':
           result = await cleanupService.cleanupOldLoginAttempts();

@@ -326,7 +326,7 @@ export const userRouter = router({
                 showPortfolio: false,
               },
               security: {
-                twoFactorEnabled: false,
+                // twoFactorEnabled removed - using password-based auth only
                 biometricEnabled: false,
               },
               preferences: {
@@ -365,7 +365,7 @@ export const userRouter = router({
         showPortfolio: z.boolean().optional(),
       }).optional(),
       security: z.object({
-        twoFactorEnabled: z.boolean().optional(),
+        // twoFactorEnabled removed - using password-based auth only
         biometricEnabled: z.boolean().optional(),
       }).optional(),
       preferences: preferencesSchema.optional(),
@@ -432,7 +432,7 @@ export const userRouter = router({
                 showPortfolio: false,
               },
               security: input.security || {
-                twoFactorEnabled: false,
+                // twoFactorEnabled removed - using password-based auth only
                 biometricEnabled: false,
               },
               preferences: input.preferences || {
@@ -702,7 +702,7 @@ export const userRouter = router({
         format: z.enum(['JSON', 'CSV']).default('JSON'),
       })
     )
-    .mutation(async ({ ctx }) => {
+    .mutation(async ({ ctx: _ctx }) => {
       // GDPR export - simplified for beta (returns inline data)
       return { success: true, requestId: 'inline-export', message: 'Use exportData endpoint for immediate export' }
     }),
@@ -755,7 +755,7 @@ export const userRouter = router({
 
   requestDataDeletion: protectedProcedure
     .input(z.object({ reason: z.string().min(1).max(500) }))
-    .mutation(async ({ ctx }) => {
+    .mutation(async ({ ctx: _ctx }) => {
       // GDPR deletion - simplified for beta (redirects to deleteAccount)
       return { success: true, requestId: 'use-delete-account', message: 'Please use deleteAccount endpoint instead' }
     }),
@@ -791,17 +791,7 @@ export const userRouter = router({
     return { success: true, ...result }
   }),
 
-  submitKYC: protectedProcedure
-    .input(z.object({ data: z.record(z.string(), z.unknown()) }))
-    .mutation(async () => {
-      // KYC - not required for beta
-      return { success: true, verificationId: 'kyc-not-required', status: 'NOT_REQUIRED' }
-    }),
-
-  getKYCStatus: protectedProcedure.query(async () => {
-    // KYC - not required for beta
-    return { success: true, status: { verified: true, status: 'NOT_REQUIRED' } }
-  }),
+  // submitKYC and getKYCStatus procedures removed - KYC feature removed for beta
 
   /**
    * Update user's wallet address (sync from client-side wallet)
@@ -895,7 +885,7 @@ export const userRouter = router({
       query: z.string().min(1).max(50),
       limit: z.number().min(1).max(20).default(10),
     }))
-    .query(async ({ ctx, input }) => {
+    .query(async ({ ctx: _ctx, input }) => {
       try {
         logger.info(`[searchUsers] Query: "${input.query}", Limit: ${input.limit}`);
 

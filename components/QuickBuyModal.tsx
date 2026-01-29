@@ -183,19 +183,19 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
             const { signature } = await executeSwap(swapRes.swapTransaction);
 
             // 4. Notify backend of signature
-            await (trpcClient.swap as any).confirmSwap.mutate({ transactionId: swapRes.transactionId, signature });
+            await trpcClient.swap.confirmSwap.mutate({ transactionId: swapRes.transactionId, signature });
 
             // 5. Refresh balances
             await refreshBalances();
 
-            // Calculate output amount for display
-            const outputAmount = quote.quote.outAmount / Math.pow(10, tokenInfo.decimals);
+            // Calculate output amount for display (outputAmount is already in human-readable format)
+            const outputAmount = quote.outputAmount;
 
             Alert.alert(
                 '🎉 Purchase Successful!',
                 `Bought ${outputAmount.toFixed(4)} ${tokenInfo.symbol}\nfor ${amount} SOL`,
                 [
-                    { text: 'View on Solscan', onPress: () => {} },
+                    { text: 'View on Solscan', onPress: () => { } },
                     { text: 'Done', onPress: onClose }
                 ]
             );
