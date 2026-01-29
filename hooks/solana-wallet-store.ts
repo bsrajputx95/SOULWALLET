@@ -986,7 +986,20 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
         logger.info('Reverted optimistic update for swap output after failure');
       }
 
-      logger.logCritical('Swap execution failed:', error);
+      console.error('TRPC Error Full:', error);
+      console.error('TRPC Error Structure:', {
+        message: error?.message,
+        code: error?.code,
+        data: error?.data,
+        cause: error?.cause,
+        shape: error?.shape
+      });
+      logger.logCritical('Swap execution failed:', {
+        message: error?.message,
+        code: error?.code,
+        data: error?.data,
+        stack: error?.stack
+      });
       setState(prev => ({ ...prev, isLoading: false }));
 
       // Identify and throw appropriate error based on failure type
@@ -994,7 +1007,9 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
       // Serialization/transform errors (superjson issues)
       if (errorMessage.includes('transform') || errorMessage.includes('serialize') ||
-        errorMessage.includes('superjson') || errorMessage.includes('BigInt')) {
+        errorMessage.includes('superjson') || errorMessage.includes('deserialize') ||
+        errorMessage.includes('JSON') || errorMessage.includes('parse') ||
+        errorMessage.includes('BigInt')) {
         throw new Error('Response serialization error. Please try again.');
       }
 
@@ -1002,12 +1017,6 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       if (errorMessage.includes('Network') || errorMessage.includes('fetch') ||
         errorMessage.includes('connection') || errorMessage.includes('ECONNREFUSED')) {
         throw new Error('Network error. Please check your connection and try again.');
-      }
-
-      // 2FA errors
-      if (errorMessage.includes('2FA') || errorMessage.includes('TOTP') ||
-        errorMessage.includes('code is required') || errorMessage.includes('Invalid TOTP')) {
-        throw new Error('2FA verification failed. Please enter a valid code.');
       }
 
       // Transaction execution errors
@@ -1024,7 +1033,7 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
       }
 
       // Pass through the original error for unrecognized cases
-      throw error;
+      throw new Error(error?.message || error?.data?.message || 'Swap failed. Please try again.');
     }
   };
 

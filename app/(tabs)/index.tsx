@@ -452,7 +452,9 @@ export default function HomeScreen() {
       setShowSwapModal(false);
       setSwapAmount('');
     } catch (error: any) {
-      Alert.alert('Swap Failed', error.message || 'Failed to execute swap');
+      console.error('Swap execution error:', error);
+      const errorMsg = error?.message || error?.data?.message || 'Failed to execute swap';
+      Alert.alert('Swap Failed', errorMsg);
     }
   };
 

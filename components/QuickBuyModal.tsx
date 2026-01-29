@@ -200,8 +200,9 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                 ]
             );
         } catch (err: any) {
-            logger.error('Quick buy failed:', err);
-            setError(err.message || 'Transaction failed. Please try again.');
+            console.error('Quick buy failed:', err);
+            const errorMsg = err?.message || err?.data?.message || 'Transaction failed. Please try again.';
+            setError(errorMsg);
         } finally {
             setIsBuying(false);
         }

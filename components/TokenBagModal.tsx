@@ -309,8 +309,9 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
           : '';
       Alert.alert('Sold!', `${profitText}${feeText}`);
     } catch (error: any) {
-      logger.error('Sell swap failed:', error);
-      Alert.alert('Swap Failed', error.message || 'Failed to execute sell swap');
+      console.error('Sell swap failed:', error);
+      const errorMsg = error?.message || error?.data?.message || 'Failed to execute sell swap';
+      Alert.alert('Swap Failed', errorMsg);
     } finally {
       setIsSelling(false);
     }

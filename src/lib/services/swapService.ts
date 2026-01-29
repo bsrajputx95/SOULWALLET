@@ -4,6 +4,7 @@ import { redisCache } from '../redis';
 import { jupiterSwap } from './jupiterSwap';
 import prisma from '../prisma';
 import logger from '../logger';
+import { fromBaseUnits, getTokenDecimals } from '../../../constants';
 
 // Define quote cache TTL (seconds)
 const QUOTE_CACHE_TTL = 30;
@@ -11,7 +12,7 @@ const QUOTE_CACHE_TTL = 30;
 export interface QuoteParams {
   inputMint: string;
   outputMint: string;
-  amount: number; // human-readable (e.g. 1.23 SOL)
+  amount: number; // Amount in base units (lamports for SOL, smallest units for tokens)
   slippageBps: number;
 }
 
@@ -40,10 +41,11 @@ export class SwapService {
     }
 
     try {
+      // Amount is already in base units (pre-converted by caller)
       const params = new URLSearchParams({
         inputMint: p.inputMint,
         outputMint: p.outputMint,
-        amount: Math.floor(p.amount * 1_000_000).toString(),
+        amount: Math.floor(p.amount).toString(),
         slippageBps: p.slippageBps.toString(),
       });
 
@@ -73,13 +75,14 @@ export class SwapService {
       });
       if (!swapTx?.swapTransaction) throw new Error('Failed to get swap transaction');
 
-      // Save DB transaction record
+      // Save DB transaction record - convert base units to human-readable for storage
+      const humanReadableAmount = fromBaseUnits(p.amount, p.inputMint);
       const txn = await prisma.transaction.create({
         data: {
           userId: p.userId,
           signature: `pending_${Date.now()}`,
           type: 'SWAP',
-          amount: p.amount,
+          amount: humanReadableAmount,
           token: p.inputMint,
           status: 'PENDING',
           metadata: {
@@ -87,6 +90,33 @@ export class SwapService {
           },
         },
       });
+
+      // Log response types for debugging
+      logger.info('SwapService prepareSwap response types:', {
+        swapTransaction: typeof swapTx.swapTransaction,
+        swapTransactionLength: swapTx.swapTransaction?.length,
+        lastValidBlockHeight: typeof swapTx.lastValidBlockHeight,
+        lastValidBlockHeightValue: swapTx.lastValidBlockHeight,
+        transactionId: typeof txn.id,
+        quoteType: typeof quote,
+        quoteOutAmount: typeof quote.outAmount,
+        quotePriceImpact: typeof quote.priceImpactPct
+      });
+
+      // Check for problematic values
+      const problematicValues: string[] = [];
+      if (typeof swapTx.lastValidBlockHeight === 'bigint') {
+        problematicValues.push('lastValidBlockHeight is BigInt');
+      }
+      if (swapTx.lastValidBlockHeight === Infinity || swapTx.lastValidBlockHeight === -Infinity) {
+        problematicValues.push('lastValidBlockHeight is Infinity');
+      }
+      if (Number.isNaN(swapTx.lastValidBlockHeight)) {
+        problematicValues.push('lastValidBlockHeight is NaN');
+      }
+      if (problematicValues.length > 0) {
+        logger.warn('SwapService detected problematic values:', problematicValues);
+      }
 
       return {
         swapTransaction: swapTx.swapTransaction,

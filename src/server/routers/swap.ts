@@ -6,7 +6,7 @@ import { getFeatureFlags } from '../../lib/featureFlags';
 import prisma from '../../lib/prisma';
 import { swapService } from '../../lib/services/swapService';
 import { auditLogService } from '../../lib/services/auditLog'
-import { DECIMALS, FEES } from '../../../constants'
+import { FEES, toBaseUnits, fromBaseUnits } from '../../../constants'
 // BigInt sanitization removed - SuperJSON handles serialization
 
 
@@ -22,13 +22,18 @@ export const swapRouter = router({
       slippage: z.number().min(FEES.SWAP.SLIPPAGE_PERCENT.MIN).max(FEES.SWAP.SLIPPAGE_PERCENT.MAX).default(FEES.SWAP.SLIPPAGE_PERCENT.DEFAULT),
     }))
     .query(async ({ input }) => {
+      // Convert input amount to base units using proper decimals
+      const inputAmountBaseUnits = toBaseUnits(input.amount, input.inputMint);
+
       const quote = await swapService.getQuote({
         inputMint: input.inputMint,
         outputMint: input.outputMint,
-        amount: input.amount,
+        amount: inputAmountBaseUnits,
         slippageBps: Math.floor(input.slippage * 100),
       });
-      const outputAmount = Number(quote.outAmount) / 1_000_000;
+
+      // Convert output amount using output mint decimals
+      const outputAmount = fromBaseUnits(quote.outAmount, input.outputMint);
       const priceImpact = Number(quote.priceImpactPct);
       return {
         quote,
@@ -72,13 +77,15 @@ export const swapRouter = router({
       }
 
       try {
+        // Convert input amount to base units using proper decimals for the input token
+        const inputAmountBaseUnits = toBaseUnits(input.amount, input.fromMint);
 
-        // Get quote via service (cached)
+        // Get quote via service (cached) - pass base units
         const quote = await swapService.getQuote({
           inputMint: input.fromMint,
           outputMint: input.toMint,
-          amount: Math.floor(input.amount * DECIMALS.MICRO_LAMPORTS),
-          slippageBps: Math.floor(input.slippage * (FEES.SWAP.SLIPPAGE_BPS.MAX / FEES.SWAP.SLIPPAGE_PERCENT.MAX)),
+          amount: inputAmountBaseUnits,
+          slippageBps: Math.floor(input.slippage * 100),
         });
 
         if (!quote) {
@@ -86,10 +93,11 @@ export const swapRouter = router({
         }
 
         // Get real swap transaction from Jupiter for client-side signing
+        // Pass base units for amount
         const swapTx = await swapService.prepareSwap({
           inputMint: input.fromMint,
           outputMint: input.toMint,
-          amount: input.amount,
+          amount: inputAmountBaseUnits,
           slippageBps: Math.floor(input.slippage * 100),
           userId: ctx.user!.id,
           walletAddress: user.walletAddress,
@@ -135,12 +143,54 @@ export const swapRouter = router({
             fromMint: input.fromMint,
             toMint: input.toMint,
             slippage: input.slippage,
-            outputAmount: parseFloat(quote.outAmount || '0') / 1_000_000,
+            outputAmount: fromBaseUnits(quote.outAmount || '0', input.toMint),
             priceImpact: quote.priceImpactPct || 0,
           },
           ipAddress: ctx.rateLimitContext?.ip || ctx.req?.ip || ctx.fingerprint?.ipAddress || 'unknown',
           userAgent,
         })
+
+        // Log response types for debugging
+        const computedOutputAmount = fromBaseUnits(quote.outAmount, input.toMint);
+        logger.info('Swap response types:', {
+          swapTransaction: typeof swapTx.swapTransaction,
+          lastValidBlockHeight: typeof swapTx.lastValidBlockHeight,
+          transactionId: typeof transaction.id,
+          inputAmount: typeof input.amount,
+          outputAmount: typeof computedOutputAmount,
+          priceImpact: typeof Number(quote.priceImpactPct),
+          fee: typeof 0.00005
+        });
+
+        // Validate JSON serializability
+        try {
+          JSON.stringify({
+            swapTransaction: swapTx.swapTransaction,
+            lastValidBlockHeight: swapTx.lastValidBlockHeight,
+            transactionId: transaction.id,
+            inputAmount: input.amount,
+            outputAmount: computedOutputAmount,
+            priceImpact: Number(quote.priceImpactPct),
+            fee: 0.00005
+          });
+          logger.info('Swap response JSON validation: PASSED');
+        } catch (jsonError: any) {
+          logger.error('Swap response JSON validation: FAILED', {
+            error: jsonError.message,
+            problematicFields: Object.entries({
+              swapTransaction: swapTx.swapTransaction,
+              lastValidBlockHeight: swapTx.lastValidBlockHeight,
+              transactionId: transaction.id,
+              inputAmount: input.amount,
+              outputAmount: computedOutputAmount,
+              priceImpact: Number(quote.priceImpactPct),
+              fee: 0.00005
+            }).filter(([_k, v]) => {
+              try { JSON.stringify(v); return false; } catch { return true; }
+            }).map(([k]) => k)
+          });
+          throw new Error('Response contains non-serializable values');
+        }
 
         // Return raw values - SuperJSON handles BigInt serialization
         return {
@@ -148,7 +198,7 @@ export const swapRouter = router({
           lastValidBlockHeight: swapTx.lastValidBlockHeight,
           transactionId: transaction.id,
           inputAmount: input.amount,
-          outputAmount: Number(quote.outAmount) / 1_000_000,
+          outputAmount: computedOutputAmount,
           priceImpact: Number(quote.priceImpactPct),
           fee: 0.00005,
         };
