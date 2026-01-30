@@ -349,8 +349,17 @@ export const walletRouter = router({
           };
         }).filter(t => t.balance > 0); // Only return tokens with non-zero balance
 
+        const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
+
+        // Diagnostic logging for SOL balance issue
+        logger.info('[wallet.getTokens] SOL Balance Debug:', {
+          rawLamports: solBalance,
+          formatted: solBalanceFormatted,
+          tokenCount: tokens.length,
+        });
+
         return {
-          sol: solBalance / LAMPORTS_PER_SOL,
+          sol: solBalanceFormatted,
           tokens,
         };
       } catch (error) {

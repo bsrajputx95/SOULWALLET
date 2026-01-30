@@ -188,6 +188,18 @@ export const [WalletProvider, useWallet] = createContextHook(() => {
       ? solOptimisticUpdate.originalBalance + solOptimisticUpdate.pendingDelta
       : solBalance;
 
+    // Diagnostic logging for SOL balance issue
+    if (__DEV__ && solBalance > 0) {
+      console.log('[wallet-store] SOL Balance Debug:', {
+        rawSolBalance: tokensQuery.data?.sol,
+        solBalance,
+        solPrice,
+        adjustedSolBalance,
+        calculatedValue: adjustedSolBalance * solPrice,
+        hasOptimisticUpdate: !!solOptimisticUpdate,
+      });
+    }
+
     const solToken: Token | null = solBalance > 0 || adjustedSolBalance > 0 ? {
       id: SOL_MINT,
       symbol: 'SOL',

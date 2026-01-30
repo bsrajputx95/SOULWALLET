@@ -73,7 +73,7 @@ async function getTokenPrices(mints: string[]): Promise<Record<string, number>> 
       where: { tokenMint },
       create: { tokenMint, tokenSymbol, priceUSD },
       update: { priceUSD, updatedAt: new Date() },
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   let remaining = [...mintsToFetch];
@@ -157,7 +157,7 @@ export const portfolioRouter = router({
         }
 
         const publicKey = new PublicKey(ctx.user.walletAddress);
-        
+
         // Get SOL balance
         const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
@@ -174,16 +174,25 @@ export const portfolioRouter = router({
         } catch (error) {
           logger.warn('Error fetching SOL price, using default', error);
         }
-        
+
         // Calculate SOL value
         const solValue = solBalanceFormatted * solPrice;
+
+        // Diagnostic logging for SOL balance issue
+        logger.info('[portfolio.getOverview] SOL Balance Debug:', {
+          rawLamports: solBalance,
+          solBalanceFormatted,
+          solPrice,
+          solValue,
+          walletAddress: ctx.user.walletAddress,
+        });
 
         // Get prices for all SPL tokens and calculate total value
         let splTokensValue = 0;
         if (splTokens.length > 0) {
           const tokenMints = splTokens.map(t => t.mint);
           const tokenPrices = await getTokenPrices(tokenMints);
-          
+
           for (const token of splTokens) {
             const price = tokenPrices[token.mint] || 0;
             splTokensValue += token.balance * price;
@@ -203,7 +212,7 @@ export const portfolioRouter = router({
         // ✅ Calculate real 24h change from snapshots
         let change24h = 0;
         let change24hValue = 0;
-        
+
         try {
           const ttls = getCacheTtls()
           const snapshotCacheKey: `portfolio:snapshot:${string}` = `portfolio:snapshot:${ctx.user.id}`
@@ -272,7 +281,7 @@ export const portfolioRouter = router({
         }
 
         const publicKey = new PublicKey(ctx.user.walletAddress);
-        
+
         // Get current SOL balance
         const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
@@ -286,7 +295,7 @@ export const portfolioRouter = router({
         } catch (error) {
           logger.warn('Error fetching SOL price for snapshot', error);
         }
-        
+
         const totalValue = solBalanceFormatted * solPrice;
 
         // Create snapshot
@@ -335,7 +344,7 @@ export const portfolioRouter = router({
         // Calculate date range based on period
         const now = new Date();
         const startDate = new Date();
-        
+
         switch (input.period) {
           case '1D':
             startDate.setDate(now.getDate() - 1);
@@ -370,21 +379,21 @@ export const portfolioRouter = router({
           try {
             const publicKey = new PublicKey(ctx.user.walletAddress);
             const solMint = 'So11111111111111111111111111111111111111112';
-            
+
             // Get SOL balance
             const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
             const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
-            
+
             // Get SPL token balances
             const splTokens = await getSPLTokenBalances(publicKey);
-            
+
             // Get all prices
             const allMints = [solMint, ...splTokens.map(t => t.mint)];
             const prices = await getTokenPrices(allMints);
-            
+
             const solPrice = prices[solMint] || 100;
             const solValue = solBalanceFormatted * solPrice;
-            
+
             // Build tokens object for snapshot
             const tokens: Record<string, { symbol: string; balance: number; value: number }> = {
               SOL: {
@@ -393,18 +402,18 @@ export const portfolioRouter = router({
                 value: solValue,
               },
             };
-            
+
             let totalValue = solValue;
-            
+
             for (const token of splTokens) {
               const price = prices[token.mint] || 0;
               const value = token.balance * price;
               totalValue += value;
-              
+
               const cachedInfo = await prisma.tokenPrice.findUnique({
                 where: { tokenMint: token.mint },
               });
-              
+
               tokens[token.mint] = {
                 symbol: cachedInfo?.tokenSymbol || 'UNKNOWN',
                 balance: token.balance,
@@ -458,7 +467,7 @@ export const portfolioRouter = router({
         // Calculate date range
         const now = new Date();
         const startDate = new Date();
-        
+
         switch (input.period) {
           case '1D':
             startDate.setDate(now.getDate() - 1);
@@ -501,10 +510,10 @@ export const portfolioRouter = router({
 
         const firstSnapshot = snapshots[0]!;
         const lastSnapshot = snapshots[snapshots.length - 1]!;
-        
+
         const totalReturn = lastSnapshot.totalValueUSD - firstSnapshot.totalValueUSD;
         const totalReturnPercentage = (totalReturn / firstSnapshot.totalValueUSD) * 100;
-        
+
         const values = snapshots.map(s => s.totalValueUSD);
         const highestValue = Math.max(...values);
         const lowestValue = Math.min(...values);
@@ -545,7 +554,7 @@ export const portfolioRouter = router({
 
         const publicKey = new PublicKey(ctx.user.walletAddress);
         const solMint = 'So11111111111111111111111111111111111111112';
-        
+
         // Get SOL balance
         const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
         const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
@@ -556,7 +565,7 @@ export const portfolioRouter = router({
         // Get all token prices (including SOL)
         const allMints = [solMint, ...splTokens.map(t => t.mint)];
         const prices = await getTokenPrices(allMints);
-        
+
         const solPrice = prices[solMint] || 100;
         const solValue = solBalanceFormatted * solPrice;
 
@@ -586,7 +595,7 @@ export const portfolioRouter = router({
         for (const token of splTokens) {
           const price = prices[token.mint] || 0;
           const value = token.balance * price;
-          
+
           // Get token info from cache if available
           const cachedInfo = await prisma.tokenPrice.findUnique({
             where: { tokenMint: token.mint },
@@ -605,7 +614,7 @@ export const portfolioRouter = router({
 
         // Calculate total value and percentages
         const totalValue = assets.reduce((sum, asset) => sum + asset.value, 0);
-        
+
         for (const asset of assets) {
           asset.percentage = totalValue > 0 ? (asset.value / totalValue) * 100 : 0;
         }
@@ -642,7 +651,7 @@ export const portfolioRouter = router({
         // Calculate date range
         const endDate = new Date();
         const startDate = new Date();
-        
+
         if (input.period !== 'all') {
           const days = { '1d': 1, '7d': 7, '30d': 30 }[input.period];
           startDate.setDate(startDate.getDate() - days);
@@ -654,7 +663,7 @@ export const portfolioRouter = router({
         const transactions = await prisma.transaction.findMany({
           where: {
             userId: ctx.user.id,
-            createdAt: { 
+            createdAt: {
               gte: startDate,
               lte: endDate,
             },
@@ -689,7 +698,7 @@ export const portfolioRouter = router({
         // Simple P&L calculation (received - sent - fees)
         const grossProfit = totalReceived - totalSent;
         const netProfit = grossProfit - totalSwapFees;
-        
+
         // Get current portfolio value for percentage calculation
         // Instead of calling getOverview, calculate directly
         let currentValue = 0;
@@ -697,16 +706,16 @@ export const portfolioRouter = router({
           const publicKey = new PublicKey(ctx.user.walletAddress);
           const solBalance = await rpcManager.withFailover((connection) => connection.getBalance(publicKey));
           const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
-          
+
           const solMint = 'So11111111111111111111111111111111111111112';
           const solPrices = await getTokenPrices([solMint]);
           const solPrice = solPrices[solMint] || 0;
           currentValue = solBalanceFormatted * solPrice;
         }
-        
+
         // Calculate percentage returns if we have a current value
-        const returnPercentage = currentValue > 0 
-          ? (netProfit / currentValue) * 100 
+        const returnPercentage = currentValue > 0
+          ? (netProfit / currentValue) * 100
           : 0;
 
         return {

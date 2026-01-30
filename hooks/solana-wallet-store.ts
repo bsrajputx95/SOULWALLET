@@ -13,6 +13,7 @@ import {
   revertOptimisticBalanceUpdate,
   SOL_MINT
 } from './optimistic-updates';
+import { fromBaseUnits } from '../constants';
 
 import type {
   ParsedAccountData
@@ -848,7 +849,8 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
     if (typeof swapTransactionBase64OrParams !== 'string') {
       inputMintForOptimistic = swapTransactionBase64OrParams.inputMint;
       outputMintForOptimistic = swapTransactionBase64OrParams.outputMint;
-      inputAmountForOptimistic = swapTransactionBase64OrParams.amount / 1e9; // Convert from lamports
+      // Use proper decimal conversion based on input token (SOL=9, USDC=6, etc.)
+      inputAmountForOptimistic = fromBaseUnits(swapTransactionBase64OrParams.amount, inputMintForOptimistic);
       expectedOutputForOptimistic = swapTransactionBase64OrParams.expectedOutputAmount || 0;
     }
 
@@ -881,10 +883,12 @@ export const [SolanaWalletProvider, useSolanaWallet] = createContextHook(() => {
 
         // Call backend to get swap transaction from Jupiter
         // Note: This requires 2FA - the calling component should pass totpCode if needed
+        // Use proper decimal conversion based on input token (SOL=9, USDC=6, etc.)
+        const humanReadableAmount = fromBaseUnits(params.amount, params.inputMint);
         const swapResult = await trpcClient.swap.swap.mutate({
           fromMint: params.inputMint,
           toMint: params.outputMint,
-          amount: params.amount / 1e9, // Convert from lamports to SOL-equivalent units
+          amount: humanReadableAmount, // Send human-readable amount to backend
           slippage: (params.slippageBps || 50) / 100, // Convert bps to percent
         });
 
