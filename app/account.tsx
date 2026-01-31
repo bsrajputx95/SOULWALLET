@@ -165,7 +165,7 @@ export default function AccountScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Next',
-          onPress: (currentPassword) => {
+          onPress: (currentPassword: string | undefined) => {
             if (!currentPassword) {
               Alert.alert('Error', 'Please enter your current password');
               return;
@@ -177,7 +177,7 @@ export default function AccountScreen() {
                 { text: 'Cancel', style: 'cancel' },
                 {
                   text: 'Update',
-                  onPress: async (newPassword) => {
+                  onPress: async (newPassword: string | undefined) => {
                     if (!newPassword || newPassword.length < 6) {
                       Alert.alert('Error', 'Password must be at least 6 characters');
                       return;
@@ -241,7 +241,7 @@ export default function AccountScreen() {
       setEmail(profile.email || '');
       setPhone(profile.phone || '');
       setDateOfBirth(profile.dateOfBirth || '');
-      setDefaultCurrency(profile.defaultCurrency || 'USD');
+      setDefaultCurrency(profile.currency || 'USD');
       setLanguage(profile.language || 'English');
     }
   }, [profile]);
@@ -381,7 +381,6 @@ export default function AccountScreen() {
       setIsDeleting(true);
       await deleteAccountMutation.mutateAsync({
         password: deletePassword,
-        confirmText: deleteConfirmText,
       });
       Alert.alert('Account Deleted', 'Your account has been permanently deleted.');
       setShowDeleteAccountModal(false);
