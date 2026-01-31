@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/server.ts",
@@ -16,7 +16,7 @@
   "license": "ISC",
   "description": "SoulWallet Backend API",
   "dependencies": {
-    "@prisma/client": "^7.3.0",
+    "@prisma/client": "^6.7.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
@@ -30,9 +30,9 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^25.1.0",
+    "@types/node": "^22.10.0",
     "nodemon": "^3.1.11",
-    "prisma": "^7.3.0",
+    "prisma": "^6.7.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
