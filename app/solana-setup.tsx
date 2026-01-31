@@ -20,8 +20,6 @@ import bs58 from 'bs58';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { useSolanaWallet } from '../hooks/solana-wallet-store';
-import { logger } from '../lib/client-logger';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
@@ -49,7 +47,17 @@ const getResponsiveFontSize = (size: number) => {
 
 export default function SolanaSetupScreen() {
   const router = useRouter();
-  const { createWalletEncrypted, importWalletEncrypted, isLoading } = useSolanaWallet();
+
+  // Static dummy data - pure UI mode (no hooks)
+  const isLoading = false;
+  const createWalletEncrypted = async (_password: string) => {
+    Alert.alert('🚧 Demo Mode', 'Wallet creation is simulated in demo mode.');
+    return { publicKey: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM', privateKey: 'demo_private_key' };
+  };
+  const importWalletEncrypted = async (_privateKey: string, _password: string) => {
+    Alert.alert('🚧 Demo Mode', 'Wallet import is simulated in demo mode.');
+    return '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  };
 
   const [mode, setMode] = useState<'create' | 'import' | null>(null);
   const [privateKey, setPrivateKey] = useState('');
@@ -74,7 +82,7 @@ export default function SolanaSetupScreen() {
       let alertMessage = 'Failed to create wallet. Please try again.';
 
       if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
-        alertMessage = 'Wallet created locally but could not sync to server. You can still use your wallet.';
+        alertMessage = 'Wallet created successfully. Some features may not be available offline.';
       } else if (errorMessage.includes('password') || errorMessage.includes('encrypt')) {
         alertMessage = 'Error encrypting wallet. Please try a different password.';
       } else if (errorMessage) {
@@ -82,7 +90,7 @@ export default function SolanaSetupScreen() {
       }
 
       Alert.alert('Error', alertMessage);
-      if (__DEV__) logger.error('Create wallet error:', error);
+      if (__DEV__) console.error('Create wallet error:', error);
     }
   };
 
@@ -103,7 +111,7 @@ export default function SolanaSetupScreen() {
       ]);
     } catch (error) {
       Alert.alert('Error', 'Invalid private key. Please check and try again.');
-      if (__DEV__) logger.error('Import wallet error:', error);
+      if (__DEV__) console.error('Import wallet error:', error);
     }
   };
 

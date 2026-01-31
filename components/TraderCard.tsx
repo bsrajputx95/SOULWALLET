@@ -15,10 +15,10 @@ interface TraderCardProps {
 }
 
 export const TraderCard: React.FC<TraderCardProps> = ({
-  username,
+  username: _username,
   walletAddress,
   roi,
-  period = '24h',
+  period: _period = '24h',
   onPress,
 }) => {
   // Format wallet address: first 4 chars...last 4 chars
@@ -42,7 +42,7 @@ export const TraderCard: React.FC<TraderCardProps> = ({
             <Text style={styles.address}>
               {formatAddress(walletAddress)}
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={(e) => {
                 e.stopPropagation?.();
                 void handleCopyAddress();

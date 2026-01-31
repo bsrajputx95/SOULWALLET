@@ -46,10 +46,10 @@ export const WebPreviewBanner: React.FC<WebPreviewBannerProps> = ({
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.title}>Web Preview Mode</Text>
+        <Text style={styles.title}>Offline Demo Mode</Text>
         <Text style={styles.message}>
-          Some wallet features (send, swap, tokens) are disabled on web.
-          Download the mobile app for full functionality.
+          This app uses mock data and works completely offline.
+          All data is stored locally on your device.
         </Text>
 
         {showAppStoreLinks && (

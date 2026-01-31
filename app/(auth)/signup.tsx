@@ -18,7 +18,7 @@ import { User, Mail, Lock, UserPlus, Eye, EyeOff } from 'lucide-react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useAuth } from '../../hooks/auth-store';
+import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../../constants/colors';
 import { NeonButton } from '../../components/NeonButton';
 import { NeonDivider } from '../../components/NeonDivider';
@@ -29,7 +29,6 @@ const logoImage = require('../../assets/images/icon-rounded.png');
 
 export default function SignupNewScreen() {
     const router = useRouter();
-    const { signup, error: authError } = useAuth();
 
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
@@ -64,7 +63,6 @@ export default function SignupNewScreen() {
             return;
         }
 
-
         if (Platform.OS !== 'web') {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }
@@ -73,43 +71,40 @@ export default function SignupNewScreen() {
         setErrorMessage(null);
 
         try {
-            const success = await signup(
-                username.trim(),
-                email.trim(),
-                password,
-                confirmPassword
-            );
-            if (success) {
-                router.replace('/(tabs)');
-            } else {
-                // Show actual error from auth store
-                setErrorMessage(authError || 'Signup failed - please check your connection');
-            }
-        } catch (err: any) {
-            console.error('Signup error:', JSON.stringify(err, null, 2));
-            let errorMsg = 'Signup failed';
+            // TODO: Replace with your actual backend URL (e.g., Railway deployment URL)
+            const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
-            // Try to extract the actual error message from various formats
-            if (err?.message) {
-                errorMsg = err.message;
-            }
-            if (err?.data?.message) {
-                errorMsg = err.data.message;
-            }
-            if (err?.shape?.message) {
-                errorMsg = err.shape.message;
+            const response = await fetch(`${API_URL}/register`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: username.trim(),
+                    email: email.trim(),
+                    password,
+                    confirmPassword,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                setErrorMessage(data.error || 'Registration failed');
+                return;
             }
 
-            // Network errors
-            if (errorMsg.includes('fetch') || errorMsg.includes('network') || errorMsg.includes('Failed to fetch')) {
-                errorMsg = 'Cannot connect to server. Check internet.';
-            } else if (errorMsg.includes('already exists') || errorMsg.includes('duplicate') || errorMsg.includes('CONFLICT')) {
-                errorMsg = 'Username or email already exists';
-            } else if (errorMsg.includes('origin not allowed') || errorMsg.includes('Forbidden')) {
-                errorMsg = 'Server access denied. Try updating the app.';
+            // Store JWT token securely
+            if (data.token) {
+                await SecureStore.setItemAsync('auth_token', data.token);
+                await SecureStore.setItemAsync('user_data', JSON.stringify(data.user));
             }
 
-            setErrorMessage(errorMsg);
+            // Navigate to main app on success
+            router.replace('/(tabs)');
+        } catch (error) {
+            console.error('Signup error:', error);
+            setErrorMessage('Network error. Please check your connection.');
         } finally {
             setIsLoading(false);
         }

@@ -1,9 +1,3 @@
-// Polyfills must be imported first
-import 'react-native-get-random-values';
-import 'react-native-url-polyfill/auto';
-import { Buffer } from 'buffer';
-
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React from "react";
@@ -12,51 +6,18 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts, Orbitron_400Regular, Orbitron_500Medium, Orbitron_700Bold } from '@expo-google-fonts/orbitron';
 import { View, StyleSheet, Platform } from "react-native";
 import { COLORS } from "../constants/colors";
-import { trpc, trpcClient } from "../lib/trpc";
-
-// Providers
-import { AuthProvider, useAuth } from "../hooks/auth-store";
-import { WalletProvider } from "../hooks/wallet-store";
-import { SocialProvider } from "../hooks/social-store";
-import { SolanaWalletProvider } from "../hooks/solana-wallet-store";
-import { AccountProvider } from "../hooks/account-store";
-import { MarketProvider } from "../hooks/market-store";
-import { NotificationBadgeProvider } from "../hooks/notification-provider";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { performanceMonitor, trackBundleSize } from "../utils/performance";
 import { WebPreviewBanner } from "../components/WebPreviewBanner";
-
-// Validate environment variables at app startup
-import { validateEnvironmentOrThrow } from "../lib/validate-env";
-
-// Setup Buffer global for Solana (guarded)
-if (typeof global !== 'undefined' && !(global as any).Buffer) {
-  (global as any).Buffer = Buffer;
-}
-if (typeof window !== 'undefined' && !(window as any).Buffer) {
-  (window as any).Buffer = Buffer;
-}
 
 // Initialize performance monitoring
 if (__DEV__) {
   performanceMonitor.startTiming('app-startup');
   trackBundleSize();
 }
-// TEMPORARILY DISABLED: Environment validation causing splash screen freeze
-// Will re-enable after fixing .env configuration
-// if (__DEV__) {
-//   try {
-//     validateEnvironmentOrThrow();
-//   } catch (error) {
-//     // Log error but continue in development (allows working without backend)
-//     console.error(error);
-//   }
-// }
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 void SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (
@@ -73,18 +34,6 @@ function RootLayoutNav() {
       <Stack.Screen name="+not-found" />
     </Stack>
   );
-}
-
-// Auth hydration guard - prevents rendering until auth state is restored
-function AuthHydrationGuard({ children }: { children: React.ReactNode }) {
-  const { isLoading } = useAuth();
-  
-  if (isLoading) {
-    // Return null to keep splash screen visible during auth hydration
-    return null;
-  }
-  
-  return <>{children}</>;
 }
 
 export default function RootLayout() {
@@ -144,35 +93,13 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      {/* @ts-ignore - Mock tRPC setup for development */}
-      <trpc.Provider client={trpcClient} queryClient={queryClient}>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            <AuthHydrationGuard>
-              <WalletProvider>
-                <SolanaWalletProvider>
-                  <SocialProvider>
-                    <AccountProvider>
-                      <MarketProvider>
-                        <NotificationBadgeProvider>
-                          <GestureHandlerRootView style={{ flex: 1 }}>
-                            <View style={styles.container}>
-                              {/* Web Preview Banner - shows only on web platform */}
-                              <WebPreviewBanner />
-                              <RootLayoutNav />
-                            </View>
-                          </GestureHandlerRootView>
-                        </NotificationBadgeProvider>
-                      </MarketProvider>
-                    </AccountProvider>
-                  </SocialProvider>
-                </SolanaWalletProvider>
-              </WalletProvider>
-            </AuthHydrationGuard>
-          </AuthProvider>
-        </QueryClientProvider>
-        {/* @ts-ignore */}
-      </trpc.Provider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.container}>
+          {/* Web Preview Banner - shows only on web platform */}
+          <WebPreviewBanner />
+          <RootLayoutNav />
+        </View>
+      </GestureHandlerRootView>
     </ErrorBoundary>
   );
 }

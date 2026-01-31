@@ -118,31 +118,6 @@ module.exports = {
         '@typescript-eslint/explicit-function-return-type': 'off',
       },
     },
-    {
-      // Server-side files: stricter TypeScript
-      files: ['src/server/**/*.ts', 'src/lib/**/*.ts'],
-      rules: {
-        '@typescript-eslint/no-explicit-any': 'warn',
-        '@typescript-eslint/explicit-function-return-type': 'warn',
-      },
-    },
-    {
-      // Tests: relaxed rules
-      files: ['**/*.test.ts', '**/*.spec.ts', '__tests__/**/*'],
-      rules: {
-        '@typescript-eslint/no-explicit-any': 'off',
-        'jsdoc/require-jsdoc': 'off',
-      },
-    },
-    {
-      files: ['tests/load/**/*.js'],
-      globals: { __ENV: 'readonly' },
-      rules: {
-        'import/no-unresolved': 'off',
-        'no-undef': 'off',
-        'no-console': 'off',
-      },
-    },
   ],
   ignorePatterns: [
     'node_modules/',

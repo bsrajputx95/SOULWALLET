@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -17,103 +17,88 @@ import { MessageSquare, Repeat, Heart, Send, X, Share2 } from 'lucide-react-nati
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
-import { trpc } from '../../lib/trpc';
-import { useSocial } from '../../hooks/social-store';
 
-interface Comment {
-  id: string;
-  username: string;
-  content: string;
-  timestamp: string;
-  isVerified: boolean;
-  profileImage?: string;
-  likes?: number;
-  createdAt?: string | number | Date;
-}
+// Static dummy post for pure UI mode
+const DUMMY_POST = {
+  id: '1',
+  username: 'crypto_trader',
+  profileImage: '',
+  content: 'Just made a great trade on $SOL! 🚀 The market is looking bullish today.',
+  timestamp: '2h ago',
+  likes: 42,
+  comments: 5,
+  reposts: 3,
+  mentionedToken: 'SOL',
+  isVerified: true,
+  createdAt: new Date().toISOString(),
+  agreeCount: 15,
+  disagreeCount: 3,
+  user: { username: 'crypto_trader', profileImage: '', isVerified: true },
+  commentsList: [] as any[],
+};
+
+
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [newComment, setNewComment] = useState('');
-  const [isLiked, setIsLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
-  const [isReposted, setIsReposted] = useState(false);
-  const { posts } = useSocial();
-  const [userVote, setUserVote] = useState<null | 'agree' | 'disagree'>(null);
-  const [agreeCount, setAgreeCount] = useState<number>(0);
-  const [disagreeCount, setDisagreeCount] = useState<number>(0);
   const [sortMode, setSortMode] = useState<'new' | 'old' | 'liked'>('new');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Mock tRPC queries for development - using any to bypass type checking
-  const postQuery = (trpc as any).social.getPost.useQuery(
-    { postId: id! },
-    { enabled: !!id }
-  );
+  // Static dummy data - pure UI mode (no hooks)
+  const getPostById = (_id: string) => DUMMY_POST;
+  const toggleLike = (_postId: string) => { Alert.alert('🚧 Demo Mode', 'Like functionality is simulated.'); };
+  const isPostLiked = (_postId: string) => false;
+  const toggleRepost = (_postId: string) => { Alert.alert('🚧 Demo Mode', 'Repost functionality is simulated.'); };
+  const isPostReposted = (_postId: string) => false;
+  const voteOnPost = (_postId: string, _vote: string) => { Alert.alert('🚧 Demo Mode', 'Vote functionality is simulated.'); };
+  const getPostVote = (_postId: string) => null;
+  const addComment = async (_postId: string, _content: string) => {
+    Alert.alert('🚧 Demo Mode', 'Comment functionality is simulated.');
+  };
 
-  // Use correct API endpoint names
-  const likePostMutation = trpc.social.toggleLike.useMutation({
-    onSuccess: (data: any) => {
-      setIsLiked(data.liked);
-      // Update like count: if liked, increment; if unliked, decrement
-      setLikeCount(prev => data.liked ? prev + 1 : Math.max(0, prev - 1));
-      postQuery.refetch();
-    },
-  });
+  // Get post data from store - this stays in sync across screens
+  const post = id ? getPostById(id) : null;
 
-  const repostMutation = trpc.social.createRepost.useMutation({
-    onSuccess: () => {
-      setIsReposted(true);
-      void postQuery.refetch();
-    },
-  });
+  // Derive like/repost/vote state from store
+  const isLiked = id ? isPostLiked(id) : false;
+  const isReposted = id ? isPostReposted(id) : false;
+  const userVote = id ? getPostVote(id) : null;
 
-  // Fetch comments from API
-  const commentsQuery = trpc.social.getComments.useQuery(
-    { postId: id!, limit: 50 },
-    { enabled: !!id }
-  );
+  // Get counts from post (store keeps these in sync)
+  const likeCount = post?.likes || 0;
+  const agreeCount = post?.agreeCount || 0;
+  const disagreeCount = post?.disagreeCount || 0;
 
-  const addCommentMutation = trpc.social.createComment.useMutation({
-    onSuccess: () => {
-      setNewComment('');
-      void postQuery.refetch();
-      void commentsQuery.refetch(); // Also refetch comments
-    },
-  });
-
-  // Vote on post mutation
-  const voteOnPostMutation = trpc.social.voteOnPost.useMutation({
-    onSuccess: (data: { success: boolean; agreeCount: number; disagreeCount: number }) => {
-      setAgreeCount(data.agreeCount);
-      setDisagreeCount(data.disagreeCount);
-    },
-    onError: (error: any) => {
-      console.error('Vote error:', error);
-      // Revert on error
-      setUserVote(null);
-    },
-  });
-
+  // Handlers that call store methods
   const handleLike = () => {
     if (id) {
-      likePostMutation.mutate({ postId: id });
+      toggleLike(id);
     }
   };
 
   const handleRepost = () => {
     if (id) {
-      repostMutation.mutate({ postId: id });
+      toggleRepost(id);
+      Alert.alert('Reposted!', 'Post shared to your followers.');
     }
   };
 
   const handleAddComment = () => {
-    if (newComment.trim() && id) {
-      addCommentMutation.mutate({
-        postId: id,
-        content: newComment.trim(),
-      });
-    }
+    if (!newComment.trim() || !id) return;
+    setIsSubmitting(true);
+    addComment(id, newComment.trim());
+    setNewComment('');
+    setIsSubmitting(false);
   };
+
+  const handleVote = (choice: 'agree' | 'disagree') => {
+    if (userVote !== null) return;
+    if (!id) return;
+    voteOnPost(id, choice);
+  };
+
 
   const handleShare = async () => {
     if (!id) return;
@@ -162,92 +147,9 @@ export default function PostDetailScreen() {
     });
   };
 
-  // Determine post data up front (server or offline), keeping hooks stable
-  const offlinePost = posts.find(p => p.id === String(id));
-  const post: any = postQuery.data ?? (offlinePost ? {
-    ...offlinePost,
-    commentsList: [
-      {
-        id: 'c1',
-        username: 'ghostxsol',
-        content: 'Solid take! Agree on the targets. 🚀',
-        timestamp: '1h ago',
-        isVerified: true,
-        profileImage: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61',
-        likes: 24,
-        createdAt: Date.now() - 60 * 60 * 1000,
-      },
-      {
-        id: 'c2',
-        username: 'alphaWolf',
-        content: 'Watching this closely. Entry looks clean.',
-        timestamp: '45m ago',
-        isVerified: true,
-        profileImage: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e',
-        likes: 15,
-        createdAt: Date.now() - 45 * 60 * 1000,
-      },
-    ],
-    agreeCount: 80,
-    disagreeCount: 20,
-  } : null);
 
-  // Sync vote counts and user vote from server
-  useEffect(() => {
-    if (!post) return;
-    if (typeof (post as any)?.agreeCount === 'number') {
-      setAgreeCount((post as any).agreeCount);
-    }
-    if (typeof (post as any)?.disagreeCount === 'number') {
-      setDisagreeCount((post as any).disagreeCount);
-    }
-    // Sync like count and status from post data
-    if (typeof (post as any)?.likes === 'number') {
-      setLikeCount((post as any).likes);
-    }
-    if (typeof (post as any)?.isLiked === 'boolean') {
-      setIsLiked((post as any).isLiked);
-    }
-    // Sync user's existing vote from API
-    if ((post as any)?.userVote === true) {
-      setUserVote('agree');
-    } else if ((post as any)?.userVote === false) {
-      setUserVote('disagree');
-    } else {
-      setUserVote(null);
-    }
-  }, [post]);
 
-  // Early returns AFTER hooks to keep hook order stable
-  if (postQuery.isLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Stack.Screen
-          options={{
-            headerShown: false,
-          }}
-        />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.solana} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (postQuery.error && !offlinePost) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Stack.Screen
-          options={{
-            headerShown: false,
-          }}
-        />
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Post not found</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // Show loading fallback if no post data
 
   if (!post) {
     return (
@@ -268,48 +170,7 @@ export default function PostDetailScreen() {
   const agreePercent = Math.round((agreeCount / totalVotes) * 100);
   const disagreePercent = 100 - agreePercent;
 
-  const handleVote = (choice: 'agree' | 'disagree') => {
-    // Already voted - no changes allowed (one vote per user)
-    if (userVote !== null) return;
-    if (!id) return;
 
-    // Optimistic update
-    setUserVote(choice);
-    if (choice === 'agree') {
-      setAgreeCount(c => c + 1);
-    } else {
-      setDisagreeCount(c => c + 1);
-    }
-
-    // Call API
-    voteOnPostMutation.mutate({
-      postId: id,
-      vote: choice === 'agree',
-    });
-  };
-
-  // Helpers for sorting
-  const parseRelativeTime = (text?: string) => {
-    if (!text) return 0;
-    const m = text.match(/(\d+)\s*([smhdw])\s*ago/i);
-    if (!m) return 0;
-    const n = parseInt(m[1], 10);
-    const unit = m[2];
-    const msMap: Record<string, number> = {
-      s: 1000,
-      m: 60 * 1000,
-      h: 60 * 60 * 1000,
-      d: 24 * 60 * 60 * 1000,
-      w: 7 * 24 * 60 * 60 * 1000,
-    };
-    return Date.now() - n * (msMap[unit] || 0);
-  };
-
-  const getTime = (c: Comment, idx: number) => {
-    if (c.createdAt) return new Date(c.createdAt).getTime();
-    const rel = parseRelativeTime(c.timestamp);
-    return rel || idx; // fallback
-  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -360,7 +221,7 @@ export default function PostDetailScreen() {
             <TouchableOpacity
               style={styles.action}
               onPress={handleLike}
-              disabled={likePostMutation.isPending}
+              disabled={false}
             >
               <Heart
                 size={20}
@@ -375,7 +236,7 @@ export default function PostDetailScreen() {
             <TouchableOpacity
               style={styles.action}
               onPress={handleRepost}
-              disabled={repostMutation.isPending}
+              disabled={false}
             >
               <Repeat
                 size={20}
@@ -442,9 +303,9 @@ export default function PostDetailScreen() {
                 !newComment.trim() && styles.sendButtonDisabled,
               ]}
               onPress={handleAddComment}
-              disabled={!newComment.trim() || addCommentMutation.isPending}
+              disabled={!newComment.trim() || isSubmitting}
             >
-              {addCommentMutation.isPending ? (
+              {isSubmitting ? (
                 <ActivityIndicator size="small" color={COLORS.textPrimary} />
               ) : (
                 <Send size={20} color={COLORS.textPrimary} />
@@ -456,7 +317,7 @@ export default function PostDetailScreen() {
         {/* Comments */}
         <View style={styles.commentsSection}>
           <Text style={styles.commentsTitle}>
-            Comments ({commentsQuery.data?.comments?.length || post.commentsCount || post.comments || 0})
+            Comments ({post?.commentsList?.length || post?.comments || 0})
           </Text>
           <View style={styles.sortRow}>
             <TouchableOpacity
@@ -479,11 +340,9 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Use API comments data, fallback to mock commentsList */}
+          {/* Use comments from store */}
           {(() => {
-            const apiComments = commentsQuery.data?.comments || [];
-            const comments = apiComments.length > 0 ? apiComments : (post.commentsList || []);
-            const commentCount = apiComments.length > 0 ? apiComments.length : (post.commentsList?.length || 0);
+            const comments = post?.commentsList || [];
 
             if (comments.length > 0) {
               return [...comments].sort((a: any, b: any) => {
@@ -835,3 +694,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+

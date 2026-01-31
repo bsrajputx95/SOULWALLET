@@ -14,7 +14,6 @@ import { X } from 'lucide-react-native';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { trpc } from '../lib/trpc';
 
 interface CopyTradingModalProps {
     visible: boolean;
@@ -34,19 +33,18 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [maxSlippage, setMaxSlippage] = useState('0.5');
     const [exitWithTrader, setExitWithTrader] = useState(false);
     const [minProfitForSharing, setMinProfitForSharing] = useState('0');
+    const [isPending, setIsPending] = useState(false);
 
-    const startCopyingMutation = trpc.copyTrading.startCopying.useMutation({
-        onSuccess: () => {
-            Alert.alert('Success', `Now copying @${trader?.username}! Check your copy trades in the Home tab.`);
-            onClose();
-            resetForm();
+    // Mock mutation - copy trading coming soon
+    const startCopyingMutation = {
+        isPending,
+        mutateAsync: async (_params: any) => {
+            Alert.alert('🚧 Coming Soon', 'Copy trading is not available yet. This feature is being developed.');
+            return {};
         },
-        onError: (error: any) => {
-            Alert.alert('Error', error.message || 'Failed to start copy trading. Please try again.');
-        },
-    });
+    };
 
-    const resetForm = () => {
+    const _resetForm = () => {
         setCopyAmount('1000');
         setAmountPerTrade('100');
         setStopLoss('10');
@@ -71,6 +69,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
         }
 
         try {
+            setIsPending(true);
             await startCopyingMutation.mutateAsync({
                 walletAddress: trader.walletAddress,
                 totalBudget,
@@ -83,6 +82,8 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
             });
         } catch (error: any) {
             console.error('[CopyTradingModal] Error:', error);
+        } finally {
+            setIsPending(false);
         }
     };
 
@@ -419,3 +420,4 @@ const styles = StyleSheet.create({
         opacity: 0.7,
     },
 });
+

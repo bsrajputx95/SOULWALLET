@@ -18,8 +18,13 @@ import { X, ChevronDown, QrCode } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { useSolanaWallet } from '../hooks/solana-wallet-store';
-import { logger } from '../lib/client-logger';
+
+// Static dummy data for pure UI mode
+const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+const DUMMY_TOKENS = [
+    { symbol: 'SOL', name: 'Solana', mint: 'So11111111111111111111111111111111111111112', decimals: 9, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png', balance: 10.5 },
+    { symbol: 'USDC', name: 'USD Coin', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png', balance: 500 },
+];
 
 interface Token {
     symbol: string;
@@ -44,7 +49,17 @@ export const SendModal: React.FC<SendModalProps> = ({
     const { height } = useWindowDimensions();
     const modalHeight = height * 0.75;
 
-    const { getAvailableTokens, sendSol, sendToken, publicKey } = useSolanaWallet();
+    // Static dummy data - pure UI mode (no hooks)
+    const publicKey = DUMMY_PUBLIC_KEY;
+    const getAvailableTokens = () => DUMMY_TOKENS;
+    const sendSol = async (_recipient: string, _amount: number) => {
+        Alert.alert('🚧 Demo Mode', 'Send functionality is simulated in demo mode.');
+        return 'demo_signature_' + Date.now();
+    };
+    const sendToken = async (_recipient: string, _amount: number, _mint: string, _decimals: number) => {
+        Alert.alert('🚧 Demo Mode', 'Send functionality is simulated in demo mode.');
+        return 'demo_signature_' + Date.now();
+    };
 
     const [selectedToken, setSelectedToken] = useState<Token | null>(null);
     const [amount, setAmount] = useState('');
@@ -176,7 +191,7 @@ export const SendModal: React.FC<SendModalProps> = ({
                 ]
             );
         } catch (error: any) {
-            logger.error('Send transaction failed:', error);
+            console.error('Send transaction failed:', error);
             Alert.alert('Transaction Failed', error.message || 'Failed to send transaction');
         } finally {
             setIsSending(false);
@@ -625,3 +640,4 @@ const styles = StyleSheet.create({
 });
 
 export default SendModal;
+

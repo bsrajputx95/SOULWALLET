@@ -17,17 +17,11 @@
     "module": "esnext",
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
       "@/components/*": [
         "./components/*"
       ],
       "@/constants/*": [
         "./constants/*"
-      ],
-      "@/hooks/*": [
-        "./hooks/*"
       ],
       "@/lib/*": [
         "./lib/*"
@@ -37,9 +31,6 @@
       ],
       "@/utils/*": [
         "./utils/*"
-      ],
-      "@/services/*": [
-        "./services/*"
       ]
     }
   },

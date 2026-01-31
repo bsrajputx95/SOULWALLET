@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -10,7 +10,6 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -26,24 +25,46 @@ import {
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { trpc } from '../lib/trpc';
 
-import { useAccount } from '../hooks/account-store';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ProfileForm } from '../components/account/ProfileForm';
 
-export default function AccountScreen() {
-  const {
-    profile,
-    isLoading,
-    isUpdating: isAccountUpdating,
-    updateProfile,
-    updateSecurity,
-    uploadProfileImage,
-    isUploadingImage,
-  } = useAccount();
+// Static dummy profile for pure UI mode
+const DUMMY_PROFILE = {
+  id: '1',
+  firstName: 'Demo',
+  lastName: 'User',
+  email: 'demo@example.com',
+  phone: '+1234567890',
+  dateOfBirth: '1990-01-01',
+  defaultCurrency: 'USD',
+  language: 'English',
+  profileImage: null as string | null,
+};
 
-  const deleteAccountMutation = trpc.account.deleteAccount.useMutation();
+export default function AccountScreen() {
+  // Static dummy data - pure UI mode (no hooks)
+  const profile = DUMMY_PROFILE;
+  const isLoading = false;
+  const isAccountUpdating = false;
+  const updateProfile = async (_data: any) => {
+    Alert.alert('🚧 Demo Mode', 'Profile update is simulated in demo mode.');
+  };
+
+  const uploadProfileImage = async (_base64: string, _mimeType: string) => {
+    Alert.alert('🚧 Demo Mode', 'Image upload is simulated in demo mode.');
+    return { success: true };
+  };
+  const isUploadingImage = false;
+
+  // Mock delete account mutation - coming soon
+  const deleteAccountMutation = {
+    mutateAsync: async (_params: any) => {
+      Alert.alert('🚧 Coming Soon', 'Account deletion is not available yet.');
+      throw new Error('Feature not available');
+    },
+    isPending: false,
+  };
 
   // Initialize form fields with empty strings - useEffect will populate when profile loads
   const [firstName, setFirstName] = useState('');
@@ -164,12 +185,6 @@ export default function AccountScreen() {
 
 
 
-  // Scroll tracking for header animation
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const lastScrollY = useRef(0);
-  const headerTranslateY = useRef(new Animated.Value(0)).current;
-  const HEADER_HEIGHT = 60; // Approximate header height
-
   const handleSave = async () => {
     try {
       // Update user profile
@@ -193,56 +208,7 @@ export default function AccountScreen() {
     }
   };
 
-  const handleScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-    {
-      useNativeDriver: false,
-      listener: (event: any) => {
-        const currentScrollY = event.nativeEvent.contentOffset.y;
-        const scrollDirection = currentScrollY > lastScrollY.current ? 'down' : 'up';
 
-        // Only animate if scroll direction changed or significant scroll distance
-        if (Math.abs(currentScrollY - lastScrollY.current) > 5) {
-          if (scrollDirection === 'down' && currentScrollY > HEADER_HEIGHT) {
-            // Hide header when scrolling down
-            Animated.timing(headerTranslateY, {
-              toValue: -HEADER_HEIGHT,
-              duration: 200,
-              useNativeDriver: true,
-            }).start();
-          } else if (scrollDirection === 'up') {
-            // Show header when scrolling up
-            Animated.timing(headerTranslateY, {
-              toValue: 0,
-              duration: 200,
-              useNativeDriver: true,
-            }).start();
-          }
-        }
-
-        lastScrollY.current = currentScrollY;
-      },
-    }
-  );
-
-  const handleResetPassword = () => {
-    Alert.alert('Reset Password', 'This feature is coming soon!');
-  };
-
-
-
-
-
-
-  const handleInviteFriends = () => {
-    Alert.alert(
-      'Invite Friends',
-      'Share your referral code: GHOST2024',
-      [
-        { text: 'OK' },
-      ]
-    );
-  };
 
   // Delete Account Handlers
   const handleDeleteAccount = () => {
@@ -971,3 +937,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+

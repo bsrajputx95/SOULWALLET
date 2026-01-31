@@ -18,7 +18,7 @@ import { Mail, Lock, LogIn, Eye, EyeOff } from 'lucide-react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useAuth } from '../../hooks/auth-store';
+import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../../constants/colors';
 import { NeonButton } from '../../components/NeonButton';
 import { NeonDivider } from '../../components/NeonDivider';
@@ -29,7 +29,6 @@ const logoImage = require('../../assets/images/icon-rounded.png');
 
 export default function LoginNewScreen() {
     const router = useRouter();
-    const { login } = useAuth();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -59,26 +58,38 @@ export default function LoginNewScreen() {
         setErrorMessage(null);
 
         try {
-            const success = await login(email.trim(), password, true); // Always remember login
-            if (success) {
-                router.replace('/(tabs)');
-            } else {
-                setPassword('');
-                setErrorMessage('Invalid credentials');
-                Alert.alert(
-                    'Login Failed',
-                    'Email/username or password is incorrect. Please try again.',
-                    [{ text: 'OK' }]
-                );
+            // TODO: Replace with your actual backend URL (e.g., Railway deployment URL)
+            const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+
+            const response = await fetch(`${API_URL}/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    emailOrUsername: email.trim(),
+                    password,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                setErrorMessage(data.error || 'Login failed');
+                return;
             }
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : 'Login failed';
-            setErrorMessage(errorMsg);
-            Alert.alert(
-                'Login Failed',
-                errorMsg,
-                [{ text: 'OK' }]
-            );
+
+            // Store JWT token securely
+            if (data.token) {
+                await SecureStore.setItemAsync('auth_token', data.token);
+                await SecureStore.setItemAsync('user_data', JSON.stringify(data.user));
+            }
+
+            // Navigate to main app on success
+            router.replace('/(tabs)');
+        } catch (error) {
+            console.error('Login error:', error);
+            setErrorMessage('Network error. Please check your connection.');
         } finally {
             setIsLoading(false);
         }
@@ -178,13 +189,13 @@ export default function LoginNewScreen() {
                         </View>
 
                         {/* Forgot Password Link */}
-                    <View style={styles.forgotPasswordContainer}>
-                        <Link href="/(auth)/forgot-password" asChild>
-                            <TouchableOpacity>
-                                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                            </TouchableOpacity>
-                        </Link>
-                    </View>
+                        <View style={styles.forgotPasswordContainer}>
+                            <Link href="/(auth)/forgot-password" asChild>
+                                <TouchableOpacity>
+                                    <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+                                </TouchableOpacity>
+                            </Link>
+                        </View>
                         {/* Login Button */}
                         <NeonButton
                             title="Login"
@@ -322,7 +333,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 24,
     },
-    
+
     forgotPasswordText: {
         color: COLORS.usdc,
         fontSize: 14,

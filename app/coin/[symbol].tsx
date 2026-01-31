@@ -34,7 +34,6 @@ import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
 import { NeonButton } from '../../components/NeonButton';
 import { GlowingText } from '../../components/GlowingText';
-import { trpc } from '../../lib/trpc';
 import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '../../lib/priceFormatter';
 
 type Timeframe = '1h' | '1d' | '1w' | '1m' | '1y';
@@ -104,19 +103,11 @@ export default function CoinDetailsScreen() {
 
   // Fetch real token data from API - use symbol if valid, otherwise skip
   const shouldFetchBySymbol = !!symbol && symbol.toUpperCase() !== 'UNKNOWN';
-  const {
-    data: apiData,
-    isLoading: isLoadingApi,
-    error: _apiError,
-    refetch: refetchApi
-  } = trpc.market.getTokenDetails.useQuery(
-    { symbol: symbol?.toUpperCase() || '' },
-    {
-      enabled: shouldFetchBySymbol,
-      refetchInterval: 30000, // Refresh every 30 seconds
-      retry: 2,
-    }
-  );
+
+  // Mock token details query - uses passed params or fallback data
+  const apiData: any = null; // Local-only mode, no external API
+  const isLoadingApi = false;
+  const refetchApi = async () => ({});
 
   // Transform API data to CoinData format - prefer passed params for consistency
   // CRITICAL: Create fallback coinData from passed params even if API fails
@@ -206,45 +197,25 @@ export default function CoinDetailsScreen() {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 640;
 
-  // Fetch price history for chart - use passed pairAddress or from API
-  const pairAddress = passedPairAddress || apiData?.pairAddress || '';
-  const {
-    data: priceHistoryData,
-    isLoading: isLoadingChart,
-    refetch: refetchChart,
-  } = trpc.market.getPriceHistory.useQuery(
-    { pairAddress, timeframe: chartTimeframe },
-    {
-      enabled: !!pairAddress && activeTab === 'chart',
-      refetchInterval: 60000, // Refresh every minute
-      retry: 1,
-    }
-  );
+  // Mock price history - using static mock data (pure UI mode)
+  const isLoadingChart = false;
 
-  // Convert to OHLCV format for candlestick chart
+  // Convert to OHLCV format for candlestick chart - always mock in pure UI mode
   const chartData = useMemo(() => {
-    if (!priceHistoryData?.data || priceHistoryData.data.length === 0) {
-      // Generate mock OHLCV data if no real data
-      return Array.from({ length: 50 }, (_, i) => {
-        const base = coinData?.price || 100;
-        const variance = base * 0.03;
-        const open = base + (Math.random() - 0.5) * variance;
-        const close = base + (Math.random() - 0.5) * variance;
-        return {
-          open,
-          high: Math.max(open, close) + Math.random() * variance * 0.3,
-          low: Math.min(open, close) - Math.random() * variance * 0.3,
-          close,
-        };
-      });
-    }
-    return priceHistoryData.data.map((d: any) => ({
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
-  }, [priceHistoryData, coinData?.price]);
+    // Generate mock OHLCV data (pure UI mode - no real API data)
+    return Array.from({ length: 50 }, (_v, _i) => {
+      const base = coinData?.price || 100;
+      const variance = base * 0.03;
+      const open = base + (Math.random() - 0.5) * variance;
+      const close = base + (Math.random() - 0.5) * variance;
+      return {
+        open,
+        high: Math.max(open, close) + Math.random() * variance * 0.3,
+        low: Math.min(open, close) - Math.random() * variance * 0.3,
+        close,
+      };
+    });
+  }, [coinData?.price]);
 
   // TradingView modal state
   const [showTradingView, setShowTradingView] = useState(false);
@@ -408,18 +379,6 @@ export default function CoinDetailsScreen() {
   const formatPrice = formatSubscriptPrice;
 
   const formatLargeNumber = formatLargeNum;
-
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
-
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return date.toLocaleDateString();
-  };
 
   // Loading state - only show if we're fetching by symbol AND don't have fallback data
   if (isLoadingApi && shouldFetchBySymbol && !passedPairAddress && !passedContractAddress) {
@@ -1021,15 +980,6 @@ export default function CoinDetailsScreen() {
 //   };
 //   return names[symbol] || `${symbol} Token`;
 // };
-
-const generateMockAddress = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < 44; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-};
 
 const styles = StyleSheet.create({
   // topBar removed
@@ -1767,3 +1717,4 @@ const styles = StyleSheet.create({
     height: 60,
   },
 });
+

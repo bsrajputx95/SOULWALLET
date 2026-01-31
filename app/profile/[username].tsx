@@ -9,7 +9,6 @@ import {
   Modal,
   TextInput,
   Alert,
-  ActivityIndicator,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,10 +21,39 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { SocialPost } from '../../components/SocialPost';
 import { NeonCard } from '../../components/NeonCard';
 import { GlowingText } from '../../components/GlowingText';
-import { trpc } from '../../lib/trpc';
 
-import type { TraderProfile } from '../../hooks/social-store';
-import { useSocial } from '../../hooks/social-store';
+// Mock hooks for local-only mode
+const useMockMutation = <T,>(_options: { onSuccess?: () => void; onError?: (e: any) => void }) => ({
+  mutate: (_params: any) => {
+    // Simulate success for demo
+    Alert.alert('Coming Soon', 'This feature is not available yet.');
+  },
+  mutateAsync: async (_params: any) => {
+    Alert.alert('Coming Soon', 'This feature is not available yet.');
+    return {} as T;
+  },
+  isPending: false,
+});
+
+// Static dummy data for pure UI mode
+const DUMMY_POSTS = [
+  { id: '1', username: 'crypto_trader', profileImage: '', content: 'Great trade on SOL today! 🚀', timestamp: '2h ago', likes: 42, comments: 5, mentionedToken: 'SOL', isVerified: true },
+];
+const DUMMY_PROFILE = {
+  username: 'demo_trader',
+  profileImage: null as string | null,
+  isVerified: false,
+  stats: { followersCount: 150, followingCount: 75, roi: 25.5, pnl: 1250 },
+  followers: 150,
+  following: 75,
+  copyTraders: 10,
+  vipFollowers: 5,
+  roi30d: 25.5,
+  pnl24h: 125.0,
+  maxDrawdown: 15.0,
+  winRate: 72.5,
+  vipPrice: 0.1,
+};
 
 
 type TimeFilter = '24h' | '7d' | '30d' | '90d';
@@ -37,9 +65,11 @@ type PostVisibility = 'public' | 'followers' | 'vip';
 
 
 export default function UserProfileScreen() {
-  const router = useRouter();
+  useRouter(); // Keep router available for future navigation
   const { username } = useLocalSearchParams<{ username: string }>();
-  const { getTraderProfile, posts } = useSocial(); // Keep only for mock posts fallback
+  // Static dummy data - pure UI mode (no hooks)
+  const getTraderProfile = (_username: string) => DUMMY_PROFILE;
+  const posts = DUMMY_POSTS;
   const [refreshing, setRefreshing] = useState(false);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('24h');
   const [activePostsTab, setActivePostsTab] = useState<PostVisibility>('public');
@@ -53,47 +83,26 @@ export default function UserProfileScreen() {
   const [takeProfit, setTakeProfit] = useState('30');
   const [maxSlippage, setMaxSlippage] = useState('0.5');
   const [exitWithTrader, setExitWithTrader] = useState(false);
-  const [targetUserId, setTargetUserId] = useState<string | null>(null);
+  const [_targetUserId] = useState<string | null>(null); // Not needed in pure UI mode
   const [totpCode, setTotpCode] = useState('');
+  const [isFollowingUser, setIsFollowingUser] = useState(false);
 
-  // Copy trading mutation - CRITICAL FIX: This was missing!
-  const startCopyingMutation = trpc.copyTrading.startCopying.useMutation({
+  // Mock copy trading mutation - coming soon
+  const startCopyingMutation = useMockMutation({
     onSuccess: () => {
       Alert.alert('Success', `Now copying @${username}! Check your copy trades in the Home tab.`);
       setShowCopyModal(false);
       setTotpCode('');
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to start copy trading. Please check your 2FA code and try again.');
+      Alert.alert('Error', error.message || 'Failed to start copy trading.');
     },
   });
 
-  // Search for user to get their ID (workaround until getProfileByUsername is deployed)
-  const searchUserQuery = trpc.social.searchUsers.useQuery(
-    { query: username || '', limit: 5 },
-    { enabled: !!username }
-  );
-
-  // Update targetUserId when search results come in
-  React.useEffect(() => {
-    if (searchUserQuery.data?.length) {
-      const foundUser = searchUserQuery.data.find((u: any) => u.username === username);
-      if (foundUser) {
-        setTargetUserId(foundUser.id);
-      }
-    }
-  }, [searchUserQuery.data, username]);
-
-  // Fetch user profile from API by username (may not work until Railway deploys)
-  const userProfileQuery = trpc.user.getProfileByUsername.useQuery(
-    { username: username || '' },
-    { enabled: !!username, retry: false }
-  );
-
-  // Toggle follow mutation - use existing toggleFollow with userId
-  const toggleFollowMutation = trpc.social.toggleFollow.useMutation({
+  // Mock toggle follow mutation - coming soon
+  const toggleFollowMutation = useMockMutation({
     onSuccess: () => {
-      void userProfileQuery.refetch();
+      setIsFollowingUser(!isFollowingUser);
     },
     onError: (error: any) => {
       Alert.alert('Error', error.message || 'Failed to follow user');
@@ -101,41 +110,29 @@ export default function UserProfileScreen() {
   });
 
   const handleFollowPress = () => {
-    const userId = userProfileQuery.data?.id || targetUserId;
-    if (!userId) {
-      Alert.alert('Error', 'User not found. Please try again.');
-      return;
-    }
-    toggleFollowMutation.mutate({ userId });
+    toggleFollowMutation.mutate({ userId: _targetUserId });
   };
 
-  // Fetch user's posts from API  
-  const userPostsQuery = trpc.social.getFeed.useQuery(
-    { feedType: 'user' as const, targetUserId: userProfileQuery.data?.id || '', limit: 20 },
-    { enabled: !!userProfileQuery.data?.id }
-  );
-
-  // Use API data if available, otherwise fall back to mock trader profile or create placeholder
-  const apiProfile = userProfileQuery.data;
+  // Use mock profile data from social store
   const mockProfile = username ? getTraderProfile(username) : null;
 
-  // Create unified profile object - with fallback placeholder for unknown users
-  const userProfile = apiProfile ? {
-    username: apiProfile.username || username || '',
-    profileImage: apiProfile.profileImage,
-    walletAddress: apiProfile.walletAddress,
-    isVerified: apiProfile.isVerified || false,
-    followers: apiProfile.followersCount || 0,
-    following: apiProfile.followingCount || 0,
-    copyTraders: (apiProfile as any).copyTradersCount || 0,
-    vipFollowers: (apiProfile as any).vipFollowersCount || 0,
-    roi30d: (apiProfile as any).roi30d || 0,
-    pnl24h: (apiProfile as any).pnl24h || 0,
-    maxDrawdown: (apiProfile as any).maxDrawdown || 0,
-    winRate: (apiProfile as any).winRate || 0,
-    vipPrice: (apiProfile as any).vipPrice,
-  } : mockProfile ? mockProfile : username ? {
-    // Placeholder profile when API fails and no mock exists
+  // Create unified profile object from mock data
+  const userProfile = mockProfile ? {
+    username: mockProfile.username || username || '',
+    profileImage: mockProfile.profileImage,
+    walletAddress: (mockProfile as any).walletAddress,
+    isVerified: mockProfile.isVerified || false,
+    followers: mockProfile.followers || 0,
+    following: mockProfile.following || 0,
+    copyTraders: mockProfile.copyTraders || 0,
+    vipFollowers: mockProfile.vipFollowers || 0,
+    roi30d: mockProfile.roi30d || 0,
+    pnl24h: mockProfile.pnl24h || 0,
+    maxDrawdown: mockProfile.maxDrawdown || 0,
+    winRate: mockProfile.winRate || 0,
+    vipPrice: mockProfile.vipPrice,
+  } : username ? {
+    // Placeholder profile when no mock exists
     username: username,
     profileImage: undefined,
     walletAddress: undefined,
@@ -151,15 +148,11 @@ export default function UserProfileScreen() {
     vipPrice: undefined,
   } : null;
 
-  // Compute isFollowingUser from API response
-  const isFollowingUser = (apiProfile as any)?.isFollowing || false;
-  const walletAddress = (userProfile as any)?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
-  const trustScore = 0.9; // TODO: Calculate from real data
+  const walletAddress = userProfile?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
+  const trustScore = 0.9; // Mock trust score
 
-  // Use API posts if available, otherwise use mock posts
-  const apiPosts = userPostsQuery.data?.posts || [];
-  const allPosts = apiPosts.length > 0 ? apiPosts : posts || [];
-  const userPosts = userProfile ? allPosts.filter((p: any) => p.username === userProfile.username || p.user?.username === userProfile.username) : [];
+  // Use mock posts from social store
+  const userPosts = userProfile ? posts.filter((p: any) => p.username === userProfile.username) : [];
   const visiblePosts = userPosts.filter((p: any) => {
     if (activePostsTab === 'public') {
       return p.visibility === 'public' || p.visibility === 'PUBLIC' || !p.visibility;
@@ -169,23 +162,12 @@ export default function UserProfileScreen() {
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await userProfileQuery.refetch();
-    await userPostsQuery.refetch();
+    // Simulate refresh delay (data is local mock)
+    await new Promise(resolve => setTimeout(resolve, 500));
     setRefreshing(false);
-  }, [userProfileQuery, userPostsQuery]);
+  }, []);
 
-  // Show loading while fetching profile
-  if (userProfileQuery.isLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.solana} />
-          <Text style={styles.loadingText}>Loading profile...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // No loading state needed for local mock data
 
   if (!userProfile) {
     return (
@@ -466,15 +448,14 @@ export default function UserProfileScreen() {
                   <SocialPost
                     key={post.id}
                     id={post.id}
-                    username={post.user?.username || post.username || userProfile.username}
-                    profileImage={post.user?.profileImage || userProfile.profileImage}
+                    username={post.username || userProfile.username}
+                    profileImage={post.profileImage || userProfile.profileImage || ''}
                     content={post.content}
-                    images={post.images}
-                    comments={post.commentsCount || post.comments || 0}
-                    likes={post.likesCount || post.likes || 0}
-                    timestamp={post.createdAt ? new Date(post.createdAt).toLocaleString() : post.timestamp}
-                    mentionedToken={post.mentionedTokenSymbol || post.mentionedTokenName || post.mentionedToken}
-                    isVerified={post.user?.isVerified || userProfile.isVerified}
+                    comments={post.comments || 0}
+                    likes={post.likes || 0}
+                    timestamp={post.timestamp}
+                    mentionedToken={post.mentionedToken || ''}
+                    isVerified={post.isVerified || userProfile.isVerified}
                   />
                 ))
               ) : (

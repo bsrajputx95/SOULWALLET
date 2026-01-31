@@ -13,7 +13,7 @@ import {
   useWindowDimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign, ChevronDown } from 'lucide-react-native';
+import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -22,13 +22,49 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
 import { NeonButton } from '../../components/NeonButton';
 import { NeonInput } from '../../components/NeonInput';
-import { useAuth } from '../../hooks/auth-store';
-import { useSolanaWallet } from '../../hooks/solana-wallet-store';
-import type { Token, CopiedWallet } from '../../hooks/wallet-store';
-import { useWallet } from '../../hooks/wallet-store';
-import { trpc } from '../../lib/trpc';
 import { QueueStatusBanner } from '../../components/QueueStatusBanner';
 import { PortfolioSkeleton } from '../../components/SkeletonLoader';
+
+// Static dummy types for pure UI mode
+type Token = {
+  id?: string;
+  symbol: string;
+  name: string;
+  balance: number;
+  usdValue: number;
+  logo?: string;
+  price: number;
+  change24h: number;
+  value: number;
+};
+type CopiedWallet = {
+  id: string;
+  address: string;
+  name: string;
+  isActive: boolean;
+  pnl: number;
+  username?: string;
+  walletAddress?: string;
+  totalAmount?: number;
+  amountPerTrade?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  slippage?: number;
+  roi: number;
+};
+
+// Static dummy data for pure UI mode
+const DUMMY_USER = { username: 'demo_user', profileImage: null as string | null, walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' };
+const DUMMY_WALLET = {
+  publicKey: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+  tokens: [
+    { id: '1', symbol: 'SOL', name: 'Solana', balance: 10.5, usdValue: 1050, price: 105, change24h: 2.5, value: 1050 },
+    { id: '2', symbol: 'USDC', name: 'USD Coin', balance: 500, usdValue: 500, price: 1, change24h: 0, value: 500 },
+  ] as Token[],
+  copiedWallets: [] as CopiedWallet[],
+  totalBalance: 1550,
+  dailyPnl: 25.50,
+};
 
 type PortfolioTab = 'tokens' | 'copied' | 'watchlist';
 type ChartPeriod = '24h' | '7d' | '30d' | 'all';
@@ -36,10 +72,23 @@ type ChartType = 'line' | 'candle';
 
 export default function PortfolioScreen() {
   const router = useRouter();
-  const { user } = useAuth();
-  const { publicKey: solanaPublicKey } = useSolanaWallet();
-  const { tokens, copiedWallets, totalBalance, dailyPnl, refetch, updateCopiedWallet, isUpdatingCopyTrade } = useWallet();
-  const openPositionsQuery = trpc.copyTrading.getOpenPositions.useQuery({}, { refetchInterval: 30000 });
+
+  // Static dummy data - pure UI mode (no hooks)
+  const user = DUMMY_USER;
+  const solanaPublicKey = DUMMY_WALLET.publicKey;
+  const tokens = DUMMY_WALLET.tokens;
+  const copiedWallets = DUMMY_WALLET.copiedWallets;
+  const totalBalance = DUMMY_WALLET.totalBalance;
+  const dailyPnl = DUMMY_WALLET.dailyPnl;
+  const refetch = async () => { };
+  const updateCopiedWallet = async (_id: string, _updates: any, _totp: string) => {
+    Alert.alert('🚧 Demo Mode', 'Copy trade update is simulated.');
+    return true;
+  };
+  const isUpdatingCopyTrade = false;
+
+  // Mock open positions query - coming soon
+  const openPositionsQuery = { data: [] as any[], isLoading: false, refetch: async () => ({}) };
 
   // Loading state for skeleton
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -54,11 +103,8 @@ export default function PortfolioScreen() {
     return () => clearTimeout(timer);
   }, [tokens.length]);
 
-  // Fetch trending tokens for watchlist price data
-  const { data: trendingData } = trpc.market.trending.useQuery(undefined, {
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-  });
+  // Mock trending data - static mock data
+  const trendingData: any = { pairs: [] };
 
   // Responsive padding logic like Home screen
   const { width } = useWindowDimensions();
@@ -82,12 +128,8 @@ export default function PortfolioScreen() {
   const [editTP, setEditTP] = useState('');
   const [editSlippage, setEditSlippage] = useState('');
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1d' | '7d' | '30d' | '1y'>('1d');
-  const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
 
   // Wallet creation/import is handled by /solana-setup page
-
-  // Header height for content offset
-  const HEADER_HEIGHT = 60;
 
   const loadWatchlist = useCallback(async () => {
     try {
@@ -1573,3 +1615,4 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary
   }
 });
+

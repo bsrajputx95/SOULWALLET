@@ -28,14 +28,26 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { NeonCard } from '../components/NeonCard';
 import { NeonButton } from '../components/NeonButton';
-import { useAuth } from '../hooks/auth-store';
-import { useSolanaWallet } from '../hooks/solana-wallet-store';
-import { logger } from '../lib/client-logger';
+
+// Static dummy data for pure UI mode
+const DUMMY_USER = {
+  username: 'demo_user',
+  email: 'demo@example.com',
+  walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+};
+const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { user } = useAuth();
-  const { publicKey: solanaPublicKey, deleteWallet, isLoading: walletLoading } = useSolanaWallet();
+
+  // Static dummy data - pure UI mode (no hooks)
+  const user = DUMMY_USER;
+  const solanaPublicKey = DUMMY_PUBLIC_KEY;
+  const deleteWallet = async () => {
+    Alert.alert('🚧 Demo Mode', 'Wallet deletion is simulated in demo mode.');
+  };
+  const walletLoading = false;
+
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [showMnemonic, setShowMnemonic] = useState(false);
 
@@ -43,7 +55,7 @@ export default function SettingsScreen() {
   const walletAddress = solanaPublicKey || user?.walletAddress || null;
   const hasWallet = !!walletAddress;
 
-  // Detect if wallet needs reconnection (server has address but no local private key access)
+  // Detect if wallet needs reconnection (stored address but no local private key)
   const needsReconnect = !solanaPublicKey && !!user?.walletAddress;
   const isWalletUnlocked = !!solanaPublicKey;
 
@@ -106,7 +118,7 @@ export default function SettingsScreen() {
         );
       }
     } catch (error) {
-      if (__DEV__) logger.error('Error sharing:', error);
+      if (__DEV__) console.error('Error sharing:', error);
       // Fallback: copy to clipboard
       try {
         await Clipboard.setStringAsync(walletData.publicKey);
@@ -116,7 +128,7 @@ export default function SettingsScreen() {
           [{ text: 'OK' }]
         );
       } catch (clipboardError) {
-        if (__DEV__) logger.error('Failed to copy to clipboard:', clipboardError);
+        if (__DEV__) console.error('Failed to copy to clipboard:', clipboardError);
       }
     }
   };
@@ -466,3 +478,4 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
+

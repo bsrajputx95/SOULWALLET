@@ -3,7 +3,6 @@ import { StyleSheet, View, Text, Pressable, Animated } from 'react-native';
 import { AlertCircle, RefreshCw, X, Clock } from 'lucide-react-native';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { trpc } from '../lib/trpc';
 
 type QueueHealth = 'healthy' | 'degraded' | 'down';
 
@@ -41,6 +40,7 @@ interface QueueStatusBannerProps {
 /**
  * Banner that displays queue status for transparency about transaction processing.
  * Shows warnings when queue is busy or degraded.
+ * NOTE: In local-only mode, always shows healthy status.
  */
 export const QueueStatusBanner: React.FC<QueueStatusBannerProps> = ({
     highLoadThreshold = 50,
@@ -52,17 +52,8 @@ export const QueueStatusBanner: React.FC<QueueStatusBannerProps> = ({
     const [isDismissed, setIsDismissed] = useState(false);
     const [pulseAnim] = useState(new Animated.Value(1));
 
-    // Query queue status - polls every 30 seconds
-    const { data: queueStatus, refetch } = trpc.queue.getStatus.useQuery(undefined, {
-        refetchInterval: 30000,
-        enabled: true,
-        retry: false,
-        onSuccess: (data: QueueStatus) => {
-            if (data.health === 'healthy' && data.activeJobs <= highLoadThreshold) {
-                setIsDismissed(false);
-            }
-        },
-    });
+    // Mock queue status - always healthy in local-only mode
+    const queueStatus: QueueStatus = { activeJobs: 0, health: 'healthy' };
 
     // Determine if banner should show
     const shouldShow = React.useMemo(() => {
@@ -96,6 +87,7 @@ export const QueueStatusBanner: React.FC<QueueStatusBannerProps> = ({
             animation.start();
             return () => animation.stop();
         }
+        return undefined;
     }, [shouldShow, queueStatus?.health, pulseAnim]);
 
     if (!shouldShow) {
@@ -167,22 +159,21 @@ export const QueueStatusBanner: React.FC<QueueStatusBannerProps> = ({
 
 /**
  * Hook to get queue status for custom implementations
+ * NOTE: In local-only mode, always returns healthy status
  */
 export const useQueueStatus = () => {
-    const { data, isLoading, error, refetch } = trpc.queue.getStatus.useQuery(undefined, {
-        refetchInterval: 30000,
-        retry: false,
-    });
+    // Mock healthy status - local mode always healthy
+    const data: QueueStatus = { activeJobs: 0, health: 'healthy' };
 
     return {
         status: data,
-        isLoading,
-        error,
-        refetch,
-        isHealthy: data?.health === 'healthy',
-        isDegraded: data?.health === 'degraded',
-        isDown: data?.health === 'down',
-        activeJobs: data?.activeJobs ?? 0,
+        isLoading: false,
+        error: null,
+        refetch: async () => { },
+        isHealthy: true,
+        isDegraded: false,
+        isDown: false,
+        activeJobs: 0,
     };
 };
 
@@ -241,3 +232,4 @@ const styles = StyleSheet.create({
         marginLeft: SPACING.s,
     },
 });
+

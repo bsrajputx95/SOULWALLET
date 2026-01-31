@@ -26,13 +26,24 @@ import { QuickActionButton } from '../../components/QuickActionButton';
 import { TokenCard } from '../../components/TokenCard';
 import { TraderCard } from '../../components/TraderCard';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
-import { useAuth } from '../../hooks/auth-store';
-import { useWallet } from '../../hooks/wallet-store';
-import { trpc } from '../../lib/trpc';
-import { useSolanaWallet } from '../../hooks/solana-wallet-store';
-import { PublicKey } from '@solana/web3.js';
 import { SendModal } from '../../components/SendModal';
 import { ReceiveModal } from '../../components/ReceiveModal';
+
+// Static dummy data for pure UI mode
+const DUMMY_USER = {
+  username: 'demo_user',
+  email: 'demo@example.com',
+  profileImage: null as string | null,
+  walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+};
+const DUMMY_WALLET = {
+  publicKey: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+  balance: 1234.56,
+  tokens: [
+    { symbol: 'SOL', name: 'Solana', balance: 10.5, usdValue: 1050, mint: 'So11111111111111111111111111111111111111112', decimals: 9, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' },
+    { symbol: 'USDC', name: 'USD Coin', balance: 500, usdValue: 500, mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png' },
+  ],
+};
 
 // Well-known token logos for popular Solana tokens (fallback when API doesn't have them)
 const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
@@ -62,37 +73,27 @@ export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 375;
-  const { user, isLoading: authLoading } = useAuth();
-  const isAuthenticated = !!user;
-  const { totalBalance, dailyPnl, refetch } = useWallet();
 
-  // Auth guard - redirect to login if not authenticated
-  React.useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.replace('/(auth)/login');
-    }
-  }, [authLoading, isAuthenticated, router]);
+  // Static dummy data - pure UI mode (no hooks)
+  const user = DUMMY_USER;
+  const authLoading = false;
+  const isAuthenticated = true;
+  const totalBalance = DUMMY_WALLET.balance;
+  const dailyPnl = 25.50;
+  const refetch = async () => { };
 
-  const {
-    wallet: solanaWallet,
-    publicKey: solanaPublicKey,
-    getAvailableTokens,
-    executeSwap
-  } = useSolanaWallet();
+  // Static wallet data for UI display
+  const solanaWallet = { publicKey: DUMMY_WALLET.publicKey };
+  const solanaPublicKey = DUMMY_WALLET.publicKey;
+  const getAvailableTokens = () => DUMMY_WALLET.tokens;
+  const executeSwap = async (_params?: any) => ({ success: true, signature: 'demo_signature_' + Date.now(), outputAmount: 0 });
 
-  // ✅ Fetch user profile for profile image
-  const profileQuery = trpc.user.getProfile.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
+  // Mock profile query - use local user data
+  const profileQuery = { data: { profileImage: null }, isLoading: false };
 
-  // ✅ Fetch trending coins from market - daily snapshot at 15:00 UTC
-  const { data: trendingData, isLoading: trendingLoading } = trpc.market.trending.useQuery(undefined, {
-    enabled: isAuthenticated,
-    staleTime: Infinity, // Treat as daily snapshot - don't refetch automatically
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-  });
+  // Mock trending data - using static mock data
+  const trendingData: any = { pairs: [] };
+  const trendingLoading = false;
 
   // Transform trending data to displayable format
   // Comment 3: Include liquidity, volume, and transactions for TokenCard
@@ -120,36 +121,19 @@ export default function HomeScreen() {
     });
   }, [trendingData]);
 
-  // ✅ Custodial wallet for copy trading
-  const { data: custodialWalletData, refetch: refetchCustodialWallet } = trpc.copyTrading.getCustodialBalance.useQuery(undefined, {
-    enabled: isAuthenticated,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-    refetchOnWindowFocus: false,
-  });
-  const setupCustodialWalletMutation = trpc.copyTrading.setupCustodialWallet.useMutation();
+  // Mock custodial wallet data - coming soon
+  const custodialWalletData: any = { hasWallet: false, balance: 0 };
+  const refetchCustodialWallet = async () => ({});
+  const setupCustodialWalletMutation = { mutateAsync: async (): Promise<any> => ({ publicKey: 'mock-public-key' }) };
 
-  // ✅ Real copy trading queries and mutations
-  const { data: myCopyTradesData } = trpc.copyTrading.getMyCopyTrades.useQuery(undefined, {
-    enabled: isAuthenticated,
-    staleTime: 120_000,
-    refetchInterval: 120_000,
-    refetchOnWindowFocus: false,
-  });
-  const { data: copyStatsData } = trpc.copyTrading.getStats.useQuery({}, {
-    enabled: isAuthenticated,
-    staleTime: 120_000,
-    refetchInterval: 120_000,
-    refetchOnWindowFocus: false,
-  });
+  // Mock copy trading data - coming soon
+  const myCopyTradesData: any[] = [];
+  const copyStatsData: any = null;
 
   const copyTradeSettings = myCopyTradesData || [];
 
-  // ✅ Fetch recent positions/trades
-  const { data: positionsData } = trpc.copyTrading.getPositionHistory.useQuery(
-    { limit: 10 },
-    { enabled: isAuthenticated, staleTime: 120_000, refetchInterval: 120_000, refetchOnWindowFocus: false }
-  );
+  // Mock positions data - using local token balances
+  const positionsData: any = { positions: [] };
 
   const copyTrades = positionsData?.positions || [];
 
@@ -157,7 +141,7 @@ export default function HomeScreen() {
     if (!copyStatsData) {
       return { activeCopies: 0, totalTrades: 0, profitLoss: 0, profitLossPercentage: 0 };
     }
-    // Map backend stats to frontend format
+    // Map stats to frontend format
     return {
       activeCopies: copyTradeSettings.filter((ct: any) => ct.isActive).length,
       totalTrades: copyStatsData.totalTrades || 0,
@@ -166,8 +150,9 @@ export default function HomeScreen() {
     };
   };
 
-  const createCopyTradeMutation = trpc.copyTrading.startCopying.useMutation();
-  const stopCopyTradeMutation = trpc.copyTrading.stopCopying.useMutation();
+  // Mock copy trade mutations - coming soon
+  const createCopyTradeMutation = { mutateAsync: async (_p: any): Promise<any> => { throw new Error('Feature not available'); }, isPending: false };
+  const stopCopyTradeMutation = { mutateAsync: async (_p: any): Promise<any> => { throw new Error('Feature not available'); }, isPending: false };
 
   const createCopyTrade = async (params: any) => {
     try {
@@ -236,15 +221,9 @@ export default function HomeScreen() {
     return () => clearTimeout(timer);
   }, [coinsSearchQuery]);
 
-  // ✅ Market search query
-  const { data: searchData, isLoading: searchLoading } = trpc.market.search.useQuery(
-    { q: debouncedCoinsSearch },
-    {
-      enabled: isAuthenticated && debouncedCoinsSearch.length >= 2,
-      staleTime: 60_000,
-      refetchOnWindowFocus: false,
-    }
-  );
+  // Mock market search - using local data
+  const searchData: any = { pairs: [] };
+  const searchLoading = false;
 
   // Transform search results
   const searchCoins = React.useMemo(() => {
@@ -274,11 +253,9 @@ export default function HomeScreen() {
   const displayCoins = debouncedCoinsSearch.length >= 2 ? searchCoins : topCoins;
   const isLoadingCoins = debouncedCoinsSearch.length >= 2 ? searchLoading : trendingLoading;
 
-  // ✅ Fetch top traders from backend (Birdeye data) - Top 10, refreshes every 24h
-  const { data: tradersData, isLoading: tradersLoading } = trpc.traders.getTopTraders.useQuery(
-    { limit: 10, period: '1d' },
-    { enabled: isAuthenticated, staleTime: 86_400_000, refetchInterval: 86_400_000, refetchOnWindowFocus: false }
-  );
+  // Mock top traders - coming soon
+  const tradersData: any = { data: [] };
+  const tradersLoading = false;
 
   const topTraders = tradersData?.data || [];
 
@@ -289,10 +266,9 @@ export default function HomeScreen() {
     return () => clearTimeout(timer);
   }, [tradersSearchQuery]);
 
-  const { data: searchedTradersData, isLoading: searchedTradersLoading } = trpc.traders.search.useQuery(
-    { q: debouncedTradersSearch, limit: 10 },
-    { enabled: isAuthenticated && debouncedTradersSearch.length >= 3, refetchOnWindowFocus: false }
-  );
+  // Mock trader search - coming soon
+  const searchedTradersData: any = { data: [] };
+  const searchedTradersLoading = false;
 
   const [showCopyModal, setShowCopyModal] = React.useState(false);
   const [selectedTrader, setSelectedTrader] = React.useState<string | null>(null);
@@ -351,15 +327,11 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [refetch]);
 
-  // Validate Solana address
+  // Validate Solana address using regex (pure frontend)
   const validateSolanaAddress = (address: string): boolean => {
     if (!address || address.trim().length === 0) return false;
-    try {
-      new PublicKey(address);
-      return true;
-    } catch {
-      return false;
-    }
+    // Solana addresses are base58 encoded, 32-44 characters
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
   };
 
   // Validate copy trade form
@@ -2258,3 +2230,4 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.xs,
   },
 });
+

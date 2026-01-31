@@ -27,30 +27,16 @@ config.transformer = {
 // Enable require context for Expo Hermes
 config.transformer.unstable_allowRequireContext = true;
 
-// Enable tree shaking and exclude server code from mobile bundle
+// Resolver configuration with polyfills for crypto packages
 config.resolver = {
     ...config.resolver,
     // Only include necessary file extensions
     sourceExts: ['jsx', 'js', 'ts', 'tsx', 'json', 'cjs', 'mjs'],
-    // Exclude server code and test files from bundle - BETA OPTIMIZATION
+    // Exclude test files from bundle
     blockList: [
-        // Server-side code (not needed in mobile bundle)
-        /.*\/src\/server\/.*/,
-        /.*\/src\/lib\/services\/.*/,
-        /.*\/src\/lib\/middleware\/.*/,
-        /.*\/src\/lib\/di\/.*/,
-        /.*\/prisma\/.*/,
-        // Test files
         /.*\/__tests__\/.*/,
         /.*\.test\.(js|ts|tsx)$/,
         /.*\.spec\.(js|ts|tsx)$/,
-        // Docker and config files
-        /.*\/docker-compose.*\.yml$/,
-        /.*\/Dockerfile$/,
-        /.*\/nginx\/.*/,
-        /.*\/ssl\/.*/,
-        // Only block project root scripts, not node_modules scripts
-        /^(?!.*node_modules).*\/scripts\/.*/,
     ],
     // Node.js polyfills for crypto packages (ed25519-hd-key, etc.)
     extraNodeModules: {
@@ -82,40 +68,6 @@ config.resolver = {
 
         // Let Metro handle other modules normally
         return context.resolveRequest(context, moduleName, platform);
-    },
-};
-
-// Optimize serializer - exclude only server-side modules
-config.serializer = {
-    ...config.serializer,
-    // Process modules in parallel - exclude server-side dependencies only
-    processModuleFilter: (module) => {
-        // Only exclude specific server-side packages
-        if (module.path.includes('node_modules')) {
-            // Server-side packages to exclude from mobile bundle
-            const serverOnlyModules = [
-                'fastify',
-                '@fastify',
-                'prisma',
-                '@prisma',
-                'ioredis',
-                'bull',
-                'amqplib',
-                'pino',
-                'nodemailer',
-                'sharp',
-                '@opentelemetry',
-                '@sentry/node',
-                'prom-client',
-                '@aws-sdk',
-                'rotating-file-stream',
-                'node-cron',
-            ];
-
-            // Exclude server-only modules, include everything else
-            return !serverOnlyModules.some(m => module.path.includes(`node_modules/${m}`));
-        }
-        return true;
     },
 };
 

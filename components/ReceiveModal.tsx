@@ -14,7 +14,9 @@ import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { useSolanaWallet } from '../hooks/solana-wallet-store';
+
+// Static dummy data for pure UI mode
+const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 
 interface ReceiveModalProps {
     visible: boolean;
@@ -28,7 +30,8 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
     const { height } = useWindowDimensions();
     const modalHeight = height * 0.65;
 
-    const { publicKey } = useSolanaWallet();
+    // Static dummy data - pure UI mode (no hooks)
+    const publicKey = DUMMY_PUBLIC_KEY;
     const [copied, setCopied] = useState(false);
 
     const walletAddress = publicKey || '';

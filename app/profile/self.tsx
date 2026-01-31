@@ -14,7 +14,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Settings, Shield, Plus, X, DollarSign } from 'lucide-react-native';
+import { Settings, Shield, Plus, X, DollarSign } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -22,13 +22,22 @@ import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 import { NeonCard } from '../../components/NeonCard';
 import { SocialPost } from '../../components/SocialPost';
-import { useAuth } from '../../hooks/auth-store';
-import { trpc } from '../../lib/trpc';
+
+// Static dummy data for pure UI mode
+const DUMMY_USER = {
+  id: 'demo-user-id',
+  username: 'demo_user',
+  email: 'demo@example.com',
+  walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+};
 
 export default function SelfProfileScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { user } = useAuth();
+
+  // Static dummy data - pure UI mode (no hooks)
+  const user = DUMMY_USER;
+
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'public' | 'followers' | 'vip'>('public');
   const [showVipSetup, setShowVipSetup] = useState(false);
@@ -47,8 +56,17 @@ export default function SelfProfileScreen() {
     setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
-  // Fetch real profile data from API
-  const profileQuery = trpc.user.getProfile.useQuery(undefined);
+  // Mock profile data - using local user data
+  const profileQuery = {
+    data: {
+      id: user?.id || 'local-user',
+      profileImage: null,
+      stats: { followersCount: 0, followingCount: 0, copyTradersCount: 0, roi: 0, vipSubscribersCount: 0 },
+      tradingStats: { pnl24h: 0, winRate: 0, maxDrawdown: 0, followerEquity: 0 },
+    },
+    isLoading: false,
+    refetch: async () => ({}),
+  };
 
   // Use real data from API or fallback to defaults
   const stats = {
@@ -66,29 +84,28 @@ export default function SelfProfileScreen() {
     followerEquity: profileQuery.data?.tradingStats?.followerEquity || 0,
   };
 
-  // VIP info from API or defaults
-  const vipInfo = {
+  // VIP info from API or defaults (reserved for future use)
+  const _vipInfo = {
     price: (profileQuery.data as any)?.vipPrice || 0,
     subscribers: stats.vipSubs,
   };
 
 
 
-  // Fetch user's posts from API
-  const userPostsQuery = trpc.social.getFeed.useQuery(
-    { feedType: 'user' as const, targetUserId: profileQuery.data?.id || '', limit: 50 },
-    { enabled: !!profileQuery.data?.id }
-  );
+  // Mock user posts - using local social store
+  const userPostsQuery = {
+    data: { posts: [] as any[] },
+    isLoading: false,
+    refetch: async () => ({}),
+  };
 
-  // Delete post mutation
-  const deletePostMutation = trpc.social.deletePost.useMutation({
-    onSuccess: () => {
-      void userPostsQuery.refetch();
+  // Mock delete post mutation - coming soon
+  const deletePostMutation = {
+    mutate: (_params: { postId: string }) => {
+      Alert.alert('🚧 Coming Soon', 'Post deletion is not available yet.');
     },
-    onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to delete post');
-    },
-  });
+    isPending: false,
+  };
 
   const handleDeletePost = (postId: string) => {
     Alert.alert(
@@ -953,3 +970,4 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
 });
+

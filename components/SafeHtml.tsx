@@ -3,7 +3,6 @@ import { View, Text, StyleSheet } from 'react-native';
 import DOMPurify from 'isomorphic-dompurify';
 import { COLORS } from '../constants/colors';
 import { FONTS } from '../constants/theme';
-import { logger } from '../lib/client-logger';
 
 // Default allowed tags for safe HTML rendering
 const DEFAULT_ALLOWED_TAGS: string[] = [];  // Default: strip all HTML
@@ -55,7 +54,7 @@ export const SafeHtml: React.FC<SafeHtmlProps> = ({
       // If sanitization results in empty content, use fallback
       return cleaned.trim() || fallbackText;
     } catch (error) {
-      logger.warn('SafeHtml: Error sanitizing content:', error);
+      console.warn('SafeHtml: Error sanitizing content:', error);
       return fallbackText;
     }
   }, [html, maxLength, fallbackText, allowedTags]);
@@ -129,7 +128,7 @@ export const SafeHtmlText: React.FC<{
         ? stripped.substring(0, maxLength) + '...'
         : stripped;
     } catch (error) {
-      logger.warn('SafeHtmlText: Error processing content:', error);
+      console.warn('SafeHtmlText: Error processing content:', error);
       return fallbackText;
     }
   }, [html, maxLength, fallbackText]);

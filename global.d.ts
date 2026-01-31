@@ -5,14 +5,18 @@ import { Buffer } from 'buffer';
 declare global {
   // Buffer polyfill for React Native
   var Buffer: typeof Buffer;
-  
+
   // Development flag
   var __DEV__: boolean;
-  
+
   // Window object for web compatibility
   interface Window {
     Buffer: typeof Buffer;
   }
 }
 
-export {};
+// Stream polyfill module declarations
+declare module 'stream-browserify';
+declare module 'readable-stream';
+
+export { };

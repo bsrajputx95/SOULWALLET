@@ -26,38 +26,63 @@ import { NeonButton } from '../../components/NeonButton';
 import { TokenBagModal } from '../../components/TokenBagModal';
 import { CopyTradingModal } from '../../components/CopyTradingModal';
 import { SocialPostSkeleton } from '../../components/SkeletonLoader';
-
-import { useAuth } from '../../hooks/auth-store';
-import { useSocial } from '../../hooks/social-store';
 import { useRouter } from 'expo-router';
-import { trpc } from '../../lib/trpc'
-import { useSolanaWallet } from '../../hooks/solana-wallet-store'
+
+// Static dummy data for pure UI mode
+const DUMMY_USER = { username: 'demo_user', profileImage: null as string | null };
+const DUMMY_POSTS: { id: string; username: string; profileImage: string; content: string; timestamp: string; likes: number; comments: number; mentionedToken: string; isVerified: boolean; visibility: 'public' | 'vip' | 'followers' }[] = [
+  { id: '1', username: 'crypto_trader', profileImage: '', content: 'Just made a great trade on $SOL! 🚀', timestamp: '2h ago', likes: 42, comments: 5, mentionedToken: 'SOL', isVerified: true, visibility: 'public' },
+  { id: '2', username: 'defi_degen', profileImage: '', content: 'BONK looking bullish today! 🐕', timestamp: '4h ago', likes: 28, comments: 3, mentionedToken: 'BONK', isVerified: false, visibility: 'public' },
+];
+const DUMMY_FOLLOWED_USERS: string[] = [];
 
 type FeedTab = 'forYou' | 'following';
 
 export default function SosioScreen() {
   const router = useRouter();
-  const { user } = useAuth();
-  const { posts: allPosts, followedUsers } = useSocial();
-  const profileQuery = trpc.user.getProfile.useQuery(undefined)
-  const ibuyMutation = trpc.social.ibuyToken.useMutation()
-  const ibuySettingsQuery = trpc.user.getIBuySettings.useQuery()
-  const recordPurchaseMutation = trpc.social.recordIBuyPurchase.useMutation()
-  const { executeSwap, publicKey, balance, tokenBalances } = useSolanaWallet()
+
+  // Static dummy data - pure UI mode (no hooks)
+  const user = DUMMY_USER;
+  const allPosts = DUMMY_POSTS;
+  const followedUsers = DUMMY_FOLLOWED_USERS;
+
+  // Mock profile query - use local user data
+  const profileQuery = { data: { profileImage: null }, isLoading: false };
+
+  // Mock iBuy mutation - coming soon
+  const ibuyMutation = {
+    mutateAsync: async (_params: any): Promise<{ swapTransaction: string }> => {
+      Alert.alert('🚧 Coming Soon', 'iBuy feature is not available yet.');
+      throw new Error('iBuy feature not available');
+    },
+    isPending: false,
+  };
+
+  // Mock iBuy settings - uses default values
+  const ibuySettingsQuery = { data: { buyAmount: 10, slippage: 'medium' }, isLoading: false };
+
+  // Mock record purchase mutation
+  const recordPurchaseMutation = {
+    mutateAsync: async (_params: any) => {
+      throw new Error('Feature not available');
+    },
+    isPending: false,
+  };
+
+  // Static dummy data - pure UI mode (no hooks)
+  const executeSwap = async (_params: any) => { Alert.alert('🚧 Demo Mode', 'Swap simulated.'); return { success: true, signature: 'demo_sig_' + Date.now(), outputAmount: 0 }; };
+  const publicKey = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const balance = 10.5;
+  const tokenBalances: any[] = [];
+
   const [activeFeed, setActiveFeed] = useState<'all' | 'following' | 'vip' | 'forYou'>('forYou');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchBar, setShowSearchBar] = useState(false);
 
 
 
-  // User search query - only run when search has 2+ characters
-  // Strip @ prefix if user types it (usernames stored without @)
-  const cleanedSearchQuery = searchQuery.startsWith('@') ? searchQuery.slice(1) : searchQuery;
-  // Use social.searchUsers (already exists in Railway deployment)
-  const userSearchQuery = trpc.social.searchUsers.useQuery(
-    { query: cleanedSearchQuery, limit: 5 },
-    { enabled: cleanedSearchQuery.length >= 2 }
-  );
+  // User search - mock implementation returning empty results
+  const userSearchQuery = { data: [] as any[], isLoading: false };
 
   // Detect soulwallet/post/id links in search and navigate directly
   useEffect(() => {
@@ -128,13 +153,13 @@ export default function SosioScreen() {
   const lastScrollY = useRef(0);
   const tabsHidden = useRef(false);
 
-  // Get feed query from social store or directly query
-  const feedQuery = trpc.social.getFeed.useQuery({
-    feedType: activeFeed as 'all' | 'following' | 'vip' | 'forYou',
-    limit: 20,
-  }, {
-    refetchInterval: 30000,
-  });
+  // Mock feed query - uses local posts from social store
+  const feedQuery = {
+    data: { posts: filteredPosts, nextCursor: null },
+    isLoading: false,
+    isFetching: false,
+    refetch: async () => ({}),
+  };
 
 
 
@@ -179,13 +204,14 @@ export default function SosioScreen() {
     }
   );
 
-  // Create post mutation
-  const createPostMutation = trpc.social.createPost.useMutation({
-    onSuccess: () => {
-      // Refetch the feed after posting
-      void feedQuery?.refetch();
+  // Mock create post mutation - coming soon
+  const createPostMutation = {
+    mutateAsync: async (_params: any) => {
+      Alert.alert('🚧 Coming Soon', 'Creating posts is not available yet.');
+      throw new Error('Feature not available');
     },
-  });
+    isPending: false,
+  };
 
 
 
@@ -1249,3 +1275,4 @@ const styles = StyleSheet.create({
     paddingTop: SPACING.m,
   },
 });
+

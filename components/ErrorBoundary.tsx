@@ -3,7 +3,6 @@ import React, { Component } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { captureException } from '../lib/sentry';
 
 interface Props {
   children: ReactNode;
@@ -31,16 +30,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Log error to console in development
-    if (__DEV__) {
-      console.error('Error Boundary caught an error:', error, errorInfo);
-    }
-    
-    // Send error to Sentry for production monitoring
-    captureException(error, {
-      errorInfo,
-      componentStack: errorInfo.componentStack,
-    });
+    // Log error to console
+    console.error('Error Boundary caught an error:', error, errorInfo);
   }
 
   handleReset = () => {
@@ -60,7 +51,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <Text style={styles.message}>
               We've encountered an unexpected error. Don't worry, your wallet is safe.
             </Text>
-            
+
             {__DEV__ && this.state.error && (
               <View style={styles.errorBox}>
                 <Text style={styles.errorText}>
@@ -68,7 +59,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 </Text>
               </View>
             )}
-            
+
             <TouchableOpacity
               style={styles.button}
               onPress={this.handleReset}

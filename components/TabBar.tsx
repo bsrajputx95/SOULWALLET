@@ -4,7 +4,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
 import { NotificationTabBadge } from './NotificationBadge';
-import { useNotificationBadgeContext } from '../hooks/notification-provider';
 
 type TabBarProps = {
   state: any;
@@ -15,13 +14,15 @@ type TabBarProps = {
 
 export const TabBar: React.FC<TabBarProps> = (props) => {
   const { state, descriptors, navigation } = props;
-  const { badgeCount } = useNotificationBadgeContext();
-  
+
+  // Static dummy data - pure UI mode (no hooks)
+  const badgeCount = 0;
+
   // Create animated values for each tab
   const animatedValues = useRef(
     state?.routes?.map(() => new Animated.Value(0)) || []
   ).current;
-  
+
   if (!state || !descriptors || !navigation) {
     return null;
   }
@@ -38,15 +39,15 @@ export const TabBar: React.FC<TabBarProps> = (props) => {
             options.tabBarLabel !== undefined
               ? options.tabBarLabel
               : options.title !== undefined
-              ? options.title
-              : route.name;
+                ? options.title
+                : route.name;
 
           const isFocused = state.index === index;
 
           const onPress = () => {
             // Start spin animation
             const animatedValue = animatedValues[index];
-            
+
             Animated.timing(animatedValue, {
               toValue: 1,
               duration: 400,
@@ -99,7 +100,7 @@ export const TabBar: React.FC<TabBarProps> = (props) => {
                   </Animated.View>
                   {/* Show notification badge on Home tab (index 0) */}
                   {index === 0 && badgeCount > 0 && (
-                      <NotificationTabBadge count={badgeCount} />
+                    <NotificationTabBadge count={badgeCount} />
                   )}
                 </View>
                 <Text

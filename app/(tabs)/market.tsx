@@ -15,7 +15,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { useMarket } from '../../hooks/market-store';
 
 // Import TokenCard
 import { TokenCard } from '../../components/TokenCard';
@@ -25,20 +24,27 @@ import { QueueStatusBanner } from '../../components/QueueStatusBanner';
 import { MarketSkeleton } from '../../components/SkeletonLoader';
 import { QuickBuyModal } from '../../components/QuickBuyModal';
 
+// Static dummy market data for pure UI
+const DUMMY_TOKENS = [
+  { id: '1', symbol: 'SOL', name: 'Solana', price: 105.25, change24h: 2.5, liquidity: 500000, volume: 150000, transactions: 1200, contractAddress: 'So11111111111111111111111111111111111111112', pairAddress: 'SOL-USDC', logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' },
+  { id: '2', symbol: 'BONK', name: 'Bonk', price: 0.000025, change24h: -3.2, liquidity: 300000, volume: 80000, transactions: 850, contractAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', pairAddress: 'BONK-SOL', logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I' },
+  { id: '3', symbol: 'JUP', name: 'Jupiter', price: 0.82, change24h: 5.1, liquidity: 450000, volume: 120000, transactions: 980, contractAddress: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', pairAddress: 'JUP-USDC', logo: 'https://static.jup.ag/jup/icon.png' },
+];
+
 type MarketTab = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
 
 export default function MarketScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const {
-    tokens,
-    isLoading,
-    searchQuery,
-    refetch,
-    hasMore,
-    loadMore,
-    totalCount,
-  } = useMarket();
+
+  // Static dummy data - pure UI mode (no hooks)
+  const tokens = DUMMY_TOKENS;
+  const isLoading = false;
+  const searchQuery = '';
+  const refetch = async () => { };
+  const hasMore = false;
+  const loadMore = () => { };
+  const totalCount = DUMMY_TOKENS.length;
 
   // Responsive padding logic like Home screen
   const isSmallScreen = width < 375;

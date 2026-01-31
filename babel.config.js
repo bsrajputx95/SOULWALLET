@@ -26,7 +26,6 @@ module.exports = function (api) {
           './app/**/*',
           './components/**/*',
           './lib/**/*',
-          './hooks/**/*',
           './utils/**/*',
           './src/**/*',
         ],

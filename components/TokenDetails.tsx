@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { X, TrendingUp, TrendingDown, ExternalLink, Copy } from 'lucide-react-native';
+import { X, TrendingUp, TrendingDown, Copy } from 'lucide-react-native';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';

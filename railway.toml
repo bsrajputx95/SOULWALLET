@@ -1,8 +1,0 @@
-[build]
-builder = "nixpacks"
-buildCommand = "npm install --legacy-peer-deps && npm run db:generate && npm run server:build"
-
-[deploy]
-startCommand = "npm run server"
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 10

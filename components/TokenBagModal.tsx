@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -18,9 +18,9 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { NeonCard } from './NeonCard';
 import { NeonButton } from './NeonButton';
-import { logger } from '../lib/client-logger';
-import { trpc } from '../lib/trpc';
-import { useSolanaWallet } from '../hooks/solana-wallet-store';
+
+// Static dummy data for pure UI mode
+const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 
 // Mint addresses on Solana
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -57,36 +57,75 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   const [tokenPrices, setTokenPrices] = useState<Map<string, number>>(new Map());
   const [pricesLoading, setPricesLoading] = useState(false);
 
-  // Get wallet for swap execution
-  const { executeSwap, publicKey } = useSolanaWallet();
+  // Static dummy data - pure UI mode (no hooks)
+  const publicKey = DUMMY_PUBLIC_KEY;
+  const executeSwap = async (_params: any) => {
+    Alert.alert('🚧 Demo Mode', 'Swap functionality is simulated in demo mode.');
+    return { success: true, signature: 'demo_sig_' + Date.now(), outputAmount: 0 };
+  };
 
-  // Fetch persisted settings from API
-  const settingsQuery = trpc.user.getIBuySettings.useQuery(undefined, {
-    enabled: visible,
-  });
-  const updateSettingsMutation = trpc.user.updateIBuySettings.useMutation();
+  // Mock settings query - coming soon
+  const settingsQuery = {
+    data: { buyAmount: 100, slippage: 'medium' as const, inputCurrency: 'SOL' as const },
+    isLoading: false,
+    refetch: async () => ({}),
+  };
 
-  // Fetch iBuy purchases from API
-  const purchasesQuery = trpc.social.getIBuyPurchases.useQuery(undefined, {
-    enabled: visible,
-  });
+  // Mock mutations - coming soon
+  const updateSettingsMutation = {
+    mutate: (_params: any) => {
+      Alert.alert('Coming Soon', 'This feature is not available yet.');
+    },
+    mutateAsync: async (_params: any) => {
+      Alert.alert('Coming Soon', 'This feature is not available yet.');
+      return {};
+    },
+    isPending: false,
+  };
 
-  // Sell iBuy token mutation
-  const sellMutation = trpc.social.sellIBuyToken.useMutation();
+  // Mock purchases query - returns empty array
+  const purchasesQuery = {
+    data: [] as any[],
+    isLoading: false,
+    refetch: async () => ({}),
+  };
 
-  // Buy iBuy token mutation (for Buy More)
-  const ibuyMutation = trpc.social.ibuyToken.useMutation();
+  // Mock sell mutation - coming soon
+  const sellMutation = {
+    mutate: (_params: any) => {
+      Alert.alert('🚧 Coming Soon', 'Selling iBuy tokens is not available yet.');
+    },
+    mutateAsync: async (_params: any) => {
+      Alert.alert('🚧 Coming Soon', 'Selling iBuy tokens is not available yet.');
+      return {};
+    },
+    isPending: false,
+  };
+
+  // Mock iBuy mutation - coming soon
+  const ibuyMutation = {
+    mutate: (_params: any) => {
+      Alert.alert('🚧 Coming Soon', 'iBuy feature is not available yet.');
+    },
+    mutateAsync: async (_params: any): Promise<{ success: boolean; amountUsd?: number }> => {
+      Alert.alert('🚧 Coming Soon', 'iBuy feature is not available yet.');
+      return { success: false };
+    },
+    isPending: false,
+  };
 
   // Load settings when query completes
   useEffect(() => {
     if (settingsQuery.data) {
       setBuyAmount(settingsQuery.data.buyAmount.toString());
-      setSlippage(settingsQuery.data.slippage);
+      // Convert slippage preset to number
+      const slippageMap: Record<string, number> = { low: 0.1, medium: 0.5, high: 1.0 };
+      setSlippage(slippageMap[settingsQuery.data.slippage] ?? 0.5);
       setInputCurrency(settingsQuery.data.inputCurrency || 'SOL');
     }
   }, [settingsQuery.data]);
 
-  // Get OPEN purchases only (not sold yet)
+  // Get OPEN purchases only (not sold yet) - returns empty array in local mode
   const openPurchases = React.useMemo(() => {
     if (!purchasesQuery.data) return [];
     return purchasesQuery.data.filter((p: any) => p.status === 'OPEN');
@@ -97,10 +136,11 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     return Array.from(new Set(openPurchases.map((p: any) => String(p.tokenMint))));
   }, [openPurchases]);
 
-  const metadataQuery = trpc.wallet.getTokenMetadata.useQuery(
-    { mints: openMints },
-    { enabled: visible && openMints.length > 0 }
-  );
+  // Mock metadata query - returns empty data
+  const metadataQuery = {
+    data: { metadata: [] as any[] },
+    isLoading: false,
+  };
 
   const metadataMap = React.useMemo(() => {
     const entries = metadataQuery.data?.metadata ?? [];
@@ -110,29 +150,28 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
     }, {} as Record<string, any>);
   }, [metadataQuery.data]);
 
-  // Fetch token prices from Jupiter
+  // Mock token prices - no network call needed
+  const MOCK_PRICES: Record<string, number> = {
+    'So11111111111111111111111111111111111111112': 150, // SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 1, // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 1, // USDT
+    'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 0.00002, // BONK
+    'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm': 2.5, // WIF
+    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 0.85, // JUP
+    'rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof': 1.2, // RENDER
+  };
+
   const fetchTokenPrices = React.useCallback(async (mints: string[]) => {
     if (mints.length === 0) return;
-    setPricesLoading(true);
-    try {
-      const mintIds = mints.join(',');
-      const response = await fetch(`https://price.jup.ag/v6/price?ids=${mintIds}`);
-      const data = await response.json();
-
-      if (data?.data) {
-        const prices = new Map<string, number>();
-        Object.entries(data.data).forEach(([mint, info]: [string, any]) => {
-          if (info?.price) {
-            prices.set(mint, info.price);
-          }
-        });
-        setTokenPrices(prices);
-      }
-    } catch (error) {
-      logger.warn('Failed to fetch token prices:', error);
-    } finally {
-      setPricesLoading(false);
-    }
+    // Mock prices - no network call
+    const prices = new Map<string, number>();
+    mints.forEach((mint) => {
+      // Use known price or generate mock price based on mint hash
+      const mockPrice = MOCK_PRICES[mint] || (parseInt(mint.slice(0, 8), 36) % 100) / 100 + 0.01;
+      prices.set(mint, mockPrice);
+    });
+    setTokenPrices(prices);
+    setPricesLoading(false);
   }, []);
 
   // Fetch prices when modal opens
@@ -193,7 +232,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       });
       setShowSettings(false);
     } catch (error) {
-      logger.error('Failed to save iBuy settings:', error);
+      console.error('Failed to save iBuy settings:', error);
     }
   };
 
@@ -304,7 +343,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       const feeText =
         totalCreatorFee > 0
           ? creatorUsernames.length === 1
-            ? `\n5% creator fee: $${totalCreatorFee.toFixed(2)} â†’ @${creatorUsernames[0]}`
+            ? `\n5% creator fee: $${totalCreatorFee.toFixed(2)} → @${creatorUsernames[0]}`
             : `\nCreator fees: $${totalCreatorFee.toFixed(2)}`
           : '';
       Alert.alert('Sold!', `${profitText}${feeText}`);
@@ -332,7 +371,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
     setBuyingToken(token.address);
     try {
-      logger.info(`[iBuy] Buying more ${token.symbol} with ${inputCurrency}...`);
+      console.log(`[iBuy] Buying more ${token.symbol} with ${inputCurrency}...`);
 
       // Use the selected input currency
       const inputMint = inputCurrency === 'USDC' ? USDC_MINT : SOL_MINT;
@@ -351,7 +390,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
         );
       }
     } catch (error: any) {
-      logger.error('[iBuy] Buy More failed:', error);
+      console.error('[iBuy] Buy More failed:', error);
       Alert.alert('Buy Failed', error.message || 'Failed to execute buy');
     } finally {
       setBuyingToken(null);
@@ -833,3 +872,4 @@ const styles = StyleSheet.create({
     textAlign: 'center' as const,
   },
 });
+

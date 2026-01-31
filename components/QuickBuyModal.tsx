@@ -16,9 +16,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { useSolanaWallet } from '../hooks/solana-wallet-store';
-import { logger } from '../lib/client-logger';
-import { trpcClient } from '../lib/trpc';
+
+// Static dummy data for pure UI mode
+const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+const DUMMY_BALANCE = 10.5;
 
 interface QuickBuyModalProps {
     visible: boolean;
@@ -38,10 +39,17 @@ interface TokenInfo {
     hasMetadata?: boolean; // whether full metadata is available
 }
 
-const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const _SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }) => {
-    const { publicKey, balance, executeSwap, refreshBalances } = useSolanaWallet();
+    // Static dummy data - pure UI mode (no hooks)
+    const publicKey = DUMMY_PUBLIC_KEY;
+    const balance = DUMMY_BALANCE;
+    const executeSwap = async (_params: any) => {
+        Alert.alert('🚧 Demo Mode', 'Swap functionality is simulated in demo mode.');
+        return { success: true };
+    };
+    const refreshBalances = async () => { };
 
     const [tokenAddress, setTokenAddress] = useState('');
     const [solAmount, setSolAmount] = useState('');
@@ -67,7 +75,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address.trim());
     };
 
-    // Verify token with retry logic (max 3 attempts)
+    // Verify token with mock verification (local-only)
     const handleVerifyToken = async () => {
         const addr = tokenAddress.trim();
         if (!addr) {
@@ -84,35 +92,28 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         setTokenInfo(null);
 
         const address = tokenAddress.trim();
-        const MAX_ATTEMPTS = 3;
-        let lastError: unknown = null;
-        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            try {
-                logger.info(`[QuickBuy] Verifying token (attempt ${attempt}) via backend`);
-                const res = await trpcClient.market.verifyToken.query({ tokenAddress: address });
-                setTokenInfo({
-                    address,
-                    symbol: res.symbol,
-                    name: res.name,
-                    logoURI: res.logoURI || undefined,
-                    decimals: res.decimals,
-                    price: res.price || 0,
-                    verified: res.verified,
-                    source: res.source,
-                    hasMetadata: res.hasMetadata,
-                });
-                setIsVerifying(false);
-                return;
-            } catch (err) {
-                lastError = err;
-                if (attempt < MAX_ATTEMPTS) {
-                    await new Promise(r => setTimeout(r, 1000 * 2 ** (attempt - 1)));
-                }
-            }
+
+        try {
+            console.log('[QuickBuy] Verifying token locally');
+            // Mock token verification - simulate network delay then accept valid addresses
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            setTokenInfo({
+                address,
+                symbol: 'TOKEN',
+                name: 'Unknown Token',
+                decimals: 9,
+                price: 0,
+                verified: false,
+                source: 'generic',
+                hasMetadata: false,
+            });
+            setIsVerifying(false);
+        } catch (err) {
+            console.error('[QuickBuy] Token verification failed:', err);
+            setError('Unable to verify token.');
+            setIsVerifying(false);
         }
-        logger.error('[QuickBuy] Token verification failed:', lastError as Error);
-        setError('Unable to verify token after multiple attempts.');
-        setIsVerifying(false);
     };
 
     // Auto-verify when address looks complete
@@ -126,7 +127,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         return undefined;
     }, [tokenAddress]);
 
-    // Execute buy via Jupiter
+    // Execute buy - using local swap simulation
     const handleBuy = async () => {
         if (!publicKey) {
             Alert.alert('Connect Wallet', 'Please connect your wallet to buy tokens.');
@@ -149,63 +150,12 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
             return;
         }
 
-        const slippageBps = Math.round(parseFloat(slippage) * 100);
-        if (isNaN(slippageBps) || slippageBps < 10 || slippageBps > 5000) {
-            setError('Slippage must be between 0.1% and 50%');
-            return;
-        }
-
-        setIsBuying(true);
-        setError(null);
-
-        try {
-            // 1. Fetch quote from backend (optional, mainly for price impact/output preview)
-            const quote = await trpcClient.swap.getQuote.query({
-                inputMint: SOL_MINT,
-                outputMint: tokenInfo.address,
-                amount,
-                slippage: parseFloat(slippage),
-            });
-
-            // 2. Request swap transaction from backend
-            const swapRes = await trpcClient.swap.swap.mutate({
-                fromMint: SOL_MINT,
-                toMint: tokenInfo.address,
-                amount,
-                slippage: parseFloat(slippage),
-            });
-
-            if (!swapRes.swapTransaction) {
-                throw new Error('Failed to get swap transaction from server');
-            }
-
-            // 3. Sign & send transaction locally
-            const { signature } = await executeSwap(swapRes.swapTransaction);
-
-            // 4. Notify backend of signature
-            await trpcClient.swap.confirmSwap.mutate({ transactionId: swapRes.transactionId, signature });
-
-            // 5. Refresh balances
-            await refreshBalances();
-
-            // Calculate output amount for display (outputAmount is already in human-readable format)
-            const outputAmount = quote.outputAmount;
-
-            Alert.alert(
-                '🎉 Purchase Successful!',
-                `Bought ${outputAmount.toFixed(4)} ${tokenInfo.symbol}\nfor ${amount} SOL`,
-                [
-                    { text: 'View on Solscan', onPress: () => { } },
-                    { text: 'Done', onPress: onClose }
-                ]
-            );
-        } catch (err: any) {
-            console.error('Quick buy failed:', err);
-            const errorMsg = err?.message || err?.data?.message || 'Transaction failed. Please try again.';
-            setError(errorMsg);
-        } finally {
-            setIsBuying(false);
-        }
+        // Show Coming Soon message since swap feature is not available yet
+        Alert.alert(
+            '🚧 Coming Soon',
+            'Quick Buy feature is currently being upgraded. Please use a DEX like Jupiter or Raydium directly for now.',
+            [{ text: 'OK', onPress: onClose }]
+        );
     };
 
     const estimatedOutput = tokenInfo?.price && solAmount
@@ -676,3 +626,4 @@ const styles = StyleSheet.create({
         flex: 1,
     },
 });
+
