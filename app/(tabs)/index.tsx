@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -28,6 +28,8 @@ import { TraderCard } from '../../components/TraderCard';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { SendModal } from '../../components/SendModal';
 import { ReceiveModal } from '../../components/ReceiveModal';
+import * as SecureStore from 'expo-secure-store';
+import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding } from '../../services/wallet';
 
 // Static dummy data for pure UI mode
 const DUMMY_USER = {
@@ -74,18 +76,109 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 375;
 
-  // Static dummy data - pure UI mode (no hooks)
+  // Real wallet state
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [hasWallet, setHasWallet] = useState<boolean>(false);
+  const [totalBalance, setTotalBalance] = useState<number>(0);
+  const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [isLoadingWallet, setIsLoadingWallet] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [showCreateWalletModal, setShowCreateWalletModal] = useState<boolean>(false);
+  const [walletPin, setWalletPin] = useState<string>('');
+  const [isCreatingWallet, setIsCreatingWallet] = useState<boolean>(false);
+
+  // Auth state from dummy for now (integrate with real auth later)
   const user = DUMMY_USER;
   const authLoading = false;
   const isAuthenticated = true;
-  const totalBalance = DUMMY_WALLET.balance;
-  const dailyPnl = 25.50;
-  const refetch = async () => { };
+  const dailyPnl = 0; // Will be calculated from holdings
 
-  // Static wallet data for UI display
-  const solanaWallet = { publicKey: DUMMY_WALLET.publicKey };
-  const solanaPublicKey = DUMMY_WALLET.publicKey;
-  const getAvailableTokens = () => DUMMY_WALLET.tokens;
+  // Load wallet data
+  const loadWalletData = useCallback(async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) {
+        setIsLoadingWallet(false);
+        return;
+      }
+
+      // Check if wallet exists locally
+      const hasLocal = await hasLocalWallet();
+      setHasWallet(hasLocal);
+
+      if (hasLocal) {
+        const pubkey = await getLocalPublicKey();
+        setWalletAddress(pubkey);
+
+        // Fetch balances from backend
+        const portfolio = await fetchBalances(token);
+        if (portfolio) {
+          setTotalBalance(portfolio.totalUsdValue);
+          setHoldings(portfolio.holdings);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load wallet data:', error);
+    } finally {
+      setIsLoadingWallet(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadWalletData();
+  }, [loadWalletData]);
+
+  const refetch = async () => {
+    setRefreshing(true);
+    await loadWalletData();
+    setRefreshing(false);
+  };
+
+  // Handle wallet creation
+  const handleCreateWallet = async () => {
+    if (walletPin.length < 4) {
+      Alert.alert('Error', 'PIN must be at least 4 digits');
+      return;
+    }
+
+    setIsCreatingWallet(true);
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) {
+        Alert.alert('Error', 'Please login first');
+        return;
+      }
+
+      const result = await createWallet(token, walletPin);
+      if (result.success) {
+        setWalletAddress(result.publicKey || null);
+        setHasWallet(true);
+        setShowCreateWalletModal(false);
+        setWalletPin('');
+        Alert.alert('Success', 'Wallet created successfully!');
+        await loadWalletData();
+      } else {
+        Alert.alert('Error', result.error || 'Failed to create wallet');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to create wallet');
+    } finally {
+      setIsCreatingWallet(false);
+    }
+  };
+
+  // Static wallet data fallback for UI display
+  const solanaWallet = { publicKey: walletAddress || DUMMY_WALLET.publicKey };
+  const solanaPublicKey = walletAddress || DUMMY_WALLET.publicKey;
+  const getAvailableTokens = () => holdings.length > 0 ? holdings.map(h => ({
+    symbol: h.symbol,
+    name: h.name,
+    balance: h.balance,
+    usdValue: h.usdValue,
+    mint: h.mint,
+    decimals: h.decimals,
+    logo: WELL_KNOWN_TOKEN_LOGOS[h.symbol] || undefined
+  })) : DUMMY_WALLET.tokens;
   const executeSwap = async (_params?: any) => ({ success: true, signature: 'demo_signature_' + Date.now(), outputAmount: 0 });
 
   // Mock profile query - use local user data
@@ -201,7 +294,6 @@ export default function HomeScreen() {
 
   const isCreating = createCopyTradeMutation.isPending || false;
 
-  const [refreshing, setRefreshing] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<'coins' | 'traders' | 'copy'>('coins');
   const [pnlPeriod, setPnlPeriod] = React.useState<'1d' | '7d' | '30d' | '1y'>('1d');
 

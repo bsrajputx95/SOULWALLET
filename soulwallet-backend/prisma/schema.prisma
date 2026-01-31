@@ -25,6 +25,22 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // Wallet Relation (1-to-1)
+  wallet       Wallet?
+
   @@index([username])
   @@index([email])
+}
+
+model Wallet {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  publicKey     String   @unique
+  network       String   @default("mainnet-beta")
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([publicKey])
+  @@map("wallets")
 }

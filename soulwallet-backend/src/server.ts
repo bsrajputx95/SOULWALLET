@@ -5,6 +5,8 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import axios from 'axios';
 import prisma from './db';
 
 // Load environment variables
@@ -19,6 +21,23 @@ if (!JWT_SECRET) {
     console.error('FATAL ERROR: JWT_SECRET is not defined');
     process.exit(1);
 }
+
+// Solana RPC connection (Helius)
+const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL;
+if (!HELIUS_RPC_URL) {
+    console.warn('WARNING: HELIUS_RPC_URL is not defined. Wallet features disabled.');
+}
+const connection = HELIUS_RPC_URL ? new Connection(HELIUS_RPC_URL, 'confirmed') : null;
+
+// BirdEye API client for token prices
+const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
+if (!BIRDEYE_API_KEY) {
+    console.warn('WARNING: BIRDEYE_API_KEY is not defined. Price features disabled.');
+}
+const birdeye = BIRDEYE_API_KEY ? axios.create({
+    baseURL: 'https://public-api.birdeye.so',
+    headers: { 'X-API-KEY': BIRDEYE_API_KEY }
+}) : null;
 
 // ====== Middleware Stack ======
 
@@ -85,6 +104,10 @@ const changePasswordSchema = z.object({
 
 const deleteAccountSchema = z.object({
     password: z.string().min(1, 'Password is required'),
+});
+
+const linkWalletSchema = z.object({
+    publicKey: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address format'),
 });
 
 // ====== Authentication Middleware ======
@@ -403,6 +426,173 @@ app.post('/account/delete', authMiddleware, async (req: AuthRequest, res: Respon
         console.error('Account deletion error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
+});
+
+// ====== Wallet Endpoints ======
+
+// POST /wallet/link - Link a wallet public key to the authenticated user
+app.post('/wallet/link', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { publicKey } = linkWalletSchema.parse(req.body);
+
+        // Verify it's a valid Solana address
+        try {
+            new PublicKey(publicKey);
+        } catch {
+            res.status(400).json({ error: 'Invalid Solana address' });
+            return;
+        }
+
+        // Check if address already linked to another user
+        const existing = await prisma.wallet.findUnique({ where: { publicKey } });
+        if (existing && existing.userId !== req.userId) {
+            res.status(409).json({ error: 'Address already linked to another account' });
+            return;
+        }
+
+        // Create or update wallet
+        const wallet = await prisma.wallet.upsert({
+            where: { userId: req.userId! },
+            update: { publicKey },
+            create: { userId: req.userId!, publicKey, network: 'mainnet-beta' }
+        });
+
+        res.json({ success: true, wallet });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({ error: error.issues[0]?.message || 'Validation failed' });
+            return;
+        }
+        console.error('Wallet link error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /wallet/balances - Get SOL + Token balances with USD prices
+app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        // Check if RPC is configured
+        if (!connection) {
+            res.status(503).json({ error: 'Wallet service unavailable. RPC not configured.' });
+            return;
+        }
+
+        // Get user's wallet
+        const wallet = await prisma.wallet.findUnique({ where: { userId: req.userId! } });
+        if (!wallet) {
+            res.status(404).json({ error: 'No wallet linked' });
+            return;
+        }
+
+        const pubKey = new PublicKey(wallet.publicKey);
+
+        // 1. Get SOL Balance
+        const solBalance = await connection.getBalance(pubKey);
+        const solAmount = solBalance / LAMPORTS_PER_SOL;
+
+        // 2. Get Token Accounts (SPL tokens like USDC)
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+            pubKey,
+            { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+        );
+
+        // Prepare addresses for price fetch
+        const tokenAddresses = [
+            'So11111111111111111111111111111111111111112', // SOL wrapped address
+            ...tokenAccounts.value.map(t => t.account.data.parsed.info.mint)
+        ];
+
+        // 3. Fetch Prices from BirdEye (if configured)
+        let prices: Record<string, { value: number }> = {};
+        if (birdeye) {
+            try {
+                const priceResponse = await birdeye.post('/defi/multi_price', {
+                    list_address: tokenAddresses
+                });
+                prices = priceResponse.data?.data || {};
+            } catch (priceErr) {
+                console.warn('BirdEye price fetch failed:', priceErr);
+            }
+        }
+
+        // 4. Format Response
+        const holdings = [];
+        let totalUsd = 0;
+
+        // Add SOL
+        const solPrice = prices['So11111111111111111111111111111111111111112']?.value || 0;
+        const solUsd = solAmount * solPrice;
+        totalUsd += solUsd;
+
+        holdings.push({
+            symbol: 'SOL',
+            name: 'Solana',
+            mint: 'So11111111111111111111111111111111111111112',
+            balance: solAmount,
+            price: solPrice,
+            usdValue: solUsd,
+            decimals: 9
+        });
+
+        // Add SPL Tokens
+        for (const token of tokenAccounts.value) {
+            const info = token.account.data.parsed.info;
+            const mint = info.mint;
+            const amount = Number(info.tokenAmount.amount) / Math.pow(10, info.tokenAmount.decimals);
+
+            if (amount <= 0) continue;
+
+            const price = prices[mint]?.value || 0;
+            const usdValue = amount * price;
+            totalUsd += usdValue;
+
+            // Known token symbols
+            let symbol = 'Unknown';
+            let name = 'Unknown Token';
+            if (mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1') {
+                symbol = 'USDC';
+                name = 'USD Coin';
+            } else if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263') {
+                symbol = 'BONK';
+                name = 'Bonk';
+            } else if (mint === 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN') {
+                symbol = 'JUP';
+                name = 'Jupiter';
+            }
+
+            holdings.push({
+                symbol,
+                name,
+                mint,
+                balance: amount,
+                price,
+                usdValue,
+                decimals: info.tokenAmount.decimals
+            });
+        }
+
+        res.json({
+            success: true,
+            publicKey: wallet.publicKey,
+            totalUsdValue: totalUsd,
+            holdings: holdings.sort((a, b) => b.usdValue - a.usdValue)
+        });
+    } catch (error) {
+        console.error('Balance fetch error:', error);
+        res.status(500).json({ error: 'Failed to fetch balances' });
+    }
+});
+
+// GET /tokens/search - Search tokens for dropdowns
+app.get('/tokens/search', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
+    // For beta, return top Solana tokens
+    const topTokens = [
+        { symbol: 'SOL', name: 'Solana', address: 'So11111111111111111111111111111111111111112', decimals: 9 },
+        { symbol: 'USDC', name: 'USD Coin', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1', decimals: 6 },
+        { symbol: 'BONK', name: 'Bonk', address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5 },
+        { symbol: 'JUP', name: 'Jupiter', address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', decimals: 6 }
+    ];
+    res.json({ success: true, tokens: topTokens });
 });
 
 // GET /health (Unauthenticated - for Railway monitoring)
