@@ -71,8 +71,8 @@ export default function SignupNewScreen() {
         setErrorMessage(null);
 
         try {
-            // TODO: Replace with your actual backend URL (e.g., Railway deployment URL)
             const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+            console.log('API URL:', API_URL); // Debug log
 
             const response = await fetch(`${API_URL}/register`, {
                 method: 'POST',
