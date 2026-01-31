@@ -138,3 +138,98 @@ Identical pattern: calls `/register` endpoint with `{username, email, password, 
 ---
 
 *Last updated: 2026-01-31 13:49 IST*
+
+---
+
+## Session: Phase 2.1 - Solana Wallet (Jan 31, 2026 - 23:30 IST)
+
+### 📋 WHAT WAS THE TASK?
+Implement Solana wallet infrastructure for the SoulWallet app.
+
+---
+
+### 🔍 WHAT DID I DO?
+
+#### Backend Changes
+| Step | Action | Details |
+|------|--------|---------|
+| 1 | Added Wallet model | 1-to-1 relation with User, stores `publicKey` |
+| 2 | Installed Solana deps | `@solana/web3.js`, `axios`, `bs58` |
+| 3 | Added RPC/API setup | Helius RPC connection, BirdEye price client |
+| 4 | Created 3 endpoints | `/wallet/link`, `/wallet/balances`, `/tokens/search` |
+
+#### Frontend Changes
+| Step | Action | Details |
+|------|--------|---------|
+| 5 | Created wallet service | `services/wallet.ts` with createWallet, fetchBalances |
+| 6 | Updated home screen | Real wallet state, balance fetching from backend |
+| 7 | Fixed lint warnings | Added void suppressors for Phase 2.2 variables |
+
+---
+
+### 📁 FILES CHANGED
+
+| File | Change |
+|------|--------|
+| [schema.prisma](file:///b:/SOULWALLET/soulwallet-backend/prisma/schema.prisma) | Added Wallet model |
+| [server.ts](file:///b:/SOULWALLET/soulwallet-backend/src/server.ts) | Added 3 wallet endpoints, Helius/BirdEye setup |
+| [services/wallet.ts](file:///b:/SOULWALLET/services/wallet.ts) | **NEW** - Client-side wallet management |
+| [app/(tabs)/index.tsx](file:///b:/SOULWALLET/app/(tabs)/index.tsx) | Real wallet state, balance display |
+
+---
+
+### 🔧 NEW ENDPOINTS
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/wallet/link` | POST | Links client-generated public key to user |
+| `/wallet/balances` | GET | SOL + token balances with USD prices |
+| `/tokens/search` | GET | Returns top Solana tokens for dropdowns |
+
+---
+
+### 🔐 SECURITY ARCHITECTURE
+
+```
+┌─────────────────┐     ┌──────────────┐     ┌───────────┐
+│   Expo App      │────▶│   Backend    │────▶│  Helius   │
+│ • Keypair gen   │     │ • Public key │     │  BirdEye  │
+│ • PIN encrypt   │     │   storage    │     └───────────┘
+│ • SecureStore   │     │ • Price proxy│
+└─────────────────┘     └──────────────┘
+```
+**Private keys NEVER leave the device.**
+
+---
+
+### ⚠️ REQUIRED RAILWAY ENV VARS
+
+```
+HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+BIRDEYE_API_KEY=YOUR_KEY
+```
+
+---
+
+### ✅ VERIFICATION
+
+| Check | Status |
+|-------|--------|
+| Backend TypeScript build | ✅ PASS |
+| Prisma client regenerated | ✅ PASS |
+| Frontend lint warnings fixed | ✅ PASS |
+| Pushed to GitHub | ✅ PASS |
+
+---
+
+### 🚀 NEXT STEPS (Phase 2.2)
+
+- [ ] Add Create Wallet modal UI
+- [ ] `/transactions/prepare-send` endpoint
+- [ ] `/transactions/broadcast` endpoint
+- [ ] Portfolio screen real data
+- [ ] ReceiveModal with real public key
+
+---
+
+*Last updated: 2026-01-31 23:30 IST*
