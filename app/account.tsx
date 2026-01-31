@@ -14,6 +14,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as SecureStore from 'expo-secure-store';
+import { useRouter } from 'expo-router';
 import {
   Languages,
   DollarSign,
@@ -29,41 +31,189 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ProfileForm } from '../components/account/ProfileForm';
 
-// Static dummy profile for pure UI mode
-const DUMMY_PROFILE = {
-  id: '1',
-  firstName: 'Demo',
-  lastName: 'User',
-  email: 'demo@example.com',
-  phone: '+1234567890',
-  dateOfBirth: '1990-01-01',
-  defaultCurrency: 'USD',
-  language: 'English',
-  profileImage: null as string | null,
-};
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+
+// Profile type from backend
+interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  profileImage: string | null;
+  currency: string;
+  language: string;
+  createdAt: string;
+}
 
 export default function AccountScreen() {
-  // Static dummy data - pure UI mode (no hooks)
-  const profile = DUMMY_PROFILE;
-  const isLoading = false;
-  const isAccountUpdating = false;
-  const updateProfile = async (_data: any) => {
-    Alert.alert('🚧 Demo Mode', 'Profile update is simulated in demo mode.');
+  const router = useRouter();
+
+  // Real profile state
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAccountUpdating, setIsAccountUpdating] = useState(false);
+
+  // Fetch profile from backend
+  const fetchProfile = async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+
+      if (json.success) {
+        setProfile(json.user);
+      }
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+  }, []);
+
+  // Real update profile handler
+  const updateProfile = async (data: any) => {
+    try {
+      setIsAccountUpdating(true);
+      const token = await SecureStore.getItemAsync('token');
+      const response = await fetch(`${API_URL}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          firstName: data.firstName || undefined,
+          lastName: data.lastName || undefined,
+          phone: data.phone || undefined,
+          dateOfBirth: data.dateOfBirth || undefined,
+          profileImage: data.profileImage || undefined,
+        }),
+      });
+
+      const json = await response.json();
+
+      if (!response.ok) {
+        throw new Error(json.error || 'Failed to update profile');
+      }
+
+      setProfile(json.user);
+      return json;
+    } catch (error: any) {
+      throw error;
+    } finally {
+      setIsAccountUpdating(false);
+    }
   };
 
   const uploadProfileImage = async (_base64: string, _mimeType: string) => {
-    Alert.alert('🚧 Demo Mode', 'Image upload is simulated in demo mode.');
-    return { success: true };
+    Alert.alert('🚧 Coming Soon', 'Image upload to cloud storage is not configured yet. Store the URL directly for now.');
+    return { success: false };
   };
   const isUploadingImage = false;
 
-  // Mock delete account mutation - coming soon
+  // Real delete account handler
   const deleteAccountMutation = {
-    mutateAsync: async (_params: any) => {
-      Alert.alert('🚧 Coming Soon', 'Account deletion is not available yet.');
-      throw new Error('Feature not available');
+    mutateAsync: async (params: { password: string }) => {
+      const token = await SecureStore.getItemAsync('token');
+      const response = await fetch(`${API_URL}/account/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: params.password }),
+      });
+
+      const json = await response.json();
+
+      if (!response.ok) {
+        throw new Error(json.error || 'Failed to delete account');
+      }
+
+      // Clear local storage
+      await SecureStore.deleteItemAsync('token');
+      await SecureStore.deleteItemAsync('user_data');
+
+      // Navigate to login
+      router.replace('/(auth)/login');
+
+      return json;
     },
     isPending: false,
+  };
+
+  // Password reset handler
+  const handleResetPassword = () => {
+    Alert.prompt(
+      'Reset Password',
+      'Enter your current password:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Next',
+          onPress: (currentPassword) => {
+            if (!currentPassword) {
+              Alert.alert('Error', 'Please enter your current password');
+              return;
+            }
+            Alert.prompt(
+              'New Password',
+              'Enter your new password (min 6 characters):',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Update',
+                  onPress: async (newPassword) => {
+                    if (!newPassword || newPassword.length < 6) {
+                      Alert.alert('Error', 'Password must be at least 6 characters');
+                      return;
+                    }
+                    try {
+                      const token = await SecureStore.getItemAsync('token');
+                      const response = await fetch(`${API_URL}/auth/reset-password`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({
+                          currentPassword,
+                          newPassword,
+                        }),
+                      });
+                      const json = await response.json();
+                      if (response.ok) {
+                        Alert.alert('Success', 'Password updated successfully');
+                      } else {
+                        Alert.alert('Error', json.error || 'Failed to update password');
+                      }
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message || 'Failed to update password');
+                    }
+                  },
+                },
+              ],
+              'secure-text'
+            );
+          },
+        },
+      ],
+      'secure-text'
+    );
   };
 
   // Initialize form fields with empty strings - useEffect will populate when profile loads
@@ -338,7 +488,7 @@ export default function AccountScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Security & Privacy</Text>
 
-          <TouchableOpacity style={styles.settingRow} onPress={() => Alert.alert('Reset Password', 'This feature is coming soon!')}>
+          <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
             <View style={styles.settingLeft}>
               <Lock size={20} color={COLORS.textSecondary} />
               <Text style={styles.settingText}>Reset Password</Text>

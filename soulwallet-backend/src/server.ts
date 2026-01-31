@@ -70,6 +70,23 @@ const loginSchema = z.object({
     password: z.string().min(1, 'Password is required'),
 });
 
+const profileSchema = z.object({
+    firstName: z.string().min(1).max(50).optional(),
+    lastName: z.string().min(1).max(50).optional(),
+    phone: z.string().optional(),
+    dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD format').optional(),
+    profileImage: z.string().url().optional(),
+});
+
+const changePasswordSchema = z.object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z.string().min(6, 'New password must be at least 6 characters'),
+});
+
+const deleteAccountSchema = z.object({
+    password: z.string().min(1, 'Password is required'),
+});
+
 // ====== Authentication Middleware ======
 
 const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): void => {
@@ -230,6 +247,13 @@ app.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promise<
                 id: true,
                 username: true,
                 email: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+                dateOfBirth: true,
+                profileImage: true,
+                currency: true,
+                language: true,
                 createdAt: true,
             },
         });
@@ -245,6 +269,138 @@ app.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promise<
         });
     } catch (error) {
         console.error('Get profile error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// PUT /profile (Protected)
+app.put('/profile', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const data = profileSchema.parse(req.body);
+
+        const user = await prisma.user.update({
+            where: { id: req.userId },
+            data: {
+                firstName: data.firstName,
+                lastName: data.lastName,
+                phone: data.phone,
+                dateOfBirth: data.dateOfBirth,
+                profileImage: data.profileImage,
+            },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+                dateOfBirth: true,
+                profileImage: true,
+                currency: true,
+                language: true,
+            },
+        });
+
+        res.json({
+            success: true,
+            user,
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({
+                error: error.issues[0]?.message || 'Validation failed',
+            });
+            return;
+        }
+
+        console.error('Profile update error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /auth/reset-password (Protected)
+app.post('/auth/reset-password', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.userId },
+        });
+
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+
+        if (!isValidPassword) {
+            res.status(401).json({ error: 'Current password is incorrect' });
+            return;
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        await prisma.user.update({
+            where: { id: req.userId },
+            data: { password: hashedPassword },
+        });
+
+        res.json({
+            success: true,
+            message: 'Password updated successfully',
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({
+                error: error.issues[0]?.message || 'Validation failed',
+            });
+            return;
+        }
+
+        console.error('Password change error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /account/delete (Protected)
+app.post('/account/delete', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { password } = deleteAccountSchema.parse(req.body);
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.userId },
+        });
+
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        const isValidPassword = await bcrypt.compare(password, user.password);
+
+        if (!isValidPassword) {
+            res.status(401).json({ error: 'Password is incorrect' });
+            return;
+        }
+
+        await prisma.user.delete({
+            where: { id: req.userId },
+        });
+
+        res.json({
+            success: true,
+            message: 'Account deleted permanently',
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({
+                error: error.issues[0]?.message || 'Validation failed',
+            });
+            return;
+        }
+
+        console.error('Account deletion error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

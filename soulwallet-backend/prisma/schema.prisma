@@ -11,11 +11,19 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  username  String   @unique
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  password     String
+  firstName    String?
+  lastName     String?
+  phone        String?
+  dateOfBirth  String?  // YYYY-MM-DD format
+  profileImage String?  // URL to image
+  currency     String   @default("USD")
+  language     String   @default("en")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([username])
   @@index([email])
