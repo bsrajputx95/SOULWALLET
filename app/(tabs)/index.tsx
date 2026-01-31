@@ -93,6 +93,11 @@ export default function HomeScreen() {
   const isAuthenticated = true;
   const dailyPnl = 0; // Will be calculated from holdings
 
+  // Suppress unused variable warnings (used in Phase 2.2 Create Wallet modal)
+  void showCreateWalletModal; void setShowCreateWalletModal;
+  void isCreatingWallet;
+  void hasWallet; void isLoadingWallet;
+
   // Load wallet data
   const loadWalletData = useCallback(async () => {
     try {
@@ -166,6 +171,7 @@ export default function HomeScreen() {
       setIsCreatingWallet(false);
     }
   };
+  void handleCreateWallet; // Used in Phase 2.2 Create Wallet modal
 
   // Static wallet data fallback for UI display
   const solanaWallet = { publicKey: walletAddress || DUMMY_WALLET.publicKey };
