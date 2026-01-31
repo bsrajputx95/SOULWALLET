@@ -72,7 +72,8 @@ export default function SignupNewScreen() {
 
         try {
             const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
-            console.log('API URL:', API_URL); // Debug log
+            console.log('API URL:', API_URL);
+            console.log('Request body:', { username: username.trim(), email: email.trim(), password: '***', confirmPassword: '***' });
 
             const response = await fetch(`${API_URL}/register`, {
                 method: 'POST',
@@ -87,10 +88,22 @@ export default function SignupNewScreen() {
                 }),
             });
 
-            const data = await response.json();
+            console.log('Response status:', response.status);
+            const responseText = await response.text();
+            console.log('Response body:', responseText);
+
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch {
+                setErrorMessage(`Server error (${response.status}): ${responseText.slice(0, 100)}`);
+                return;
+            }
 
             if (!response.ok) {
-                setErrorMessage(data.error || 'Registration failed');
+                // Show detailed error message
+                const errorMsg = data.error || data.message || JSON.stringify(data);
+                setErrorMessage(`Error ${response.status}: ${errorMsg}`);
                 return;
             }
 
@@ -102,9 +115,10 @@ export default function SignupNewScreen() {
 
             // Navigate to main app on success
             router.replace('/(tabs)');
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('Signup error:', error);
-            setErrorMessage('Network error. Please check your connection.');
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            setErrorMessage(`Network error: ${errorMsg}`);
         } finally {
             setIsLoading(false);
         }
