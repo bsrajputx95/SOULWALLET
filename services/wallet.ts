@@ -171,6 +171,58 @@ export const clearWalletData = async (): Promise<void> => {
 };
 
 /**
+ * Import an existing wallet from private key
+ * Encrypts with PIN and links to backend
+ */
+export const importWallet = async (
+    authToken: string,
+    privateKeyBase58: string,
+    userPin: string
+): Promise<{ success: boolean; publicKey?: string; secretKey?: Uint8Array; error?: string }> => {
+    try {
+        // 1. Decode private key from base58
+        const secretKey = bs58.decode(privateKeyBase58);
+
+        // 2. Create keypair from secret key
+        const keypair = Keypair.fromSecretKey(secretKey);
+        const publicKey = keypair.publicKey.toBase58();
+
+        // 3. Encrypt secret key with user PIN
+        const encrypted = simpleEncrypt(JSON.stringify(Array.from(secretKey)), userPin);
+
+        // 4. Store encrypted secret locally
+        await SecureStore.setItemAsync('wallet_secret', encrypted);
+        await SecureStore.setItemAsync('wallet_pubkey', publicKey);
+        await SecureStore.setItemAsync('wallet_pin_hash', btoa(userPin));
+
+        // 5. Link public key to user account on backend
+        const response = await fetch(`${API_URL}/wallet/link`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ publicKey }),
+        });
+
+        const json = await response.json();
+
+        if (!response.ok) {
+            // Rollback local storage on failure
+            await SecureStore.deleteItemAsync('wallet_secret');
+            await SecureStore.deleteItemAsync('wallet_pubkey');
+            await SecureStore.deleteItemAsync('wallet_pin_hash');
+            return { success: false, error: json.error || 'Failed to link wallet' };
+        }
+
+        return { success: true, publicKey, secretKey };
+    } catch (error: any) {
+        console.error('Import wallet error:', error);
+        return { success: false, error: error.message || 'Invalid private key format' };
+    }
+};
+
+/**
  * Send SOL transaction - prepares on backend, signs locally, broadcasts
  */
 export const sendTransaction = async (

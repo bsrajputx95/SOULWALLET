@@ -31,13 +31,7 @@ import { ReceiveModal } from '../../components/ReceiveModal';
 import * as SecureStore from 'expo-secure-store';
 import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding } from '../../services/wallet';
 
-// Static dummy data for pure UI mode
-const DUMMY_USER = {
-  username: 'demo_user',
-  email: 'demo@example.com',
-  profileImage: null as string | null,
-  walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-};
+// Static fallback wallet data for UI display
 const DUMMY_WALLET = {
   publicKey: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
   balance: 1234.56,
@@ -71,6 +65,8 @@ function getWellKnownTokenLogo(symbol?: string): string | undefined {
   return WELL_KNOWN_TOKEN_LOGOS[symbol.toUpperCase()];
 }
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -87,11 +83,41 @@ export default function HomeScreen() {
   const [walletPin, setWalletPin] = useState<string>('');
   const [isCreatingWallet, setIsCreatingWallet] = useState<boolean>(false);
 
-  // Auth state from dummy for now (integrate with real auth later)
-  const user = DUMMY_USER;
-  const authLoading = false;
-  const isAuthenticated = true;
+  // Real user profile state
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const isAuthenticated = !!user;
   const dailyPnl = 0; // Will be calculated from holdings
+
+  // Fetch user profile from backend
+  const fetchUserProfile = async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) {
+        setAuthLoading(false);
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user || data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
 
   // Suppress unused variable warnings (used in Phase 2.2 Create Wallet modal)
   void showCreateWalletModal; void setShowCreateWalletModal;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -23,40 +23,91 @@ import {
   ExternalLink,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
+import * as SecureStore from 'expo-secure-store';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { NeonCard } from '../components/NeonCard';
 import { NeonButton } from '../components/NeonButton';
+import { getLocalPublicKey, clearWalletData } from '../services/wallet';
 
-// Static dummy data for pure UI mode
-const DUMMY_USER = {
-  username: 'demo_user',
-  email: 'demo@example.com',
-  walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-};
-const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+
+interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  profileImage?: string;
+}
 
 export default function SettingsScreen() {
   const router = useRouter();
 
-  // Static dummy data - pure UI mode (no hooks)
-  const user = DUMMY_USER;
-  const solanaPublicKey = DUMMY_PUBLIC_KEY;
-  const deleteWallet = async () => {
-    Alert.alert('🚧 Demo Mode', 'Wallet deletion is simulated in demo mode.');
-  };
-  const walletLoading = false;
+  // State for user profile and wallet
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [solanaPublicKey, setSolanaPublicKey] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [walletLoading, setWalletLoading] = useState(false);
 
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [showMnemonic, setShowMnemonic] = useState(false);
 
+  // Fetch user profile from backend
+  const fetchProfile = async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user || data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch profile:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load local wallet public key
+  const loadWalletKey = async () => {
+    const pubKey = await getLocalPublicKey();
+    setSolanaPublicKey(pubKey);
+  };
+
+  // Delete wallet function
+  const deleteWallet = async () => {
+    setWalletLoading(true);
+    try {
+      await clearWalletData();
+      setSolanaPublicKey(null);
+    } finally {
+      setWalletLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+    loadWalletKey();
+  }, []);
+
   // Get wallet address from either Solana wallet store or user auth store
-  const walletAddress = solanaPublicKey || user?.walletAddress || null;
+  const walletAddress = solanaPublicKey || null;
   const hasWallet = !!walletAddress;
 
-  // Detect if wallet needs reconnection (stored address but no local private key)
-  const needsReconnect = !solanaPublicKey && !!user?.walletAddress;
+  // Detect if wallet needs reconnection (has backend wallet but no local key)
+  const needsReconnect = false; // Simplified - we rely on local wallet only now
   const isWalletUnlocked = !!solanaPublicKey;
 
   // Get wallet data from user or use fallback
