@@ -22,22 +22,12 @@ if (!JWT_SECRET) {
     process.exit(1);
 }
 
-// Solana RPC connection (Helius)
-const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL;
-if (!HELIUS_RPC_URL) {
-    console.warn('WARNING: HELIUS_RPC_URL is not defined. Wallet features disabled.');
-}
-const connection = HELIUS_RPC_URL ? new Connection(HELIUS_RPC_URL, 'confirmed') : null;
+// Solana RPC connection (Helius or public)
+const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const connection = new Connection(HELIUS_RPC_URL, 'confirmed');
 
-// BirdEye API client for token prices
-const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
-if (!BIRDEYE_API_KEY) {
-    console.warn('WARNING: BIRDEYE_API_KEY is not defined. Price features disabled.');
-}
-const birdeye = BIRDEYE_API_KEY ? axios.create({
-    baseURL: 'https://public-api.birdeye.so',
-    headers: { 'X-API-KEY': BIRDEYE_API_KEY }
-}) : null;
+// Jupiter Price API (FREE - no API key needed)
+const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
 
 // ====== Middleware Stack ======
 
@@ -471,12 +461,6 @@ app.post('/wallet/link', authMiddleware, async (req: AuthRequest, res: Response)
 // GET /wallet/balances - Get SOL + Token balances with USD prices
 app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        // Check if RPC is configured
-        if (!connection) {
-            res.status(503).json({ error: 'Wallet service unavailable. RPC not configured.' });
-            return;
-        }
-
         // Get user's wallet
         const wallet = await prisma.wallet.findUnique({ where: { userId: req.userId! } });
         if (!wallet) {
@@ -502,17 +486,20 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
             ...tokenAccounts.value.map(t => t.account.data.parsed.info.mint)
         ];
 
-        // 3. Fetch Prices from BirdEye (if configured)
-        let prices: Record<string, { value: number }> = {};
-        if (birdeye) {
-            try {
-                const priceResponse = await birdeye.post('/defi/multi_price', {
-                    list_address: tokenAddresses
-                });
-                prices = priceResponse.data?.data || {};
-            } catch (priceErr) {
-                console.warn('BirdEye price fetch failed:', priceErr);
+        // 3. Fetch Prices from Jupiter (FREE API)
+        let prices: Record<string, number> = {};
+        try {
+            // Jupiter accepts comma-separated mint addresses
+            const priceResponse = await axios.get(JUPITER_PRICE_API, {
+                params: { ids: tokenAddresses.join(',') }
+            });
+            // Jupiter returns { data: { mint: { id, mintSymbol, vsToken, vsTokenSymbol, price } } }
+            const jupData = priceResponse.data?.data || {};
+            for (const [mint, info] of Object.entries(jupData)) {
+                prices[mint] = (info as any)?.price || 0;
             }
+        } catch (priceErr) {
+            console.warn('Jupiter price fetch failed:', priceErr);
         }
 
         // 4. Format Response
@@ -520,7 +507,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
         let totalUsd = 0;
 
         // Add SOL
-        const solPrice = prices['So11111111111111111111111111111111111111112']?.value || 0;
+        const solPrice = prices['So11111111111111111111111111111111111111112'] || 0;
         const solUsd = solAmount * solPrice;
         totalUsd += solUsd;
 
@@ -542,7 +529,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
 
             if (amount <= 0) continue;
 
-            const price = prices[mint]?.value || 0;
+            const price = prices[mint] || 0;
             const usdValue = amount * price;
             totalUsd += usdValue;
 
