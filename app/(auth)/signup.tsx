@@ -109,7 +109,7 @@ export default function SignupNewScreen() {
 
             // Store JWT token securely
             if (data.token) {
-                await SecureStore.setItemAsync('auth_token', data.token);
+                await SecureStore.setItemAsync('token', data.token);
                 await SecureStore.setItemAsync('user_data', JSON.stringify(data.user));
             }
 

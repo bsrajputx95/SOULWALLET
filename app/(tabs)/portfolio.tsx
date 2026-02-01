@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
@@ -24,6 +25,9 @@ import { NeonButton } from '../../components/NeonButton';
 import { NeonInput } from '../../components/NeonInput';
 import { QueueStatusBanner } from '../../components/QueueStatusBanner';
 import { PortfolioSkeleton } from '../../components/SkeletonLoader';
+import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding } from '../../services/wallet';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
 // Static dummy types for pure UI mode
 type Token = {
@@ -53,19 +57,6 @@ type CopiedWallet = {
   roi: number;
 };
 
-// Static dummy data for pure UI mode
-const DUMMY_USER = { username: 'demo_user', profileImage: null as string | null, walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' };
-const DUMMY_WALLET = {
-  publicKey: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-  tokens: [
-    { id: '1', symbol: 'SOL', name: 'Solana', balance: 10.5, usdValue: 1050, price: 105, change24h: 2.5, value: 1050 },
-    { id: '2', symbol: 'USDC', name: 'USD Coin', balance: 500, usdValue: 500, price: 1, change24h: 0, value: 500 },
-  ] as Token[],
-  copiedWallets: [] as CopiedWallet[],
-  totalBalance: 1550,
-  dailyPnl: 25.50,
-};
-
 type PortfolioTab = 'tokens' | 'copied' | 'watchlist';
 type ChartPeriod = '24h' | '7d' | '30d' | 'all';
 type ChartType = 'line' | 'candle';
@@ -73,14 +64,86 @@ type ChartType = 'line' | 'candle';
 export default function PortfolioScreen() {
   const router = useRouter();
 
-  // Static dummy data - pure UI mode (no hooks)
-  const user = DUMMY_USER;
-  const solanaPublicKey = DUMMY_WALLET.publicKey;
-  const tokens = DUMMY_WALLET.tokens;
-  const copiedWallets = DUMMY_WALLET.copiedWallets;
-  const totalBalance = DUMMY_WALLET.totalBalance;
-  const dailyPnl = DUMMY_WALLET.dailyPnl;
-  const refetch = async () => { };
+  // Real user profile state
+  const [user, setUser] = useState<any>(null);
+  const [solanaPublicKey, setSolanaPublicKey] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<Token[]>([]);
+  const [copiedWallets] = useState<CopiedWallet[]>([]);
+  const [totalBalance, setTotalBalance] = useState<number>(0);
+  const [dailyPnl] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch user profile from backend
+  const fetchUserProfile = useCallback(async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) return;
+
+      const response = await fetch(`${API_URL}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user || data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch profile:', error);
+    }
+  }, []);
+
+  // Fetch wallet data from backend
+  const fetchWalletData = useCallback(async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) return;
+
+      // Check if wallet exists locally
+      const hasLocal = await hasLocalWallet();
+      if (hasLocal) {
+        const pubkey = await getLocalPublicKey();
+        setSolanaPublicKey(pubkey);
+
+        // Fetch balances from backend
+        const portfolio = await fetchBalances(token);
+        if (portfolio) {
+          setTotalBalance(portfolio.totalUsdValue);
+          // Transform holdings to Token type
+          setTokens(portfolio.holdings.map((h: Holding, i: number) => ({
+            id: String(i + 1),
+            symbol: h.symbol,
+            name: h.name,
+            balance: h.balance,
+            usdValue: h.usdValue,
+            price: h.balance > 0 ? h.usdValue / h.balance : 0,
+            change24h: 0,
+            value: h.usdValue,
+            ...(h.logo ? { logo: h.logo } : {}),
+          })));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch wallet data:', error);
+    }
+  }, []);
+
+  // Refetch function for pull-to-refresh
+  const refetch = useCallback(async () => {
+    await Promise.all([fetchUserProfile(), fetchWalletData()]);
+  }, [fetchUserProfile, fetchWalletData]);
+
+  // Load data on mount
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      await Promise.all([fetchUserProfile(), fetchWalletData()]);
+      setIsLoading(false);
+    };
+    loadData();
+  }, [fetchUserProfile, fetchWalletData]);
+
   const updateCopiedWallet = async (_id: string, _updates: any, _totp: string) => {
     Alert.alert('🚧 Demo Mode', 'Copy trade update is simulated.');
     return true;
@@ -95,13 +158,13 @@ export default function PortfolioScreen() {
 
   // Set initial load to false once data is loaded
   useEffect(() => {
-    if (tokens.length > 0) {
+    if (!isLoading) {
       setIsInitialLoad(false);
     }
     // Safety timeout
     const timer = setTimeout(() => setIsInitialLoad(false), 3000);
     return () => clearTimeout(timer);
-  }, [tokens.length]);
+  }, [isLoading]);
 
   // Mock trending data - static mock data
   const trendingData: any = { pairs: [] };

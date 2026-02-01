@@ -36,6 +36,7 @@ export interface Holding {
     price: number;
     usdValue: number;
     decimals: number;
+    logo?: string;
 }
 
 // Portfolio response from backend
