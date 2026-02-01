@@ -22,9 +22,16 @@ if (!JWT_SECRET) {
     process.exit(1);
 }
 
-// Solana RPC connection (Helius or public)
-const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com';
-const connection = new Connection(HELIUS_RPC_URL, 'confirmed');
+// Solana RPC connection (lazy initialization)
+const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL?.trim() || 'https://api.mainnet-beta.solana.com';
+let connection: Connection | null = null;
+
+const getConnection = () => {
+    if (!connection) {
+        connection = new Connection(HELIUS_RPC_URL, 'confirmed');
+    }
+    return connection;
+};
 
 // Jupiter Price API (FREE - no API key needed)
 const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
@@ -476,11 +483,11 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
         const pubKey = new PublicKey(wallet.publicKey);
 
         // 1. Get SOL Balance
-        const solBalance = await connection.getBalance(pubKey);
+        const solBalance = await getConnection().getBalance(pubKey);
         const solAmount = solBalance / LAMPORTS_PER_SOL;
 
         // 2. Get Token Accounts (SPL tokens like USDC)
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        const tokenAccounts = await getConnection().getParsedTokenAccountsByOwner(
             pubKey,
             { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
         );
