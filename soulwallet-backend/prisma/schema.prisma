@@ -27,6 +27,9 @@ model User {
 
   // Wallet Relation (1-to-1)
   wallet       Wallet?
+  
+  // Transaction History
+  transactions Transaction[]
 
   @@index([username])
   @@index([email])
@@ -43,4 +46,24 @@ model Wallet {
 
   @@index([publicKey])
   @@map("wallets")
+}
+
+model Transaction {
+  id            String   @id @default(cuid())
+  userId        String
+  signature     String   @unique
+  type          String   // "send" or "receive"
+  amount        Float
+  token         String   // "SOL", "USDC", etc.
+  fromAddress   String
+  toAddress     String
+  fee           Float    @default(0.000005)
+  status        String   @default("pending") // "pending", "confirmed", "failed"
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([signature])
+  @@map("transactions")
 }

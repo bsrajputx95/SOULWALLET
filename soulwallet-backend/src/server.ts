@@ -5,8 +5,9 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js';
 import axios from 'axios';
+import bs58 from 'bs58';
 import prisma from './db';
 
 // Load environment variables
@@ -105,6 +106,21 @@ const deleteAccountSchema = z.object({
 
 const linkWalletSchema = z.object({
     publicKey: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address format'),
+});
+
+const prepareSendSchema = z.object({
+    toAddress: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address'),
+    amount: z.number().positive('Amount must be greater than 0'),
+    token: z.enum(['SOL', 'USDC']).default('SOL')
+});
+
+const broadcastSchema = z.object({
+    signedTransaction: z.string().min(10, 'Invalid transaction'),
+    txData: z.object({
+        toAddress: z.string(),
+        amount: z.number(),
+        token: z.string()
+    })
 });
 
 // ====== Authentication Middleware ======
@@ -592,6 +608,186 @@ app.get('/tokens/search', authMiddleware, async (_req: Request, res: Response): 
         { symbol: 'JUP', name: 'Jupiter', address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', decimals: 6 }
     ];
     res.json({ success: true, tokens: topTokens });
+});
+
+// ====== Transaction Endpoints ======
+
+// POST /transactions/prepare-send - Create unsigned transaction for client signing
+app.post('/transactions/prepare-send', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const validatedData = prepareSendSchema.parse(req.body);
+        const userId = req.userId;
+
+        // Get user's wallet
+        const wallet = await prisma.wallet.findUnique({ where: { userId } });
+        if (!wallet) {
+            res.status(400).json({ error: 'No wallet linked to account' });
+            return;
+        }
+
+        const fromPubkey = new PublicKey(wallet.publicKey);
+        const toPubkey = new PublicKey(validatedData.toAddress);
+
+        // Only SOL transfers for now
+        if (validatedData.token !== 'SOL') {
+            res.status(400).json({ error: 'Only SOL transfers supported in Phase 2.2. SPL tokens coming in Phase 2.3' });
+            return;
+        }
+
+        // Check balance
+        const balance = await getConnection().getBalance(fromPubkey);
+        const amountLamports = Math.floor(validatedData.amount * LAMPORTS_PER_SOL);
+        const feeBuffer = 5000; // 0.000005 SOL for fees
+
+        if (balance < amountLamports + feeBuffer) {
+            res.status(400).json({
+                error: 'Insufficient balance',
+                available: balance / LAMPORTS_PER_SOL,
+                required: validatedData.amount + (feeBuffer / LAMPORTS_PER_SOL)
+            });
+            return;
+        }
+
+        // Create unsigned transaction
+        const transaction = new Transaction().add(
+            SystemProgram.transfer({
+                fromPubkey,
+                toPubkey,
+                lamports: amountLamports,
+            })
+        );
+
+        // Get latest blockhash
+        const { blockhash, lastValidBlockHeight } = await getConnection().getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = fromPubkey;
+
+        // Serialize unsigned transaction
+        const serializedTransaction = bs58.encode(
+            transaction.serialize({ requireAllSignatures: false, verifySignatures: false })
+        );
+
+        res.json({
+            success: true,
+            transaction: serializedTransaction,
+            blockhash,
+            lastValidBlockHeight,
+            estimatedFee: 0.000005
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({ error: error.issues[0]?.message || 'Validation failed' });
+            return;
+        }
+        console.error('Prepare send error:', error);
+        res.status(500).json({ error: 'Failed to prepare transaction' });
+    }
+});
+
+// POST /transactions/broadcast - Broadcast signed transaction to Solana
+app.post('/transactions/broadcast', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const validatedData = broadcastSchema.parse(req.body);
+        const userId = req.userId;
+
+        // Get user's wallet for fromAddress
+        const wallet = await prisma.wallet.findUnique({ where: { userId } });
+        if (!wallet) {
+            res.status(400).json({ error: 'No wallet linked to account' });
+            return;
+        }
+
+        // Decode and send the signed transaction
+        const signedTxBuffer = bs58.decode(validatedData.signedTransaction);
+
+        const signature = await getConnection().sendRawTransaction(signedTxBuffer, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed'
+        });
+
+        // Wait for confirmation
+        const latestBlockhash = await getConnection().getLatestBlockhash();
+        await getConnection().confirmTransaction({
+            signature,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+        }, 'confirmed');
+
+        // Save transaction to database
+        await prisma.transaction.create({
+            data: {
+                userId: userId!,
+                signature,
+                type: 'send',
+                amount: validatedData.txData.amount,
+                token: validatedData.txData.token,
+                fromAddress: wallet.publicKey,
+                toAddress: validatedData.txData.toAddress,
+                fee: 0.000005,
+                status: 'confirmed'
+            }
+        });
+
+        res.json({
+            success: true,
+            signature,
+            explorerUrl: `https://solscan.io/tx/${signature}`
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({ error: error.issues[0]?.message || 'Validation failed' });
+            return;
+        }
+
+        // Try to save failed transaction
+        const userId = (req as AuthRequest).userId;
+        if (userId) {
+            try {
+                const wallet = await prisma.wallet.findUnique({ where: { userId } });
+                if (wallet && req.body.txData) {
+                    await prisma.transaction.create({
+                        data: {
+                            userId,
+                            signature: `failed_${Date.now()}`,
+                            type: 'send',
+                            amount: req.body.txData.amount || 0,
+                            token: req.body.txData.token || 'SOL',
+                            fromAddress: wallet.publicKey,
+                            toAddress: req.body.txData.toAddress || 'unknown',
+                            fee: 0,
+                            status: 'failed'
+                        }
+                    });
+                }
+            } catch {
+                // Ignore save errors
+            }
+        }
+
+        console.error('Broadcast error:', error);
+        res.status(500).json({ error: 'Failed to broadcast transaction' });
+    }
+});
+
+// GET /transactions/history - Get user's transaction history
+app.get('/transactions/history', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const userId = req.userId;
+
+        const transactions = await prisma.transaction.findMany({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+            take: 50
+        });
+
+        res.json({
+            success: true,
+            transactions
+        });
+    } catch (error) {
+        console.error('Transaction history error:', error);
+        res.status(500).json({ error: 'Failed to fetch transaction history' });
+    }
 });
 
 // GET /health (Unauthenticated - for Railway monitoring)

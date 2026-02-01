@@ -1352,6 +1352,14 @@ export default function HomeScreen() {
         visible={showSendModal}
         onClose={() => setShowSendModal(false)}
         onSuccess={() => refetch()}
+        holdings={holdings.map(h => ({
+          symbol: h.symbol,
+          name: h.name,
+          mint: h.mint,
+          decimals: h.decimals,
+          balance: h.balance,
+          logo: WELL_KNOWN_TOKEN_LOGOS[h.symbol] || ''
+        }))}
       />
 
       {/* Receive Modal */}

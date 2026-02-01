@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
     StyleSheet,
     View,
@@ -13,18 +13,14 @@ import {
     useWindowDimensions,
     FlatList,
     Image,
+    ActivityIndicator,
 } from 'react-native';
 import { X, ChevronDown, QrCode } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-
-// Static dummy data for pure UI mode
-const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
-const DUMMY_TOKENS = [
-    { symbol: 'SOL', name: 'Solana', mint: 'So11111111111111111111111111111111111111112', decimals: 9, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png', balance: 10.5 },
-    { symbol: 'USDC', name: 'USD Coin', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png', balance: 500 },
-];
+import { sendTransaction, getLocalPublicKey } from '../services/wallet';
 
 interface Token {
     symbol: string;
@@ -39,28 +35,20 @@ interface SendModalProps {
     visible: boolean;
     onClose: () => void;
     onSuccess?: () => void;
+    holdings?: Token[];
 }
 
 export const SendModal: React.FC<SendModalProps> = ({
     visible,
     onClose,
     onSuccess,
+    holdings = [],
 }) => {
     const { height } = useWindowDimensions();
-    const modalHeight = height * 0.75;
+    const modalHeight = height * 0.85;
 
-    // Static dummy data - pure UI mode (no hooks)
-    const publicKey = DUMMY_PUBLIC_KEY;
-    const getAvailableTokens = () => DUMMY_TOKENS;
-    const sendSol = async (_recipient: string, _amount: number) => {
-        Alert.alert('🚧 Demo Mode', 'Send functionality is simulated in demo mode.');
-        return 'demo_signature_' + Date.now();
-    };
-    const sendToken = async (_recipient: string, _amount: number, _mint: string, _decimals: number) => {
-        Alert.alert('🚧 Demo Mode', 'Send functionality is simulated in demo mode.');
-        return 'demo_signature_' + Date.now();
-    };
-
+    // State
+    const [publicKey, setPublicKey] = useState<string>('');
     const [selectedToken, setSelectedToken] = useState<Token | null>(null);
     const [amount, setAmount] = useState('');
     const [recipientAddress, setRecipientAddress] = useState('');
@@ -71,10 +59,25 @@ export const SendModal: React.FC<SendModalProps> = ({
     const [showScanner, setShowScanner] = useState(false);
     const [permission, requestPermission] = useCameraPermissions();
 
-    const availableTokens = useMemo(() => getAvailableTokens(), [getAvailableTokens]);
+    // PIN input state
+    const [showPinModal, setShowPinModal] = useState(false);
+    const [pin, setPin] = useState('');
+    const [pinError, setPinError] = useState('');
+
+    // Load public key on mount
+    useEffect(() => {
+        if (visible) {
+            getLocalPublicKey().then(key => {
+                if (key) setPublicKey(key);
+            });
+        }
+    }, [visible]);
+
+    // Available tokens from holdings prop
+    const availableTokens = useMemo(() => holdings, [holdings]);
 
     // Set default token
-    React.useEffect(() => {
+    useEffect(() => {
         if (visible && availableTokens.length > 0 && !selectedToken) {
             const solToken = availableTokens.find(t => t.symbol === 'SOL');
             if (solToken) setSelectedToken(solToken);
@@ -82,13 +85,16 @@ export const SendModal: React.FC<SendModalProps> = ({
     }, [visible, availableTokens, selectedToken]);
 
     // Reset form when modal closes
-    React.useEffect(() => {
+    useEffect(() => {
         if (!visible) {
             setAmount('');
             setRecipientAddress('');
             setAddressError('');
             setAmountError('');
             setIsSending(false);
+            setPin('');
+            setPinError('');
+            setShowPinModal(false);
         }
     }, [visible]);
 
@@ -150,7 +156,7 @@ export const SendModal: React.FC<SendModalProps> = ({
         validateAddress(address);
     };
 
-    const handleSend = async () => {
+    const handleSend = () => {
         if (!selectedToken) {
             Alert.alert('Error', 'Please select a token');
             return;
@@ -160,41 +166,73 @@ export const SendModal: React.FC<SendModalProps> = ({
             return;
         }
 
+        // Show PIN modal
+        setShowPinModal(true);
+    };
+
+    const handleConfirmSend = async () => {
+        if (pin.length < 4) {
+            setPinError('PIN must be at least 4 digits');
+            return;
+        }
+
         setIsSending(true);
+        setPinError('');
 
         try {
-            let signature: string;
-
-            // Use sendSol for SOL, sendToken for SPL tokens
-            if (selectedToken.symbol === 'SOL') {
-                signature = await sendSol(recipientAddress, parseFloat(amount));
-            } else {
-                signature = await sendToken(
-                    recipientAddress,
-                    parseFloat(amount),
-                    selectedToken.mint,
-                    selectedToken.decimals
-                );
+            // Get auth token
+            const authToken = await AsyncStorage.getItem('userToken');
+            if (!authToken) {
+                Alert.alert('Error', 'Please log in again');
+                setIsSending(false);
+                setShowPinModal(false);
+                return;
             }
 
-            Alert.alert(
-                'Transaction Sent!',
-                `Sent ${amount} ${selectedToken.symbol}\n\nTx: ${signature.slice(0, 8)}...${signature.slice(-8)}`,
-                [
-                    {
-                        text: 'OK',
-                        onPress: () => {
-                            onSuccess?.();
-                            onClose();
-                        },
-                    },
-                ]
+            // Only SOL supported in Phase 2.2
+            if (selectedToken?.symbol !== 'SOL') {
+                Alert.alert('Coming Soon', 'SPL token transfers will be available in Phase 2.3');
+                setIsSending(false);
+                setShowPinModal(false);
+                return;
+            }
+
+            // Call real sendTransaction
+            const result = await sendTransaction(
+                authToken,
+                recipientAddress,
+                parseFloat(amount),
+                pin,
+                selectedToken?.symbol || 'SOL'
             );
+
+            // Clear PIN immediately
+            setPin('');
+            setShowPinModal(false);
+
+            if (result.success) {
+                Alert.alert(
+                    '✅ Transaction Sent!',
+                    `Sent ${amount} ${selectedToken?.symbol}\n\nSignature: ${result.signature?.slice(0, 8)}...${result.signature?.slice(-8)}\n\nView on Solscan`,
+                    [
+                        {
+                            text: 'OK',
+                            onPress: () => {
+                                onSuccess?.();
+                                onClose();
+                            },
+                        },
+                    ]
+                );
+            } else {
+                Alert.alert('Transaction Failed', result.error || 'Failed to send transaction');
+            }
         } catch (error: any) {
             console.error('Send transaction failed:', error);
             Alert.alert('Transaction Failed', error.message || 'Failed to send transaction');
         } finally {
             setIsSending(false);
+            setPin('');
         }
     };
 
@@ -400,6 +438,78 @@ export const SendModal: React.FC<SendModalProps> = ({
                         onBarcodeScanned={handleBarcodeScanned}
                     />
                     <Text style={styles.scannerHint}>Point at a Solana wallet QR code</Text>
+                </View>
+            </Modal>
+
+            {/* PIN Input Modal */}
+            <Modal
+                visible={showPinModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => {
+                    setShowPinModal(false);
+                    setPin('');
+                    setPinError('');
+                }}
+            >
+                <View style={styles.selectorOverlay}>
+                    <View style={styles.selectorContainer}>
+                        <View style={styles.selectorHeader}>
+                            <Text style={styles.selectorTitle}>Confirm Transaction</Text>
+                            <TouchableOpacity onPress={() => {
+                                setShowPinModal(false);
+                                setPin('');
+                                setPinError('');
+                            }}>
+                                <X size={24} color={COLORS.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.content}>
+                            <Text style={styles.pinLabel}>Enter your wallet PIN to confirm</Text>
+                            <TextInput
+                                style={[styles.input, styles.pinInput]}
+                                value={pin}
+                                onChangeText={(text) => {
+                                    setPin(text);
+                                    setPinError('');
+                                }}
+                                placeholder="Enter PIN"
+                                placeholderTextColor={COLORS.textSecondary}
+                                keyboardType="numeric"
+                                secureTextEntry
+                                maxLength={6}
+                                autoFocus
+                            />
+                            {pinError ? (
+                                <Text style={styles.errorText}>{pinError}</Text>
+                            ) : null}
+
+                            <View style={styles.pinSummary}>
+                                <Text style={styles.pinSummaryLabel}>Sending</Text>
+                                <Text style={styles.pinSummaryValue}>{amount} {selectedToken?.symbol}</Text>
+                                <Text style={styles.pinSummaryLabel}>To</Text>
+                                <Text style={styles.pinSummaryAddress}>
+                                    {recipientAddress.slice(0, 12)}...{recipientAddress.slice(-12)}
+                                </Text>
+                            </View>
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.sendButton,
+                                    (isSending || pin.length < 4) && styles.sendButtonDisabled
+                                ]}
+                                onPress={handleConfirmSend}
+                                disabled={isSending || pin.length < 4}
+                            >
+                                {isSending ? (
+                                    <ActivityIndicator color={COLORS.textPrimary} />
+                                ) : (
+                                    <Text style={styles.sendButtonText}>Confirm Send</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
                 </View>
             </Modal>
         </Modal>
@@ -636,6 +746,41 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         padding: SPACING.l,
         backgroundColor: COLORS.background,
+    },
+    // PIN Modal styles
+    pinLabel: {
+        ...FONTS.phantomMedium,
+        fontSize: 16,
+        color: COLORS.textPrimary,
+        textAlign: 'center',
+        marginBottom: SPACING.m,
+    },
+    pinInput: {
+        textAlign: 'center',
+        fontSize: 24,
+        letterSpacing: 8,
+    },
+    pinSummary: {
+        marginTop: SPACING.l,
+        padding: SPACING.m,
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: BORDER_RADIUS.medium,
+    },
+    pinSummaryLabel: {
+        ...FONTS.phantomRegular,
+        fontSize: 12,
+        color: COLORS.textSecondary,
+        marginTop: SPACING.s,
+    },
+    pinSummaryValue: {
+        ...FONTS.phantomBold,
+        fontSize: 20,
+        color: COLORS.solana,
+    },
+    pinSummaryAddress: {
+        ...FONTS.phantomMedium,
+        fontSize: 14,
+        color: COLORS.textPrimary,
     },
 });
 

@@ -1,8 +1,9 @@
 // Wallet Service - Client-side wallet management
 // IMPORTANT: react-native-get-random-values MUST be imported before @solana/web3.js
 import 'react-native-get-random-values';
-import { Keypair } from '@solana/web3.js';
+import { Keypair, Transaction } from '@solana/web3.js';
 import * as SecureStore from 'expo-secure-store';
+import bs58 from 'bs58';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -43,6 +44,20 @@ export interface PortfolioData {
     publicKey: string;
     totalUsdValue: number;
     holdings: Holding[];
+}
+
+// Transaction record type
+export interface TransactionRecord {
+    id: string;
+    signature: string;
+    type: string;
+    amount: number;
+    token: string;
+    fromAddress: string;
+    toAddress: string;
+    fee: number;
+    status: string;
+    createdAt: string;
 }
 
 /**
@@ -153,4 +168,109 @@ export const clearWalletData = async (): Promise<void> => {
     await SecureStore.deleteItemAsync('wallet_secret');
     await SecureStore.deleteItemAsync('wallet_pubkey');
     await SecureStore.deleteItemAsync('wallet_pin_hash');
+};
+
+/**
+ * Send SOL transaction - prepares on backend, signs locally, broadcasts
+ */
+export const sendTransaction = async (
+    authToken: string,
+    toAddress: string,
+    amount: number,
+    pin: string,
+    token: string = 'SOL'
+): Promise<{ success: boolean; signature?: string; explorerUrl?: string; error?: string }> => {
+    try {
+        // 1. Request unsigned transaction from backend
+        const prepareResponse = await fetch(`${API_URL}/transactions/prepare-send`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ toAddress, amount, token }),
+        });
+
+        const prepareData = await prepareResponse.json();
+
+        if (!prepareResponse.ok) {
+            return { success: false, error: prepareData.error || 'Failed to prepare transaction' };
+        }
+
+        // 2. Get encrypted private key and decrypt with PIN
+        const encrypted = await SecureStore.getItemAsync('wallet_secret');
+        if (!encrypted) {
+            return { success: false, error: 'No wallet found. Please create a wallet first.' };
+        }
+
+        let keypair: Keypair;
+        try {
+            const decrypted = simpleDecrypt(encrypted, pin);
+            const secretKey = new Uint8Array(JSON.parse(decrypted));
+            keypair = Keypair.fromSecretKey(secretKey);
+        } catch {
+            return { success: false, error: 'Invalid PIN. Please try again.' };
+        }
+
+        // 3. Deserialize and sign the transaction
+        const transaction = Transaction.from(bs58.decode(prepareData.transaction));
+        transaction.sign(keypair);
+
+        // 4. Serialize signed transaction
+        const signedTx = bs58.encode(transaction.serialize());
+
+        // 5. Clear keypair from memory
+        // (In JS we can't truly clear, but we nullify references)
+
+        // 6. Broadcast signed transaction
+        const broadcastResponse = await fetch(`${API_URL}/transactions/broadcast`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({
+                signedTransaction: signedTx,
+                txData: { toAddress, amount, token },
+            }),
+        });
+
+        const broadcastData = await broadcastResponse.json();
+
+        if (!broadcastResponse.ok) {
+            return { success: false, error: broadcastData.error || 'Failed to broadcast transaction' };
+        }
+
+        return {
+            success: true,
+            signature: broadcastData.signature,
+            explorerUrl: broadcastData.explorerUrl,
+        };
+    } catch (error: any) {
+        console.error('Send transaction error:', error);
+        return { success: false, error: error.message || 'Transaction failed' };
+    }
+};
+
+/**
+ * Fetch transaction history from backend
+ */
+export const fetchTransactionHistory = async (authToken: string): Promise<TransactionRecord[]> => {
+    try {
+        const response = await fetch(`${API_URL}/transactions/history`, {
+            headers: {
+                Authorization: `Bearer ${authToken}`,
+            },
+        });
+
+        if (!response.ok) {
+            return [];
+        }
+
+        const data = await response.json();
+        return data.transactions || [];
+    } catch (error) {
+        console.error('Fetch transaction history error:', error);
+        return [];
+    }
 };
