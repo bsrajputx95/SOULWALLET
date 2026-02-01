@@ -844,9 +844,8 @@ export default function HomeScreen() {
     }
   };
 
-  if (authLoading || !isAuthenticated) {
-    return null;
-  }
+  // Show loading state briefly while fetching auth, but don't block UI entirely
+  // (removed early return that was causing blank screen)
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
