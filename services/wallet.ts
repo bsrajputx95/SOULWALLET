@@ -3,7 +3,6 @@
 import 'react-native-get-random-values';
 import { Keypair } from '@solana/web3.js';
 import * as SecureStore from 'expo-secure-store';
-import bs58 from 'bs58';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 

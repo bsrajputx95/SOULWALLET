@@ -19,12 +19,6 @@ export const NeonCard: React.FC<NeonCardProps> = ({
   style,
   ...props
 }) => {
-  const _intensityValues = {
-    low: 0.3,
-    medium: 0.5,
-    high: 0.8,
-  };
-
   const shadowIntensity = {
     low: SHADOWS.small,
     medium: SHADOWS.medium,

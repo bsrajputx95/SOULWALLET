@@ -1,11 +1,10 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Image, Pressable, Alert, Animated } from 'react-native';
+import { StyleSheet, Text, View, Image, Pressable, Animated } from 'react-native';
 import { MessageSquare, Heart, Zap, Copy } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
-import { SafeHtmlText } from './SafeHtml';
 
 interface SocialPostProps {
   id: string;
@@ -37,7 +36,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   timestamp,
   mentionedToken,
   walletAddress,
-  isVerified = false,
+  isVerified: _isVerified = false,
   onPress,
   onBuyPress,
   onCopyPress,
@@ -46,7 +45,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   const router = useRouter();
   const [isLiked, setIsLiked] = useState(false);
   const [currentLikes, setCurrentLikes] = useState(likes);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [_isProcessing, _setIsProcessing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Calculate post age in minutes for iBuy button coloring
@@ -174,12 +173,6 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     router.push(`/profile/${username}`);
   }, [router, username]);
 
-  const handleTokenPress = useCallback((token: string) => {
-    // Remove $ and navigate to coin details
-    const symbol = token.replace('$', '');
-    router.push(`/coin/${symbol.toLowerCase()}`);
-  }, [router]);
-
   const handlePostPress = () => {
     if (onPress) {
       onPress();
@@ -190,7 +183,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
 
   const handleLike = (e: any) => {
     e.stopPropagation();
-    if (isProcessing || toggleLikeMutation.isPending) return;
+    if (_isProcessing || toggleLikeMutation.isPending) return;
 
     // Optimistic update
     setIsLiked(!isLiked);
@@ -206,51 +199,6 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     e.stopPropagation();
     router.push(`/post/${id}`);
   };
-
-  const _formattedContent = useMemo(() => {
-    // Format hashtags, mentions, tokens, and post links
-    return content.split(' ').map((word, index) => {
-      if (word.startsWith('#')) {
-        return (
-          <Text key={index} style={styles.hashtag}>
-            {word}{' '}
-          </Text>
-        );
-      } else if (word.startsWith('@')) {
-        return (
-          <Text key={index} style={styles.mention}>
-            {word}{' '}
-          </Text>
-        );
-      } else if (word.startsWith('$')) {
-        return (
-          <Text
-            key={index}
-            style={styles.token}
-            onPress={() => handleTokenPress(word)}
-          >
-            {word}{' '}
-          </Text>
-        );
-      } else if (word.includes('soulwallet/post/')) {
-        // Clickable post link
-        const postIdMatch = word.match(/soulwallet\/post\/([a-zA-Z0-9_-]+)/);
-        if (postIdMatch) {
-          const postId = postIdMatch[1];
-          return (
-            <Text
-              key={index}
-              style={styles.postLink}
-              onPress={() => router.push(`/post/${postId}`)}
-            >
-              {word}{' '}
-            </Text>
-          );
-        }
-      }
-      return word + ' ';
-    });
-  }, [content, handleTokenPress, router]);
 
   return (
     <Pressable
@@ -329,7 +277,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
             <Pressable
               style={styles.action}
               onPress={handleLike}
-              disabled={isProcessing}
+              disabled={_isProcessing}
               accessibilityRole="button"
               accessibilityLabel={`${isLiked ? 'Unlike' : 'Like'}: ${currentLikes} likes`}
               accessibilityHint="Double tap to like this post"

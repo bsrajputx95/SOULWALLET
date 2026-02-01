@@ -18,7 +18,6 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 
 // Static dummy data for pure UI mode
-const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 const DUMMY_BALANCE = 10.5;
 
 interface QuickBuyModalProps {
@@ -39,24 +38,16 @@ interface TokenInfo {
     hasMetadata?: boolean; // whether full metadata is available
 }
 
-const _SOL_MINT = 'So11111111111111111111111111111111111111112';
-
 export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }) => {
     // Static dummy data - pure UI mode (no hooks)
-    const publicKey = DUMMY_PUBLIC_KEY;
     const balance = DUMMY_BALANCE;
-    const executeSwap = async (_params: any) => {
-        Alert.alert('🚧 Demo Mode', 'Swap functionality is simulated in demo mode.');
-        return { success: true };
-    };
-    const refreshBalances = async () => { };
 
     const [tokenAddress, setTokenAddress] = useState('');
     const [solAmount, setSolAmount] = useState('');
     const [slippage, setSlippage] = useState('1');
     const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
     const [isVerifying, setIsVerifying] = useState(false);
-    const [isBuying, setIsBuying] = useState(false);
+    const [isBuying, _setIsBuying] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     // Reset state when modal opens
@@ -129,10 +120,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
 
     // Execute buy - using local swap simulation
     const handleBuy = async () => {
-        if (!publicKey) {
-            Alert.alert('Connect Wallet', 'Please connect your wallet to buy tokens.');
-            return;
-        }
+        // Demo mode - wallet always available
 
         if (!tokenInfo) {
             setError('Please verify the token first');
@@ -353,7 +341,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                     <ActivityIndicator size="small" color={COLORS.textPrimary} />
                                 ) : (
                                     <Text style={styles.buyButtonText}>
-                                        {!publicKey ? 'Connect Wallet' : 'Buy Now'}
+                                        Buy Now
                                     </Text>
                                 )}
                             </LinearGradient>

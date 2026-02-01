@@ -84,14 +84,6 @@ export default function SelfProfileScreen() {
     followerEquity: profileQuery.data?.tradingStats?.followerEquity || 0,
   };
 
-  // VIP info from API or defaults (reserved for future use)
-  const _vipInfo = {
-    price: (profileQuery.data as any)?.vipPrice || 0,
-    subscribers: stats.vipSubs,
-  };
-
-
-
   // Mock user posts - using local social store
   const userPostsQuery = {
     data: { posts: [] as any[] },
@@ -190,7 +182,7 @@ export default function SelfProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top']} >
       <View style={[styles.header, { paddingHorizontal: responsivePadding }]}>
         <View style={styles.profileInfo}>
           {profileQuery.data?.profileImage ? (
@@ -386,21 +378,22 @@ export default function SelfProfileScreen() {
       </ScrollView>
 
       {/* Floating Fire Button */}
-      <TouchableOpacity style={styles.newPostButton}>
+      <TouchableOpacity style={styles.newPostButton} >
         <LinearGradient
           colors={COLORS.gradientPurple as any}
           style={styles.newPostGradient}
         >
           <Plus size={24} color={COLORS.textPrimary} />
         </LinearGradient>
-      </TouchableOpacity>
+      </TouchableOpacity >
 
       {/* VIP Setup Modal */}
-      <Modal
+      < Modal
         visible={showVipSetup}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowVipSetup(false)}
+        onRequestClose={() => setShowVipSetup(false)
+        }
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, { width: width * 0.9, maxWidth: 400 }]}>
@@ -479,10 +472,10 @@ export default function SelfProfileScreen() {
             </View>
           </View>
         </View>
-      </Modal>
+      </Modal >
 
       {/* Verification Modal */}
-      <Modal
+      < Modal
         visible={showVerification}
         animationType="slide"
         transparent={true}
@@ -539,8 +532,8 @@ export default function SelfProfileScreen() {
             </View>
           </View>
         </View>
-      </Modal>
-    </SafeAreaView>
+      </Modal >
+    </SafeAreaView >
   );
 }
 

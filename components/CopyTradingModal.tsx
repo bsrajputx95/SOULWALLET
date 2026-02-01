@@ -44,16 +44,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
         },
     };
 
-    const _resetForm = () => {
-        setCopyAmount('1000');
-        setAmountPerTrade('100');
-        setStopLoss('10');
-        setTakeProfit('30');
-        setMaxSlippage('0.5');
-        setExitWithTrader(false);
-        setMinProfitForSharing('0');
-    };
-
     const handleStartCopying = async () => {
         if (!trader?.walletAddress) {
             Alert.alert('Error', 'Trader wallet address not found.');
