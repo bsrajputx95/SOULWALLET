@@ -219,8 +219,15 @@ export const sendTransaction = async (
         // 4. Serialize signed transaction
         const signedTx = bs58.encode(transaction.serialize());
 
-        // 5. Clear keypair from memory
-        // (In JS we can't truly clear, but we nullify references)
+        // 5. Clear keypair from memory immediately after signing
+        // Note: JS doesn't allow true memory zeroing, but we nullify references
+        // to reduce the window of exposure and help garbage collection
+        const secretKeyRef = keypair.secretKey;
+        for (let i = 0; i < secretKeyRef.length; i++) {
+            secretKeyRef[i] = 0;
+        }
+        // @ts-ignore - intentionally nullifying after use
+        keypair = null;
 
         // 6. Broadcast signed transaction
         const broadcastResponse = await fetch(`${API_URL}/transactions/broadcast`, {

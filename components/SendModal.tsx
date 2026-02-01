@@ -238,9 +238,9 @@ export const SendModal: React.FC<SendModalProps> = ({
 
     const handleMaxAmount = () => {
         if (selectedToken) {
-            // Leave a small amount for gas if sending SOL
+            // Leave 0.0001 SOL for transaction fee if sending SOL
             const maxAmount = selectedToken.symbol === 'SOL'
-                ? Math.max(0, selectedToken.balance - 0.01)
+                ? Math.max(0, selectedToken.balance - 0.0001)
                 : selectedToken.balance;
             setAmount(maxAmount.toString());
         }
