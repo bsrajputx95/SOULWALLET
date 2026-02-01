@@ -123,6 +123,11 @@ const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): vo
 
 // ====== Endpoints ======
 
+// GET /health - Healthcheck for Railway
+app.get('/health', (_req: Request, res: Response) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // POST /register
 app.post('/register', async (req: Request, res: Response): Promise<void> => {
     try {
