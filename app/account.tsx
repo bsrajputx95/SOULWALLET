@@ -30,6 +30,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ProfileForm } from '../components/account/ProfileForm';
+import { showSuccessToast, showErrorToast } from '../utils/toast';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -390,8 +391,10 @@ export default function AccountScreen() {
         language,
       });
 
+      showSuccessToast('Profile updated!');
       Alert.alert('✅ Profile Updated', 'Your account settings have been saved.');
     } catch (error: any) {
+      showErrorToast(error.message || 'Update failed');
       Alert.alert('Error', error.message || 'Failed to update settings. Please try again.');
     }
   };

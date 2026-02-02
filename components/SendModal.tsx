@@ -21,6 +21,7 @@ import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { sendTransaction, getLocalPublicKey } from '../services/wallet';
+import { showSuccessToast, showErrorToast } from '../utils/toast';
 
 interface Token {
     symbol: string;
@@ -190,8 +191,17 @@ export const SendModal: React.FC<SendModalProps> = ({
     };
 
     const handleConfirmSend = async () => {
+        // PIN validation: numeric only, 4-6 digits (matching solana-setup.tsx)
+        if (!/^\d+$/.test(pin)) {
+            setPinError('PIN must contain only digits (0-9)');
+            return;
+        }
         if (pin.length < 4) {
             setPinError('PIN must be at least 4 digits');
+            return;
+        }
+        if (pin.length > 6) {
+            setPinError('PIN must not exceed 6 digits');
             return;
         }
 
@@ -230,12 +240,23 @@ export const SendModal: React.FC<SendModalProps> = ({
             setShowPinModal(false);
 
             if (result.success) {
+                // Show toast for immediate feedback
+                showSuccessToast(`Sent ${amount} ${selectedToken?.symbol}`);
+                // Also show Alert with Solscan link
                 Alert.alert(
                     '✅ Transaction Sent!',
-                    `Sent ${amount} ${selectedToken?.symbol}\n\nSignature: ${result.signature?.slice(0, 8)}...${result.signature?.slice(-8)}\n\nView on Solscan`,
+                    `Signature: ${result.signature?.slice(0, 8)}...${result.signature?.slice(-8)}`,
                     [
                         {
-                            text: 'OK',
+                            text: 'View on Solscan',
+                            onPress: () => {
+                                if (result.explorerUrl) {
+                                    import('react-native').then(({ Linking }) => Linking.openURL(result.explorerUrl!));
+                                }
+                            },
+                        },
+                        {
+                            text: 'Done',
                             onPress: () => {
                                 onSuccess?.();
                                 onClose();
@@ -244,7 +265,8 @@ export const SendModal: React.FC<SendModalProps> = ({
                     ]
                 );
             } else {
-                Alert.alert('Transaction Failed', result.error || 'Failed to send transaction');
+                // Show error toast
+                showErrorToast(result.error || 'Transaction failed');
             }
         } catch (error: any) {
             console.error('Send transaction failed:', error);

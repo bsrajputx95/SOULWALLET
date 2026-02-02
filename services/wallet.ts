@@ -255,32 +255,46 @@ export const sendTransaction = async (
     token: string = 'SOL'
 ): Promise<{ success: boolean; signature?: string; explorerUrl?: string; error?: string }> => {
     try {
-        // 1. Request unsigned transaction from backend (with retry for network issues)
-        const { prepareResponse, prepareData } = await retryWithBackoff(async () => {
-            const response = await fetch(`${API_URL}/transactions/prepare-send`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${authToken}`,
-                },
-                body: JSON.stringify({ toAddress, amount, token }),
-            });
-            const data = await response.json();
-            // Throw on error to trigger retry, but not for validation errors
-            if (!response.ok) {
-                const error: any = new Error(data.error || 'Failed to prepare transaction');
-                error.status = response.status;
-                throw error;
-            }
-            return { prepareResponse: response, prepareData: data };
-        });
+        // 1. Request unsigned transaction from backend (with retry for network/5xx issues only)
+        let prepareData: any;
 
-        if (!prepareResponse.ok) {
-            // Specific error messages for common issues
-            if (prepareData.error?.includes('insufficient')) {
-                return { success: false, error: 'Not enough SOL for transaction + fees' };
+        try {
+            const result = await retryWithBackoff(async () => {
+                const response = await fetch(`${API_URL}/transactions/prepare-send`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${authToken}`,
+                    },
+                    body: JSON.stringify({ toAddress, amount, token }),
+                });
+                const data = await response.json();
+
+                // For 4xx errors, return data without throwing (no retry needed)
+                if (response.status >= 400 && response.status < 500) {
+                    return { success: false, data, status: response.status };
+                }
+                // For 5xx errors, throw to trigger retry
+                if (!response.ok) {
+                    const error: any = new Error(data.error || 'Server error');
+                    error.status = response.status;
+                    throw error;
+                }
+                return { success: true, data };
+            });
+
+            if (!result.success) {
+                // 4xx error - return specific message without retry
+                const errorMsg = result.data?.error || 'Failed to prepare transaction';
+                if (errorMsg.includes('insufficient') || errorMsg.includes('balance')) {
+                    return { success: false, error: 'Not enough SOL for transaction + fees' };
+                }
+                return { success: false, error: errorMsg };
             }
-            return { success: false, error: prepareData.error || 'Failed to prepare transaction' };
+            prepareData = result.data;
+        } catch (retryError: any) {
+            // All retries exhausted for 5xx errors
+            return { success: false, error: retryError.message || 'Failed to prepare transaction' };
         }
 
         // 2. Get encrypted private key and decrypt with PIN

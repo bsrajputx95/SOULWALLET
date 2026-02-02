@@ -22,6 +22,7 @@ import bs58 from 'bs58';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { createWallet, importWallet } from '../services/wallet';
+import { showSuccessToast, showErrorToast } from '../utils/toast';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
@@ -105,8 +106,10 @@ export default function SolanaSetupScreen() {
           secretKey: storedSecret ? new Uint8Array(64) : null, // Placeholder - real key is encrypted
         });
         setMode('create');
+        showSuccessToast('Wallet created successfully!');
         Alert.alert('✅ Wallet Created!', 'Save your private key in a secure location.');
       } else {
+        showErrorToast(result.error || 'Failed to create wallet');
         Alert.alert('Error', result.error || 'Failed to create wallet');
       }
     } catch (error: any) {
@@ -164,14 +167,17 @@ export default function SolanaSetupScreen() {
       setIsLoading(false);
 
       if (result.success) {
+        showSuccessToast('Wallet imported!');
         Alert.alert('✅ Wallet Imported', 'Wallet imported and linked successfully!', [
           { text: 'OK', onPress: () => router.back() }
         ]);
       } else {
+        showErrorToast(result.error || 'Import failed');
         Alert.alert('Error', result.error || 'Failed to import wallet');
       }
     } catch (error: any) {
       setIsLoading(false);
+      showErrorToast('Invalid private key');
       Alert.alert('Error', 'Invalid private key. Please check and try again.');
       if (__DEV__) console.error('Import wallet error:', error);
     }

@@ -34,6 +34,48 @@ const getConnection = () => {
     return connection;
 };
 
+/**
+ * Categorize RPC errors for specific error responses
+ * Returns { statusCode, message } for client display
+ */
+const handleRpcError = (error: any): { statusCode: number; message: string } => {
+    const errorMsg = error?.message || String(error);
+
+    // Rate limit / throttling
+    if (errorMsg.includes('429') || errorMsg.includes('rate limit') || errorMsg.includes('too many')) {
+        return { statusCode: 429, message: 'RPC rate limited, please try again later' };
+    }
+
+    // Connection/network errors
+    if (errorMsg.includes('ECONNREFUSED') || errorMsg.includes('ETIMEDOUT') ||
+        errorMsg.includes('network') || errorMsg.includes('ENOTFOUND')) {
+        return { statusCode: 502, message: 'Solana RPC unavailable, try again shortly' };
+    }
+
+    // Timeout
+    if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
+        return { statusCode: 504, message: 'RPC request timed out, please retry' };
+    }
+
+    // 503 Service unavailable
+    if (errorMsg.includes('503') || errorMsg.includes('unavailable')) {
+        return { statusCode: 503, message: 'Solana network temporarily unavailable' };
+    }
+
+    // Blockhash expired
+    if (errorMsg.includes('blockhash')) {
+        return { statusCode: 400, message: 'Transaction expired, please try again' };
+    }
+
+    // Insufficient balance
+    if (errorMsg.includes('insufficient') || errorMsg.includes('balance')) {
+        return { statusCode: 400, message: 'Insufficient balance for transaction and fees' };
+    }
+
+    // Default server error
+    return { statusCode: 500, message: 'Transaction failed: ' + errorMsg.substring(0, 100) };
+};
+
 // Jupiter Price API (FREE - no API key needed)
 const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
 
@@ -764,16 +806,9 @@ app.post('/transactions/broadcast', authMiddleware, async (req: AuthRequest, res
             }
         }
 
-        console.error('Broadcast error:', error);
-        // Provide more specific error messages
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        if (errorMsg.includes('insufficient')) {
-            res.status(400).json({ error: 'Insufficient balance for transaction and fees' });
-        } else if (errorMsg.includes('blockhash')) {
-            res.status(400).json({ error: 'Transaction expired, please try again' });
-        } else {
-            res.status(500).json({ error: 'Transaction rejected by network: ' + (errorMsg.substring(0, 100)) });
-        }
+        // Use centralized RPC error handler for specific error responses
+        const { statusCode, message } = handleRpcError(error);
+        res.status(statusCode).json({ error: message });
     }
 });
 
