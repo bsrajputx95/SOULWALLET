@@ -765,7 +765,15 @@ app.post('/transactions/broadcast', authMiddleware, async (req: AuthRequest, res
         }
 
         console.error('Broadcast error:', error);
-        res.status(500).json({ error: 'Failed to broadcast transaction' });
+        // Provide more specific error messages
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (errorMsg.includes('insufficient')) {
+            res.status(400).json({ error: 'Insufficient balance for transaction and fees' });
+        } else if (errorMsg.includes('blockhash')) {
+            res.status(400).json({ error: 'Transaction expired, please try again' });
+        } else {
+            res.status(500).json({ error: 'Transaction rejected by network: ' + (errorMsg.substring(0, 100)) });
+        }
     }
 });
 

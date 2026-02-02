@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { X, ChevronDown, QrCode } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { sendTransaction, getLocalPublicKey } from '../services/wallet';
@@ -100,18 +100,20 @@ export const SendModal: React.FC<SendModalProps> = ({
 
     // Validate Solana address
     const validateAddress = (address: string): boolean => {
-        if (!address) {
+        const trimmed = address.trim();
+        if (!trimmed) {
             setAddressError('Address is required');
             return false;
         }
-        // Basic Solana address validation (32-44 chars, base58)
-        const isValid = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-        if (!isValid) {
-            setAddressError('Invalid Solana address');
+        // Check for self-send first
+        if (trimmed === publicKey) {
+            setAddressError('Cannot send to yourself');
             return false;
         }
-        if (address === publicKey) {
-            setAddressError('Cannot send to yourself');
+        // Basic Solana address validation (32-44 chars, base58)
+        const isValid = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed);
+        if (!isValid) {
+            setAddressError('Invalid Solana address format');
             return false;
         }
         setAddressError('');
@@ -120,11 +122,28 @@ export const SendModal: React.FC<SendModalProps> = ({
 
     // Validate amount
     const validateAmount = (value: string): boolean => {
-        if (!value || parseFloat(value) <= 0) {
-            setAmountError('Enter a valid amount');
+        const num = parseFloat(value);
+        // Check for non-numeric input
+        if (!value || isNaN(num)) {
+            setAmountError('Enter a valid number');
             return false;
         }
-        if (selectedToken && parseFloat(value) > selectedToken.balance) {
+        if (num <= 0) {
+            setAmountError('Amount must be greater than 0');
+            return false;
+        }
+        // Minimum amount for SOL (covers fees)
+        if (selectedToken?.symbol === 'SOL' && num < 0.00001) {
+            setAmountError('Minimum 0.00001 SOL');
+            return false;
+        }
+        // Max decimals check (9 for SOL)
+        const decimals = value.includes('.') ? (value.split('.')[1]?.length || 0) : 0;
+        if (decimals > 9) {
+            setAmountError('Maximum 9 decimal places');
+            return false;
+        }
+        if (selectedToken && num > selectedToken.balance) {
             setAmountError('Insufficient balance');
             return false;
         }
@@ -181,9 +200,9 @@ export const SendModal: React.FC<SendModalProps> = ({
 
         try {
             // Get auth token
-            const authToken = await AsyncStorage.getItem('userToken');
+            const authToken = await SecureStore.getItemAsync('token');
             if (!authToken) {
-                Alert.alert('Error', 'Please log in again');
+                Alert.alert('Error', 'Session expired, please log in');
                 setIsSending(false);
                 setShowPinModal(false);
                 return;

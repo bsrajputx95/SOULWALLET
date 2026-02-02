@@ -62,11 +62,20 @@ export default function SolanaSetupScreen() {
   const handleCreateWallet = async () => {
     try {
       if (!walletPassword || walletPassword !== confirmWalletPassword) {
-        Alert.alert('Error', 'Please enter and confirm your wallet PIN (4+ digits)');
+        Alert.alert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
+        return;
+      }
+      // Numeric-only check
+      if (!/^\d+$/.test(walletPassword)) {
+        Alert.alert('Error', 'PIN must contain only digits (0-9)');
         return;
       }
       if (walletPassword.length < 4) {
         Alert.alert('Error', 'PIN must be at least 4 digits');
+        return;
+      }
+      if (walletPassword.length > 6) {
+        Alert.alert('Error', 'PIN must not exceed 6 digits');
         return;
       }
 
@@ -96,7 +105,7 @@ export default function SolanaSetupScreen() {
           secretKey: storedSecret ? new Uint8Array(64) : null, // Placeholder - real key is encrypted
         });
         setMode('create');
-        Alert.alert('Success', 'Wallet created successfully!');
+        Alert.alert('✅ Wallet Created!', 'Save your private key in a secure location.');
       } else {
         Alert.alert('Error', result.error || 'Failed to create wallet');
       }
@@ -108,16 +117,33 @@ export default function SolanaSetupScreen() {
   };
 
   const handleImportWallet = async () => {
-    if (!privateKey.trim()) {
+    const trimmedKey = privateKey.trim();
+    if (!trimmedKey) {
       Alert.alert('Error', 'Please enter a private key');
       return;
     }
-    if (!walletPassword || walletPassword !== confirmWalletPassword) {
-      Alert.alert('Error', 'Please enter and confirm your wallet PIN');
+    // Base58 format validation
+    const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
+    if (!base58Regex.test(trimmedKey)) {
+      Alert.alert('Error', '❌ Invalid private key format (must be base58)');
       return;
     }
-    if (walletPassword.length < 4) {
-      Alert.alert('Error', 'PIN must be at least 4 digits');
+    // Length check (Solana private keys are typically 64-88 chars in base58)
+    if (trimmedKey.length < 64 || trimmedKey.length > 88) {
+      Alert.alert('Error', 'Invalid private key length');
+      return;
+    }
+    if (!walletPassword || walletPassword !== confirmWalletPassword) {
+      Alert.alert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
+      return;
+    }
+    // Numeric-only check
+    if (!/^\d+$/.test(walletPassword)) {
+      Alert.alert('Error', 'PIN must contain only digits (0-9)');
+      return;
+    }
+    if (walletPassword.length < 4 || walletPassword.length > 6) {
+      Alert.alert('Error', 'PIN must be 4-6 digits');
       return;
     }
 
@@ -138,7 +164,7 @@ export default function SolanaSetupScreen() {
       setIsLoading(false);
 
       if (result.success) {
-        Alert.alert('Success', 'Wallet imported successfully!', [
+        Alert.alert('✅ Wallet Imported', 'Wallet imported and linked successfully!', [
           { text: 'OK', onPress: () => router.back() }
         ]);
       } else {

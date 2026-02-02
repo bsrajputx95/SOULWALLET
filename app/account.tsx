@@ -197,7 +197,7 @@ export default function AccountScreen() {
                       });
                       const json = await response.json();
                       if (response.ok) {
-                        Alert.alert('Success', 'Password updated successfully');
+                        Alert.alert('✅ Password Changed', 'Your password has been updated successfully');
                       } else {
                         Alert.alert('Error', json.error || 'Failed to update password');
                       }
@@ -337,6 +337,48 @@ export default function AccountScreen() {
 
   const handleSave = async () => {
     try {
+      // Validate email format
+      if (email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+          Alert.alert('Invalid Email', 'Please enter a valid email address');
+          return;
+        }
+      }
+
+      // Validate phone (basic check - optional)
+      if (phone && phone.length > 0) {
+        const phoneRegex = /^[+]?[\d\s()-]{7,20}$/;
+        if (!phoneRegex.test(phone)) {
+          Alert.alert('Invalid Phone', 'Please enter a valid phone number');
+          return;
+        }
+      }
+
+      // Validate date of birth (YYYY-MM-DD, past date)
+      if (dateOfBirth) {
+        const dobRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dobRegex.test(dateOfBirth)) {
+          Alert.alert('Invalid Date', 'Date of birth must be YYYY-MM-DD format');
+          return;
+        }
+        const dob = new Date(dateOfBirth);
+        if (isNaN(dob.getTime()) || dob >= new Date()) {
+          Alert.alert('Invalid Date', 'Date of birth must be a past date');
+          return;
+        }
+      }
+
+      // Validate name lengths (1-50 chars)
+      if (firstName && (firstName.length < 1 || firstName.length > 50)) {
+        Alert.alert('Invalid Name', 'First name must be 1-50 characters');
+        return;
+      }
+      if (lastName && (lastName.length < 1 || lastName.length > 50)) {
+        Alert.alert('Invalid Name', 'Last name must be 1-50 characters');
+        return;
+      }
+
       // Update user profile
       await updateProfile({
         firstName,
@@ -348,13 +390,9 @@ export default function AccountScreen() {
         language,
       });
 
-
-
-      // IBuy settings would be updated here if implemented
-
-      Alert.alert('Success', 'Account settings updated successfully!');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update settings. Please try again.');
+      Alert.alert('✅ Profile Updated', 'Your account settings have been saved.');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to update settings. Please try again.');
     }
   };
 

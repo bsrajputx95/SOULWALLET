@@ -224,6 +224,27 @@ export const importWallet = async (
 };
 
 /**
+ * Retry helper with exponential backoff for network reliability
+ */
+const retryWithBackoff = async <T>(
+    fn: () => Promise<T>,
+    maxRetries: number = 3,
+    baseDelay: number = 1000
+): Promise<T> => {
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            return await fn();
+        } catch (error: any) {
+            // Don't retry on validation/auth errors
+            if (error.status === 400 || error.status === 401) throw error;
+            if (i === maxRetries - 1) throw error;
+            await new Promise(resolve => setTimeout(resolve, baseDelay * Math.pow(2, i)));
+        }
+    }
+    throw new Error('Max retries exceeded');
+};
+
+/**
  * Send SOL transaction - prepares on backend, signs locally, broadcasts
  */
 export const sendTransaction = async (
@@ -234,19 +255,31 @@ export const sendTransaction = async (
     token: string = 'SOL'
 ): Promise<{ success: boolean; signature?: string; explorerUrl?: string; error?: string }> => {
     try {
-        // 1. Request unsigned transaction from backend
-        const prepareResponse = await fetch(`${API_URL}/transactions/prepare-send`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({ toAddress, amount, token }),
+        // 1. Request unsigned transaction from backend (with retry for network issues)
+        const { prepareResponse, prepareData } = await retryWithBackoff(async () => {
+            const response = await fetch(`${API_URL}/transactions/prepare-send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${authToken}`,
+                },
+                body: JSON.stringify({ toAddress, amount, token }),
+            });
+            const data = await response.json();
+            // Throw on error to trigger retry, but not for validation errors
+            if (!response.ok) {
+                const error: any = new Error(data.error || 'Failed to prepare transaction');
+                error.status = response.status;
+                throw error;
+            }
+            return { prepareResponse: response, prepareData: data };
         });
 
-        const prepareData = await prepareResponse.json();
-
         if (!prepareResponse.ok) {
+            // Specific error messages for common issues
+            if (prepareData.error?.includes('insufficient')) {
+                return { success: false, error: 'Not enough SOL for transaction + fees' };
+            }
             return { success: false, error: prepareData.error || 'Failed to prepare transaction' };
         }
 
@@ -282,23 +315,35 @@ export const sendTransaction = async (
         // @ts-ignore - intentionally nullifying after use
         keypair = null;
 
-        // 6. Broadcast signed transaction
-        const broadcastResponse = await fetch(`${API_URL}/transactions/broadcast`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({
-                signedTransaction: signedTx,
-                txData: { toAddress, amount, token },
-            }),
+        // 6. Broadcast signed transaction (with retry for RPC issues)
+        const { broadcastResponse, broadcastData } = await retryWithBackoff(async () => {
+            const response = await fetch(`${API_URL}/transactions/broadcast`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${authToken}`,
+                },
+                body: JSON.stringify({
+                    signedTransaction: signedTx,
+                    txData: { toAddress, amount, token },
+                }),
+            });
+            const data = await response.json();
+            // Throw on error to trigger retry, but not for validation errors
+            if (!response.ok && response.status >= 500) {
+                const error: any = new Error(data.error || 'Failed to broadcast transaction');
+                error.status = response.status;
+                throw error;
+            }
+            return { broadcastResponse: response, broadcastData: data };
         });
 
-        const broadcastData = await broadcastResponse.json();
-
         if (!broadcastResponse.ok) {
-            return { success: false, error: broadcastData.error || 'Failed to broadcast transaction' };
+            // Specific error messages for common issues
+            if (broadcastData.error?.includes('insufficient')) {
+                return { success: false, error: 'Not enough SOL for transaction + fees' };
+            }
+            return { success: false, error: broadcastData.error || 'Transaction rejected by network' };
         }
 
         return {
@@ -308,6 +353,10 @@ export const sendTransaction = async (
         };
     } catch (error: any) {
         console.error('Send transaction error:', error);
+        // Better error messages based on error type
+        if (error.message?.includes('network') || error.message?.includes('fetch')) {
+            return { success: false, error: 'Check your internet connection' };
+        }
         return { success: false, error: error.message || 'Transaction failed' };
     }
 };
