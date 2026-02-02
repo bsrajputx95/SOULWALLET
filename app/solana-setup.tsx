@@ -193,10 +193,12 @@ export default function SolanaSetupScreen() {
   };
 
   const handleCopyPrivateKey = async () => {
-    if (generatedWallet) {
+    if (generatedWallet && generatedWallet.secretKey) {
       const privateKeyString = bs58.encode(generatedWallet.secretKey);
       await Clipboard.setStringAsync(privateKeyString);
       Alert.alert('Copied!', 'Private key copied to clipboard');
+    } else {
+      Alert.alert('Error', 'Private key not available');
     }
   };
 
@@ -359,34 +361,44 @@ export default function SolanaSetupScreen() {
             </View>
 
             <Text style={styles.infoLabel}>Private Key</Text>
-            <View style={styles.privateKeyContainer}>
-              <View style={styles.privateKeyBox}>
-                <Text style={styles.privateKeyText}>
-                  {showPrivateKey
-                    ? bs58.encode(generatedWallet.secretKey)
-                    : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'
-                  }
-                </Text>
+            {generatedWallet.secretKey ? (
+              <View style={styles.privateKeyContainer}>
+                <View style={styles.privateKeyBox}>
+                  <Text style={styles.privateKeyText}>
+                    {showPrivateKey
+                      ? bs58.encode(generatedWallet.secretKey)
+                      : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'
+                    }
+                  </Text>
+                </View>
+                <View style={styles.privateKeyActions}>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => setShowPrivateKey(!showPrivateKey)}
+                  >
+                    {showPrivateKey ? (
+                      <EyeOff size={20} color={COLORS.textSecondary} />
+                    ) : (
+                      <Eye size={20} color={COLORS.textSecondary} />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={handleCopyPrivateKey}
+                  >
+                    <Copy size={20} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                </View>
               </View>
-              <View style={styles.privateKeyActions}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => setShowPrivateKey(!showPrivateKey)}
-                >
-                  {showPrivateKey ? (
-                    <EyeOff size={20} color={COLORS.textSecondary} />
-                  ) : (
-                    <Eye size={20} color={COLORS.textSecondary} />
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleCopyPrivateKey}
-                >
-                  <Copy size={20} color={COLORS.textSecondary} />
-                </TouchableOpacity>
+            ) : (
+              <View style={styles.privateKeyContainer}>
+                <View style={styles.privateKeyBox}>
+                  <Text style={[styles.privateKeyText, { color: COLORS.textSecondary }]}>
+                    Private key securely stored. Re-enter your PIN to access it.
+                  </Text>
+                </View>
               </View>
-            </View>
+            )}
           </View>
 
           <View style={styles.warningContainer}>
