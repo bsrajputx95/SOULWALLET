@@ -132,6 +132,7 @@ const loginSchema = z.object({
 const profileSchema = z.object({
     firstName: z.string().min(1).max(50).optional(),
     lastName: z.string().min(1).max(50).optional(),
+    email: z.string().email('Invalid email address').optional(),
     phone: z.string().optional(),
     dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD format').optional(),
     profileImage: z.string().url().optional(),
@@ -366,6 +367,7 @@ app.put('/profile', authMiddleware, async (req: AuthRequest, res: Response): Pro
             data: {
                 firstName: data.firstName,
                 lastName: data.lastName,
+                email: data.email,
                 phone: data.phone,
                 dateOfBirth: data.dateOfBirth,
                 profileImage: data.profileImage,
@@ -692,8 +694,16 @@ app.post('/transactions/prepare-send', authMiddleware, async (req: AuthRequest, 
             return;
         }
 
-        // Check balance
-        const balance = await getConnection().getBalance(fromPubkey);
+        // Check balance (with RPC error handling)
+        let balance: number;
+        try {
+            balance = await getConnection().getBalance(fromPubkey);
+        } catch (rpcErr) {
+            const { statusCode, message } = handleRpcError(rpcErr);
+            res.status(statusCode).json({ error: message });
+            return;
+        }
+
         const amountLamports = Math.floor(validatedData.amount * LAMPORTS_PER_SOL);
         const feeBuffer = 5000; // 0.000005 SOL for fees
 
@@ -715,8 +725,18 @@ app.post('/transactions/prepare-send', authMiddleware, async (req: AuthRequest, 
             })
         );
 
-        // Get latest blockhash
-        const { blockhash, lastValidBlockHeight } = await getConnection().getLatestBlockhash();
+        // Get latest blockhash (with RPC error handling)
+        let blockhash: string;
+        let lastValidBlockHeight: number;
+        try {
+            const blockInfo = await getConnection().getLatestBlockhash();
+            blockhash = blockInfo.blockhash;
+            lastValidBlockHeight = blockInfo.lastValidBlockHeight;
+        } catch (rpcErr) {
+            const { statusCode, message } = handleRpcError(rpcErr);
+            res.status(statusCode).json({ error: message });
+            return;
+        }
         transaction.recentBlockhash = blockhash;
         transaction.feePayer = fromPubkey;
 
@@ -738,7 +758,9 @@ app.post('/transactions/prepare-send', authMiddleware, async (req: AuthRequest, 
             return;
         }
         console.error('Prepare send error:', error);
-        res.status(500).json({ error: 'Failed to prepare transaction' });
+        // Use centralized RPC error handler for specific error responses
+        const { statusCode, message } = handleRpcError(error);
+        res.status(statusCode).json({ error: message });
     }
 });
 

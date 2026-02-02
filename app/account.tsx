@@ -99,6 +99,7 @@ export default function AccountScreen() {
         body: JSON.stringify({
           firstName: data.firstName || undefined,
           lastName: data.lastName || undefined,
+          email: data.email || undefined,
           phone: data.phone || undefined,
           dateOfBirth: data.dateOfBirth || undefined,
           profileImage: data.profileImage || undefined,

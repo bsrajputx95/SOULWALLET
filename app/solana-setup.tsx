@@ -21,7 +21,7 @@ import bs58 from 'bs58';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { createWallet, importWallet } from '../services/wallet';
+import { createWallet, importWallet, decryptWalletSecret } from '../services/wallet';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -96,18 +96,27 @@ export default function SolanaSetupScreen() {
       setIsLoading(false);
 
       if (result.success && result.publicKey) {
-        // Store the generated keypair info for display
-        // Note: We need the secretKey for display, so we get it from local storage
-        const storedSecret = await SecureStore.getItemAsync('wallet_secret');
-        // For new wallet display, we regenerate temporarily just to show the keys
-        // In production, you'd want to return this from createWallet
-        setGeneratedWallet({
-          publicKey: result.publicKey,
-          secretKey: storedSecret ? new Uint8Array(64) : null, // Placeholder - real key is encrypted
-        });
-        setMode('create');
-        showSuccessToast('Wallet created successfully!');
-        Alert.alert('✅ Wallet Created!', 'Save your private key in a secure location.');
+        // Decrypt the stored secret key with PIN for display
+        const secretKey = await decryptWalletSecret(walletPassword);
+
+        if (secretKey) {
+          setGeneratedWallet({
+            publicKey: result.publicKey,
+            secretKey: secretKey,
+          });
+          setMode('create');
+          showSuccessToast('Wallet created successfully!');
+          Alert.alert('✅ Wallet Created!', 'Save your private key in a secure location.');
+        } else {
+          // Could not decrypt - show success but hide copy controls
+          setGeneratedWallet({
+            publicKey: result.publicKey,
+            secretKey: null, // Will hide private key display
+          });
+          setMode('create');
+          showSuccessToast('Wallet created successfully!');
+          Alert.alert('✅ Wallet Created!', 'Wallet created. Private key is securely stored.');
+        }
       } else {
         showErrorToast(result.error || 'Failed to create wallet');
         Alert.alert('Error', result.error || 'Failed to create wallet');

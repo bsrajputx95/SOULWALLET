@@ -27,6 +27,21 @@ const simpleDecrypt = (encrypted: string, pin: string): string => {
     return result;
 };
 
+/**
+ * Decrypt wallet secret key with PIN for display purposes
+ * Returns the secret key bytes or null if decryption fails
+ */
+export const decryptWalletSecret = async (pin: string): Promise<Uint8Array | null> => {
+    try {
+        const encrypted = await SecureStore.getItemAsync('wallet_secret');
+        if (!encrypted) return null;
+        const decrypted = simpleDecrypt(encrypted, pin);
+        return new Uint8Array(JSON.parse(decrypted));
+    } catch {
+        return null;
+    }
+};
+
 // Holding type from backend
 export interface Holding {
     symbol: string;
