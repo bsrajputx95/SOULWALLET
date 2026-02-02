@@ -540,15 +540,29 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
 
         const pubKey = new PublicKey(wallet.publicKey);
 
-        // 1. Get SOL Balance
-        const solBalance = await getConnection().getBalance(pubKey);
+        // 1. Get SOL Balance (with RPC error handling)
+        let solBalance: number;
+        try {
+            solBalance = await getConnection().getBalance(pubKey);
+        } catch (rpcErr) {
+            const { statusCode, message } = handleRpcError(rpcErr);
+            res.status(statusCode).json({ error: message });
+            return;
+        }
         const solAmount = solBalance / LAMPORTS_PER_SOL;
 
-        // 2. Get Token Accounts (SPL tokens like USDC)
-        const tokenAccounts = await getConnection().getParsedTokenAccountsByOwner(
-            pubKey,
-            { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
-        );
+        // 2. Get Token Accounts (SPL tokens like USDC) (with RPC error handling)
+        let tokenAccounts: any;
+        try {
+            tokenAccounts = await getConnection().getParsedTokenAccountsByOwner(
+                pubKey,
+                { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+            );
+        } catch (rpcErr) {
+            const { statusCode, message } = handleRpcError(rpcErr);
+            res.status(statusCode).json({ error: message });
+            return;
+        }
 
         // Prepare addresses for price fetch
         const tokenAddresses = [
@@ -636,7 +650,9 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
         });
     } catch (error) {
         console.error('Balance fetch error:', error);
-        res.status(500).json({ error: 'Failed to fetch balances' });
+        // Use centralized RPC error handler for specific error responses
+        const { statusCode, message } = handleRpcError(error);
+        res.status(statusCode).json({ error: message });
     }
 });
 
