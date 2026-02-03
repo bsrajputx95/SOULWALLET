@@ -165,7 +165,8 @@ model CopyTradeQueue {
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Unique constraint: entry trades use userId+traderTxSignature, exit trades use positionId
-  @@unique([userId, traderTxSignature, positionId])
+  // Note: Using a unique constraint name to avoid conflicts
+  @@unique(name: "unique_queue_item", [userId, traderTxSignature, positionId])
   @@index([userId, status])
   @@index([configId, status])
   @@index([positionId])
