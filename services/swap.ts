@@ -71,6 +71,16 @@ export const getTokenList = async (): Promise<JupiterToken[]> => {
     }
 };
 
+/**
+ * Get decimals for a specific token by mint address
+ * Returns 6 as default fallback if token not found
+ */
+export const getTokenDecimals = async (mintAddress: string): Promise<number> => {
+    const tokens = await getTokenList();
+    const token = tokens.find(t => t.address === mintAddress);
+    return token?.decimals ?? 6; // Default to 6 if not found
+};
+
 export const searchToken = async (query: string): Promise<JupiterToken[]> => {
     const tokens = await getTokenList();
     if (!query.trim()) {

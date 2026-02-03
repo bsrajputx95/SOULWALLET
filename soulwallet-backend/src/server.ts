@@ -874,7 +874,8 @@ app.get('/transactions/history', authMiddleware, async (req: AuthRequest, res: R
 // ====== Copy Trading Endpoints ======
 
 import { queueCopyTrade, markTradeExecuted, getPendingQueueItems, checkBudget } from './services/copyEngine';
-import { cancelLimitOrder, checkOrderStatus } from './services/jupiterLimitOrder';
+import { cancelLimitOrder, checkOrderStatus, getSwapTransaction, getTokenDecimals } from './services/jupiterLimitOrder';
+import { ensureTraderWebhook, deleteTraderWebhook } from './services/heliusWebhook';
 
 // Validation schemas for copy trading
 const copyConfigSchema = z.object({
@@ -923,6 +924,16 @@ app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Res
                 exitWithTrader: data.exitWithTrader,
                 isActive: true
             }
+        });
+
+        // Register webhook for this trader address (non-blocking)
+        // Errors are logged but don't fail the request
+        ensureTraderWebhook(data.traderAddress).then(result => {
+            if (!result.success) {
+                console.warn(`[CopyTrading] Webhook registration warning for ${data.traderAddress}:`, result.error);
+            }
+        }).catch(err => {
+            console.error(`[CopyTrading] Webhook registration error:`, err);
         });
 
         res.json({ success: true, config });
@@ -990,7 +1001,7 @@ app.post('/copy-trade/execute/:queueId', authMiddleware, async (req: AuthRequest
     }
 });
 
-// GET /copy-trade/positions - List user's open positions
+// GET /copy-trade/positions - List user's open positions (including pending exits)
 app.get('/copy-trade/positions', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const positions = await prisma.copyPosition.findMany({
@@ -998,6 +1009,7 @@ app.get('/copy-trade/positions', authMiddleware, async (req: AuthRequest, res: R
                 userId: req.userId!,
                 OR: [
                     { status: 'open' },
+                    { status: 'pending_exit' },
                     { status: 'sl_hit' },
                     { status: 'tp_hit' }
                 ]
@@ -1012,10 +1024,98 @@ app.get('/copy-trade/positions', authMiddleware, async (req: AuthRequest, res: R
     }
 });
 
-// POST /copy-trade/close/:positionId - Manual close position
+// POST /copy-trade/close/:positionId - Initiate position close
+// Returns cancel transactions for SL/TP and unsigned sell transaction for client signing
 app.post('/copy-trade/close/:positionId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const positionId = req.params.positionId as string;
+
+        const position = await prisma.copyPosition.findFirst({
+            where: { id: positionId, userId: req.userId! },
+            include: { config: true }
+        });
+
+        if (!position) {
+            res.status(404).json({ error: 'Position not found' });
+            return;
+        }
+
+        if (position.status !== 'open' && position.status !== 'pending_exit') {
+            res.status(400).json({ error: 'Position already closed' });
+            return;
+        }
+
+        // Get user's public key from wallet
+        const wallet = await prisma.wallet.findUnique({
+            where: { userId: req.userId! },
+            select: { publicKey: true }
+        });
+
+        if (!wallet?.publicKey) {
+            res.status(400).json({ error: 'User wallet not found' });
+            return;
+        }
+
+        // Get cancel transactions for SL/TP orders
+        const cancelTransactions: { orderId: string; transaction: string | null }[] = [];
+        
+        if (position.slOrderId) {
+            const cancelTx = await cancelLimitOrder(position.slOrderId);
+            cancelTransactions.push({ orderId: position.slOrderId, transaction: cancelTx });
+        }
+        if (position.tpOrderId) {
+            const cancelTx = await cancelLimitOrder(position.tpOrderId);
+            cancelTransactions.push({ orderId: position.tpOrderId, transaction: cancelTx });
+        }
+
+        // Get decimals for the input token (the one being sold) from Jupiter token list
+        const inputDecimals = await getTokenDecimals(position.inputMint);
+        
+        // Calculate raw amount to sell (tokenAmount in smallest units)
+        const sellAmountRaw = Math.floor(position.tokenAmount * Math.pow(10, inputDecimals));
+
+        // Get sell swap transaction (sell input token back to output token)
+        const sellTransaction = await getSwapTransaction({
+            inputMint: position.inputMint,
+            outputMint: position.outputMint,
+            amount: sellAmountRaw,
+            slippageBps: 50,
+            userPublicKey: wallet.publicKey
+        });
+
+        if (!sellTransaction) {
+            res.status(500).json({ error: 'Failed to create sell transaction' });
+            return;
+        }
+
+        res.json({ 
+            success: true, 
+            message: 'Close transactions ready - sign and broadcast to complete close',
+            cancelTransactions,
+            sellTransaction: {
+                transaction: sellTransaction.swapTransaction,
+                lastValidBlockHeight: sellTransaction.lastValidBlockHeight
+            },
+            position: {
+                id: position.id,
+                inputMint: position.inputMint,
+                inputSymbol: position.inputSymbol,
+                outputMint: position.outputMint,
+                outputSymbol: position.outputSymbol,
+                tokenAmount: position.tokenAmount
+            }
+        });
+    } catch (error) {
+        console.error('Close position error:', error);
+        res.status(500).json({ error: 'Failed to close position' });
+    }
+});
+
+// POST /copy-trade/confirm-close/:positionId - Confirm position closed after sell
+app.post('/copy-trade/confirm-close/:positionId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const positionId = req.params.positionId as string;
+        const { sellSignature } = req.body;
 
         const position = await prisma.copyPosition.findFirst({
             where: { id: positionId, userId: req.userId! }
@@ -1026,20 +1126,7 @@ app.post('/copy-trade/close/:positionId', authMiddleware, async (req: AuthReques
             return;
         }
 
-        if (position.status !== 'open') {
-            res.status(400).json({ error: 'Position already closed' });
-            return;
-        }
-
-        // Cancel SL/TP orders if they exist
-        if (position.slOrderId) {
-            await cancelLimitOrder(position.slOrderId);
-        }
-        if (position.tpOrderId) {
-            await cancelLimitOrder(position.tpOrderId);
-        }
-
-        // Update position status
+        // Update position status to closed
         await prisma.copyPosition.update({
             where: { id: positionId as string },
             data: { 
@@ -1048,10 +1135,14 @@ app.post('/copy-trade/close/:positionId', authMiddleware, async (req: AuthReques
             }
         });
 
-        res.json({ success: true, message: 'Position closed' });
+        res.json({ 
+            success: true, 
+            message: 'Position closed',
+            sellSignature
+        });
     } catch (error) {
-        console.error('Close position error:', error);
-        res.status(500).json({ error: 'Failed to close position' });
+        console.error('Confirm close error:', error);
+        res.status(500).json({ error: 'Failed to confirm close' });
     }
 });
 
@@ -1068,16 +1159,37 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
             return;
         }
 
+        // Store trader address before marking inactive
+        const traderAddress = config.traderAddress;
+
         // Cancel all SL/TP orders for open positions
         for (const position of config.positions) {
             if (position.slOrderId) await cancelLimitOrder(position.slOrderId);
             if (position.tpOrderId) await cancelLimitOrder(position.tpOrderId);
         }
 
+        // Cancel any pending queue items for this config
+        await prisma.copyTradeQueue.updateMany({
+            where: { 
+                configId: config.id,
+                status: 'pending'
+            },
+            data: { status: 'cancelled' }
+        });
+
         // Mark config as inactive
         await prisma.copyTradingConfig.update({
             where: { userId: req.userId! },
             data: { isActive: false }
+        });
+
+        // Remove webhook if no other followers (non-blocking)
+        deleteTraderWebhook(traderAddress).then(success => {
+            if (!success) {
+                console.warn(`[CopyTrading] Failed to delete webhook for ${traderAddress}`);
+            }
+        }).catch(err => {
+            console.error(`[CopyTrading] Webhook deletion error:`, err);
         });
 
         res.json({ success: true, message: 'Copy trading stopped' });
@@ -1179,12 +1291,29 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
 
             if (!inputMint || !outputMint) continue;
 
-            // Log trader activity
+            // Determine swap type from trader's perspective
+            // If trader receives output token, it's a BUY
+            // If trader sends input token (selling something they bought before), it's a SELL
+            // For simplicity: if trader receives SOL/USDC/stable, it's a SELL; if they send it, it's a BUY
+            const stableMints = ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'];
+            const isTraderSellingStable = stableMints.includes(inputMint) || inputMint === 'So11111111111111111111111111111111111111112';
+            const isTraderBuyingStable = stableMints.includes(outputMint) || outputMint === 'So11111111111111111111111111111111111111112';
+            
+            // Default: if trader is spending stable/SOL, they're buying tokens (BUY)
+            // If trader is receiving stable/SOL, they're selling tokens (SELL)
+            let swapType: 'buy' | 'sell' = 'buy';
+            if (isTraderBuyingStable && !isTraderSellingStable) {
+                swapType = 'sell'; // Trader is selling tokens for stable
+            } else if (isTraderSellingStable && !isTraderBuyingStable) {
+                swapType = 'buy'; // Trader is buying tokens with stable
+            }
+
+            // Log trader activity with correct swap type
             await prisma.traderActivity.create({
                 data: {
                     traderAddress,
                     txSignature: tx.signature,
-                    swapType: 'buy',
+                    swapType,
                     inputMint,
                     outputMint,
                     inputAmount,
@@ -1193,20 +1322,35 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
                 }
             }).catch(() => {}); // Ignore duplicates
 
-            // Queue copy trades for all users copying this trader
-            for (const config of configs) {
-                await queueCopyTrade({
-                    userId: config.userId,
-                    configId: config.id,
-                    traderAddress,
-                    traderTxSignature: tx.signature,
-                    inputMint: outputMint,  // We buy what trader bought
-                    inputSymbol: outputSymbol,
-                    outputMint: inputMint,  // We spend what trader spent
-                    outputSymbol: inputSymbol,
-                    inputAmount: outputAmount,
-                    outputAmount: inputAmount
-                });
+            // Only queue copy trades for BUYs (when trader buys, we copy the buy)
+            if (swapType === 'buy') {
+                // Calculate price ratio from trader's swap
+                // price = outputAmount / inputAmount (what trader spent / what trader received)
+                const priceRatio = inputAmount > 0 ? inputAmount / outputAmount : 0;
+                
+                for (const config of configs) {
+                    // Cap the spend to user's perTradeAmount
+                    const cappedOutputAmount = Math.min(config.perTradeAmount, inputAmount);
+                    
+                    // Calculate proportional input amount based on price ratio
+                    // If priceRatio is 0, fall back to using perTradeAmount directly
+                    const proportionalInputAmount = priceRatio > 0 
+                        ? cappedOutputAmount / priceRatio 
+                        : outputAmount * (cappedOutputAmount / inputAmount);
+                    
+                    await queueCopyTrade({
+                        userId: config.userId,
+                        configId: config.id,
+                        traderAddress,
+                        traderTxSignature: tx.signature,
+                        inputMint: outputMint,           // We buy what trader bought
+                        inputSymbol: outputSymbol,
+                        outputMint: inputMint,           // We spend what trader spent
+                        outputSymbol: inputSymbol,
+                        inputAmount: proportionalInputAmount,  // Proportional to capped spend
+                        outputAmount: cappedOutputAmount       // Capped to perTradeAmount
+                    });
+                }
             }
         }
     } catch (error) {

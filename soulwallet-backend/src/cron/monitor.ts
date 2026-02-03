@@ -3,7 +3,7 @@ import { checkOrderStatus, cancelLimitOrder } from '../services/jupiterLimitOrde
 import { cleanExpiredQueue } from '../services/copyEngine';
 
 /**
- * Monitor trader exits and queue sell transactions
+ * Monitor trader exits and create sell queue entries
  * Runs every minute
  */
 export async function monitorTraderExits(): Promise<void> {
@@ -29,30 +29,73 @@ export async function monitorTraderExits(): Promise<void> {
                 where: {
                     traderAddress: position.config.traderAddress,
                     swapType: 'sell',
-                    inputMint: position.inputMint, // Trader is selling what we bought
+                    outputMint: position.inputMint, // Trader receives stable/SOL (selling the token we copied)
                     timestamp: { gte: fiveMinutesAgo }
                 }
             });
 
             if (!traderExit) continue;
 
-            console.log(`Trader ${position.config.traderAddress} exited ${position.inputSymbol}, queuing sell for user ${position.userId}`);
+            console.log(`Trader ${position.config.traderAddress} exited ${position.inputSymbol}, creating sell queue for user ${position.userId}`);
 
-            // Cancel SL/TP orders
-            if (position.slOrderId) await cancelLimitOrder(position.slOrderId);
-            if (position.tpOrderId) await cancelLimitOrder(position.tpOrderId);
+            // Cancel SL/TP orders first
+            const cancelTransactions = [];
+            if (position.slOrderId) {
+                const cancelTx = await cancelLimitOrder(position.slOrderId);
+                if (cancelTx) cancelTransactions.push({ orderId: position.slOrderId, transaction: cancelTx });
+            }
+            if (position.tpOrderId) {
+                const cancelTx = await cancelLimitOrder(position.tpOrderId);
+                if (cancelTx) cancelTransactions.push({ orderId: position.tpOrderId, transaction: cancelTx });
+            }
 
-            // Create queue item for sell (in a real implementation, you'd create a sell queue)
-            // For now, mark position as pending close
-            await prisma.copyPosition.update({
-                where: { id: position.id },
-                data: { 
-                    status: 'closed',
-                    closedAt: new Date()
+            // Create a sell queue entry for the user to execute
+            // This represents the exit trade that mirrors the trader's exit
+            // Include positionId to ensure uniqueness per position
+            const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+            
+            try {
+                await prisma.copyTradeQueue.create({
+                    data: {
+                        configId: position.configId,
+                        userId: position.userId,
+                        positionId: position.id,    // Unique per position
+                        traderTxSignature: traderExit.txSignature,
+                        traderAddress: position.config.traderAddress,
+                        inputMint: position.outputMint,    // We receive back what we spent (USDC/SOL)
+                        inputSymbol: position.outputSymbol,
+                        outputMint: position.inputMint,    // We sell what we bought
+                        outputSymbol: position.inputSymbol,
+                        inputAmount: position.entryAmount, // Approximate amount we'd receive
+                        outputAmount: position.tokenAmount, // Amount to sell
+                        entryPrice: position.entryPrice,
+                        slPrice: null, // No SL/TP for exit trades
+                        tpPrice: null,
+                        status: 'pending',
+                        expiresAt
+                    }
+                });
+
+                // Only mark position as pending exit after successful queue insert
+                await prisma.copyPosition.update({
+                    where: { id: position.id },
+                    data: { 
+                        status: 'pending_exit',
+                    }
+                });
+
+                console.log(`Created exit queue item for position ${position.id}`);
+            } catch (error: any) {
+                // Check if it's a unique constraint violation (already queued)
+                if (error.code === 'P2002') {
+                    console.log(`Exit queue item already exists for position ${position.id}`);
+                } else {
+                    console.error(`Failed to create exit queue for position ${position.id}:`, error);
                 }
-            });
+            }
 
-            // TODO: Send push notification to user
+            // TODO: Send push notification to user about exit opportunity
+            console.log(`Created sell queue entry for position ${position.id}, cancel transactions:`, cancelTransactions);
         }
     } catch (error) {
         console.error('Monitor trader exits error:', error);
@@ -61,7 +104,8 @@ export async function monitorTraderExits(): Promise<void> {
 
 /**
  * Monitor SL/TP limit orders and update position status
- * Runs every minute
+ * When SL/TP hits, we need to cancel the other order and mark position
+ * The actual sell happens via the limit order on-chain
  */
 export async function monitorLimitOrders(): Promise<void> {
     try {
@@ -89,7 +133,7 @@ export async function monitorLimitOrders(): Promise<void> {
                         await cancelLimitOrder(position.tpOrderId);
                     }
 
-                    // Update position
+                    // Update position - the sell already happened via limit order
                     await prisma.copyPosition.update({
                         where: { id: position.id },
                         data: { 
@@ -113,7 +157,7 @@ export async function monitorLimitOrders(): Promise<void> {
                         await cancelLimitOrder(position.slOrderId);
                     }
 
-                    // Update position
+                    // Update position - the sell already happened via limit order
                     await prisma.copyPosition.update({
                         where: { id: position.id },
                         data: { 
@@ -131,7 +175,6 @@ export async function monitorLimitOrders(): Promise<void> {
 
 /**
  * Clean expired queue items
- * Runs every minute
  */
 export async function cleanExpiredQueueItems(): Promise<void> {
     try {

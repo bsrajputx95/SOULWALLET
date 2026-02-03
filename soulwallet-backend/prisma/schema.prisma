@@ -103,16 +103,16 @@ model CopyPosition {
   traderTxSignature   String   @unique // Original trader's transaction signature
   inputMint           String   // Token bought (address)
   inputSymbol         String   // Token symbol
-  outputMint          String   // Token sold/used to buy (usually USDC or SOL)
+  outputMint          String   // Token spent to buy (usually USDC or SOL)
   outputSymbol        String
-  entryAmount         Float    // Amount of output token spent
-  entryPrice          Float    // Price at entry (in USDC)
+  entryAmount         Float    // Amount spent (outputAmount)
   tokenAmount         Float    // Amount of tokens received
+  entryPrice          Float    // Price at entry (in USDC)
   slPrice             Float?   // Stop loss price
   tpPrice             Float?   // Take profit price
   slOrderId           String?  // Jupiter Limit Order ID for SL
   tpOrderId           String?  // Jupiter Limit Order ID for TP
-  status              String   @default("open") // "open", "closed", "sl_hit", "tp_hit"
+  status              String   @default("open") // "open", "pending_exit", "closed", "sl_hit", "tp_hit"
   closedAt            DateTime?
   createdAt           DateTime @default(now())
 
@@ -145,25 +145,42 @@ model CopyTradeQueue {
   id                String   @id @default(cuid())
   configId          String
   userId            String
-  traderTxSignature String   @unique
+  positionId        String?  // Set for exit trades, null for entry trades
+  traderTxSignature String
   traderAddress     String
-  inputMint         String
+  inputMint         String   // Token bought (what we receive)
   inputSymbol       String
-  outputMint        String
+  outputMint        String   // Token spent (what we pay with)
   outputSymbol      String
-  inputAmount       Float
+  inputAmount       Float    // Amount of tokens received
+  outputAmount      Float    // Amount of tokens spent (perTradeAmount)
   entryPrice        Float
   slPrice           Float?
   tpPrice           Float?
-  status            String   @default("pending") // "pending", "completed", "expired"
+  status            String   @default("pending") // "pending", "completed", "expired", "cancelled"
   expiresAt         DateTime
   createdAt         DateTime @default(now())
 
   config            CopyTradingConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Unique constraint: entry trades use userId+traderTxSignature, exit trades use positionId
+  @@unique([userId, traderTxSignature, positionId])
   @@index([userId, status])
   @@index([configId, status])
+  @@index([positionId])
   @@index([expiresAt])
   @@map("copy_trade_queue")
+}
+
+model TraderWebhook {
+  id            String   @id @default(cuid())
+  traderAddress String   @unique
+  webhookId     String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([traderAddress])
+  @@map("trader_webhooks")
 }

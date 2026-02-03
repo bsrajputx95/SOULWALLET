@@ -36,23 +36,45 @@ export async function queueCopyTrade(params: QueueCopyTradeParams): Promise<bool
             return false;
         }
 
-        // Check budget: open positions * perTradeAmount <= totalInvestment
-        const usedBudget = config.positions.length * config.perTradeAmount;
+        // Check if this trade was already queued for this user (duplicate check)
+        const existingQueue = await prisma.copyTradeQueue.findFirst({
+            where: { 
+                userId: params.userId,
+                traderTxSignature: params.traderTxSignature
+            }
+        });
+
+        if (existingQueue) {
+            console.log(`Trade ${params.traderTxSignature} already queued for user ${params.userId}`);
+            return false;
+        }
+
+        // Count pending queue items for budget calculation
+        const pendingQueueCount = await prisma.copyTradeQueue.count({
+            where: {
+                userId: params.userId,
+                status: 'pending',
+                expiresAt: { gt: new Date() }
+            }
+        });
+
+        // Check budget: (open positions + pending queue) * perTradeAmount <= totalInvestment
+        const usedBudget = (config.positions.length + pendingQueueCount) * config.perTradeAmount;
         const availableBudget = config.totalInvestment - usedBudget;
 
-        if (availableBudget < config.perTradeAmount) {
+        // Cap the output amount to available budget
+        const cappedOutputAmount = Math.min(params.outputAmount, availableBudget);
+        
+        if (cappedOutputAmount <= 0) {
             console.log(`Budget exceeded for user ${params.userId}: used ${usedBudget}/${config.totalInvestment}`);
             return false;
         }
 
-        // Check if this trade was already queued (duplicate check)
-        const existingQueue = await prisma.copyTradeQueue.findUnique({
-            where: { traderTxSignature: params.traderTxSignature }
-        });
-
-        if (existingQueue) {
-            console.log(`Trade ${params.traderTxSignature} already queued`);
-            return false;
+        // Adjust input amount proportionally if we capped the output
+        let adjustedInputAmount = params.inputAmount;
+        if (cappedOutputAmount < params.outputAmount && params.outputAmount > 0) {
+            const ratio = cappedOutputAmount / params.outputAmount;
+            adjustedInputAmount = params.inputAmount * ratio;
         }
 
         // Get current prices for both tokens
@@ -88,7 +110,8 @@ export async function queueCopyTrade(params: QueueCopyTradeParams): Promise<bool
                 inputSymbol: params.inputSymbol,
                 outputMint: params.outputMint,
                 outputSymbol: params.outputSymbol,
-                inputAmount: params.inputAmount,
+                inputAmount: adjustedInputAmount,   // Adjusted proportional amount
+                outputAmount: cappedOutputAmount,   // Capped to budget/perTradeAmount
                 entryPrice,
                 slPrice,
                 tpPrice,
@@ -97,7 +120,7 @@ export async function queueCopyTrade(params: QueueCopyTradeParams): Promise<bool
             }
         });
 
-        console.log(`Queued copy trade for user ${params.userId}: ${params.inputSymbol} at $${entryPrice}`);
+        console.log(`Queued copy trade for user ${params.userId}: ${params.inputSymbol} at $${entryPrice}, spend: ${cappedOutputAmount}`);
         return true;
 
     } catch (error) {
@@ -158,6 +181,8 @@ export async function markTradeExecuted(
         });
 
         // Create position record
+        // entryAmount = what we spent (outputAmount)
+        // tokenAmount = what we received (inputAmount)
         await prisma.copyPosition.create({
             data: {
                 configId: queueItem.configId,
@@ -167,9 +192,9 @@ export async function markTradeExecuted(
                 inputSymbol: queueItem.inputSymbol,
                 outputMint: queueItem.outputMint,
                 outputSymbol: queueItem.outputSymbol,
-                entryAmount: queueItem.inputAmount,
+                entryAmount: queueItem.outputAmount, // Amount spent
+                tokenAmount: queueItem.inputAmount,  // Amount received
                 entryPrice: queueItem.entryPrice,
-                tokenAmount: queueItem.inputAmount,
                 slPrice: queueItem.slPrice,
                 tpPrice: queueItem.tpPrice,
                 slOrderId,

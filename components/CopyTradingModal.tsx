@@ -237,13 +237,13 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                         <TouchableOpacity
                             style={[
                                 styles.startCopyButton,
-                                startCopyingMutation.isPending && styles.startCopyButtonDisabled
+                                isPending && styles.startCopyButtonDisabled
                             ]}
-                            disabled={startCopyingMutation.isPending}
+                            disabled={isPending}
                             onPress={handleStartCopying}
                         >
                             <Text style={styles.startCopyText}>
-                                {startCopyingMutation.isPending ? 'Starting...' : 'Start Copying'}
+                                {isPending ? 'Starting...' : 'Start Copying'}
                             </Text>
                         </TouchableOpacity>
                     </ScrollView>

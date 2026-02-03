@@ -29,9 +29,13 @@ import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { SendModal } from '../../components/SendModal';
 import { ReceiveModal } from '../../components/ReceiveModal';
 import { SwapModal } from '../../components/SwapModal';
+import { CopyTradingModal } from '../../components/CopyTradingModal';
+import { CopyTradeExecutionModal } from '../../components/CopyTradeExecutionModal';
+import { QueueStatusBanner } from '../../components/QueueStatusBanner';
 import * as SecureStore from 'expo-secure-store';
 import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding } from '../../services/wallet';
 import { showErrorToast } from '../../utils/toast';
+import { createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition } from '../../services/copyTrading';
 
 // Static fallback wallet data for UI display
 const DUMMY_WALLET = {
@@ -319,10 +323,62 @@ export default function HomeScreen() {
     }
   };
 
+  // Load copy trading data (positions, queue, config)
+  const loadCopyTradingData = useCallback(async () => {
+    try {
+      setIsLoadingCopyData(true);
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) return;
+
+      // Fetch config, positions, and queue in parallel
+      const [configResult, positionsResult, queueResult] = await Promise.all([
+        fetchCopyConfig(token),
+        fetchCopyPositions(token),
+        checkCopyTradeQueue(token)
+      ]);
+
+      if (configResult.success) {
+        setCopyConfig(configResult.config);
+      }
+      if (positionsResult.success && positionsResult.positions) {
+        setCopyPositions(positionsResult.positions);
+      }
+      if (queueResult.success && queueResult.queue) {
+        setCopyQueue(queueResult.queue.filter(item => item.status === 'pending'));
+      }
+    } catch (error) {
+      console.error('Failed to load copy trading data:', error);
+    } finally {
+      setIsLoadingCopyData(false);
+    }
+  }, []);
+
+  // Load copy trading data on mount and when auth changes
+  useEffect(() => {
+    loadCopyTradingData();
+  }, [loadCopyTradingData, user]);
+
+  // Handle queue banner action - open execution modal
+  const handleQueueAction = useCallback(() => {
+    if (copyQueue.length > 0) {
+      setSelectedQueueItem(copyQueue[0]);
+      setShowExecutionModal(true);
+    }
+  }, [copyQueue]);
+
+  // Handle successful execution - refresh data
+  const handleExecutionSuccess = useCallback(() => {
+    loadCopyTradingData();
+    setShowExecutionModal(false);
+    setSelectedQueueItem(null);
+  }, [loadCopyTradingData]);
+
   const stopCopyTrade = async (copyTradingId: string) => {
     try {
       await stopCopyTradeMutation.mutateAsync({ copyTradingId });
       Alert.alert('Success', 'Stopped copy trading');
+      // Refresh copy trading data
+      loadCopyTradingData();
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to stop copy trading');
     }
@@ -398,8 +454,17 @@ export default function HomeScreen() {
   const searchedTradersData: any = { data: [] };
   const searchedTradersLoading = false;
 
+  // New Copy Trading State
   const [showCopyModal, setShowCopyModal] = React.useState(false);
-  const [selectedTrader, setSelectedTrader] = React.useState<string | null>(null);
+  const [selectedTrader, setSelectedTrader] = React.useState<{ username: string; walletAddress: string } | null>(null);
+  const [showExecutionModal, setShowExecutionModal] = React.useState(false);
+  const [selectedQueueItem, setSelectedQueueItem] = React.useState<CopyTradeQueueItem | null>(null);
+  const [copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
+  const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
+  const [copyConfig, setCopyConfig] = React.useState<any>(null);
+  const [isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
+  
+  // Legacy state (to be removed after migration)
   const [selectedTraderWallet, setSelectedTraderWallet] = React.useState<string | null>(null);
   const [copyAmount, setCopyAmount] = React.useState('1000');
   const [amountPerTrade, setAmountPerTrade] = React.useState('100');
@@ -604,9 +669,11 @@ export default function HomeScreen() {
                       roi={trader.roi}
                       period="24h"
                       onPress={() => {
-                        // Simple: tap anywhere opens copy modal with address pre-filled
-                        setSelectedTrader(trader.walletAddress);
-                        setSelectedTraderWallet(trader.walletAddress);
+                        // Open copy modal with trader info
+                        setSelectedTrader({
+                          username: trader.name || trader.username,
+                          walletAddress: trader.walletAddress
+                        });
                         setShowCopyModal(true);
                       }}
                     />
@@ -674,8 +741,10 @@ export default function HomeScreen() {
                   <TouchableOpacity
                     style={styles.quickSetupButton}
                     onPress={() => {
-                      setSelectedTrader('Manual Setup');
-                      setSelectedTraderWallet('');
+                      setSelectedTrader({
+                        username: 'Manual Setup',
+                        walletAddress: ''
+                      });
                       setShowCopyModal(true);
                     }}
                   >
@@ -831,6 +900,12 @@ export default function HomeScreen() {
             </View>
           </View>
 
+          {/* Copy Trade Queue Status Banner */}
+          <QueueStatusBanner 
+            onViewQueue={handleQueueAction}
+            pollInterval={30000}
+          />
+
           <View style={styles.tabsContainer}>
             <View style={styles.tabsHeader}>
               <TouchableOpacity
@@ -884,170 +959,28 @@ export default function HomeScreen() {
         </ScrollView>
       </ErrorBoundary>
 
-      {/* Copy Trading Modal */}
-      <Modal
+      {/* Copy Trading Modal - New Implementation */}
+      <CopyTradingModal
         visible={showCopyModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowCopyModal(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowCopyModal(false)} accessibilityRole="button" accessibilityLabel="Dismiss copy trading modal">
-          <Pressable style={[styles.modalContainer, { width: width * 0.9, maxWidth: 400, maxHeight: '90%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Copy @{selectedTrader}</Text>
-              <TouchableOpacity onPress={() => setShowCopyModal(false)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
+        onClose={() => {
+          setShowCopyModal(false);
+          setSelectedTrader(null);
+          // Refresh copy trading data after config change
+          loadCopyTradingData();
+        }}
+        trader={selectedTrader}
+      />
 
-            <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalDescription}>
-                {selectedTrader === 'Manual Setup' ?
-                  'Enter wallet address and trading parameters' :
-                  `Set up copy trading parameters for @${selectedTrader}`
-                }
-              </Text>
-
-              {selectedTrader === 'Manual Setup' && (
-                <View style={styles.inputSection}>
-                  <Text style={styles.inputLabel}>Wallet Address to Copy</Text>
-                  <View style={styles.inputContainer}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter Solana wallet address..."
-                      placeholderTextColor={COLORS.textSecondary}
-                      value={selectedTraderWallet || ''}
-                      onChangeText={setSelectedTraderWallet}
-                      multiline
-                    />
-                  </View>
-                </View>
-              )}
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Total Amount (USDC)</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputPrefix}>$</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="1000"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={copyAmount}
-                    onChangeText={setCopyAmount}
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Amount per Trade (USDC)</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputPrefix}>$</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="100"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={amountPerTrade}
-                    onChangeText={setAmountPerTrade}
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Stop Loss (%)</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="10"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={stopLoss}
-                    onChangeText={setStopLoss}
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.inputSuffix}>%</Text>
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Take Profit (%)</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="30"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={takeProfit}
-                    onChangeText={setTakeProfit}
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.inputSuffix}>%</Text>
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Max Slippage (%)</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="0.5"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={maxSlippage}
-                    onChangeText={setMaxSlippage}
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.inputSuffix}>%</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity style={styles.exitWithTraderButton}>
-                <Text style={styles.exitWithTraderText}>Exit with Trader</Text>
-                <Text style={styles.exitWithTraderSubtext}>Automatically exit when trader exits</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.startCopyButton, isCreating ? { opacity: 0.7 } : null]}
-                disabled={isCreating}
-                onPress={async () => {
-                  if (!validateCopyTradeForm()) return;
-                  try {
-                    await createCopyTrade({
-                      targetWalletAddress: selectedTraderWallet,
-                      totalAmount: parseFloat(copyAmount),
-                      amountPerTrade: parseFloat(amountPerTrade),
-                      stopLoss: stopLoss ? parseFloat(stopLoss) : undefined,
-                      takeProfit: takeProfit ? parseFloat(takeProfit) : undefined,
-                      maxSlippage: maxSlippage ? parseFloat(maxSlippage) : 0.5
-                    });
-                    Alert.alert('Success', `Started copying ${selectedTrader || 'wallet'}!`);
-                    setShowCopyModal(false);
-                    setSelectedTrader(null);
-                    setSelectedTraderWallet(null);
-                    setCopyAmount('1000');
-                    setAmountPerTrade('100');
-                    setStopLoss('10');
-                    setTakeProfit('30');
-                    setMaxSlippage('0.5');
-                  } catch (error: any) {
-                    Alert.alert('Error', error.message || 'Failed to set up copy trading');
-                  }
-                }}
-                accessibilityLabel="Start copying trader"
-                accessibilityRole="button"
-              >
-                <LinearGradient
-                  colors={[COLORS.success, COLORS.success + '80']}
-                  style={styles.startCopyGradient}
-                >
-                  <Zap size={20} color={COLORS.textPrimary} />
-                  <Text style={styles.startCopyText}>
-                    {isCreating ? 'SETTING UP...' : 'START COPYING'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Copy Trade Execution Modal */}
+      <CopyTradeExecutionModal
+        visible={showExecutionModal}
+        onClose={() => {
+          setShowExecutionModal(false);
+          setSelectedQueueItem(null);
+        }}
+        onSuccess={handleExecutionSuccess}
+        queueItem={selectedQueueItem}
+      />
 
       {/* Swap Modal */}
       <SwapModal
