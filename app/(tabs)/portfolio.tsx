@@ -10,7 +10,8 @@ import {
   Modal,
   Image,
   Alert,
-  useWindowDimensions
+  useWindowDimensions,
+  Linking
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign } from 'lucide-react-native';
@@ -653,7 +654,7 @@ export default function PortfolioScreen() {
                 // Open Solscan for wallet activity
                 if (user?.walletAddress) {
                   const url = `https://solscan.io/account/${user.walletAddress}#txs`;
-                  void import('react-native').then(({ Linking }) => Linking.openURL(url));
+                  Linking.openURL(url);
                 } else {
                   Alert.alert('No Wallet', 'Connect a wallet to view activity');
                 }

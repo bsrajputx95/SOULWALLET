@@ -14,6 +14,7 @@ import {
     FlatList,
     Image,
     ActivityIndicator,
+    Linking,
 } from 'react-native';
 import { X, ChevronDown, QrCode } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -242,6 +243,8 @@ export const SendModal: React.FC<SendModalProps> = ({
             if (result.success) {
                 // Show toast for immediate feedback
                 showSuccessToast(`Sent ${amount} ${selectedToken?.symbol}`);
+                // Trigger refresh immediately before showing alert
+                if (onSuccess) await onSuccess();
                 // Also show Alert with Solscan link
                 Alert.alert(
                     '✅ Transaction Sent!',
@@ -251,14 +254,14 @@ export const SendModal: React.FC<SendModalProps> = ({
                             text: 'View on Solscan',
                             onPress: () => {
                                 if (result.explorerUrl) {
-                                    import('react-native').then(({ Linking }) => Linking.openURL(result.explorerUrl!));
+                                    Linking.openURL(result.explorerUrl);
                                 }
+                                onClose();
                             },
                         },
                         {
                             text: 'Done',
                             onPress: () => {
-                                onSuccess?.();
                                 onClose();
                             },
                         },
@@ -269,7 +272,6 @@ export const SendModal: React.FC<SendModalProps> = ({
                 showErrorToast(result.error || 'Transaction failed');
             }
         } catch (error: any) {
-            console.error('Send transaction failed:', error);
             Alert.alert('Transaction Failed', error.message || 'Failed to send transaction');
         } finally {
             setIsSending(false);

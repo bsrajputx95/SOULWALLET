@@ -871,6 +871,349 @@ app.get('/transactions/history', authMiddleware, async (req: AuthRequest, res: R
     }
 });
 
+// ====== Copy Trading Endpoints ======
+
+import { queueCopyTrade, markTradeExecuted, getPendingQueueItems, checkBudget } from './services/copyEngine';
+import { cancelLimitOrder, checkOrderStatus } from './services/jupiterLimitOrder';
+
+// Validation schemas for copy trading
+const copyConfigSchema = z.object({
+    traderAddress: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address'),
+    totalInvestment: z.number().positive().max(10000, 'Max $10,000 allowed'),
+    perTradeAmount: z.number().positive(),
+    stopLossPercent: z.number().min(1).max(50).default(10),
+    takeProfitPercent: z.number().min(5).max(1000).default(30),
+    exitWithTrader: z.boolean().default(true)
+}).refine(data => data.perTradeAmount <= data.totalInvestment, {
+    message: 'Per-trade amount cannot exceed total investment',
+    path: ['perTradeAmount']
+});
+
+// POST /copy-trade/config - Create/update copy trading config
+app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const data = copyConfigSchema.parse(req.body);
+        const userId = req.userId!;
+
+        // Validate per-trade vs total
+        if (data.perTradeAmount > data.totalInvestment) {
+            res.status(400).json({ error: 'Per-trade amount cannot exceed total investment' });
+            return;
+        }
+
+        // Upsert config
+        const config = await prisma.copyTradingConfig.upsert({
+            where: { userId },
+            update: {
+                traderAddress: data.traderAddress,
+                totalInvestment: data.totalInvestment,
+                perTradeAmount: data.perTradeAmount,
+                stopLossPercent: data.stopLossPercent,
+                takeProfitPercent: data.takeProfitPercent,
+                exitWithTrader: data.exitWithTrader,
+                isActive: true
+            },
+            create: {
+                userId,
+                traderAddress: data.traderAddress,
+                totalInvestment: data.totalInvestment,
+                perTradeAmount: data.perTradeAmount,
+                stopLossPercent: data.stopLossPercent,
+                takeProfitPercent: data.takeProfitPercent,
+                exitWithTrader: data.exitWithTrader,
+                isActive: true
+            }
+        });
+
+        res.json({ success: true, config });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({ error: error.issues[0]?.message || 'Validation failed' });
+            return;
+        }
+        console.error('Copy config error:', error);
+        res.status(500).json({ error: 'Failed to save copy trading config' });
+    }
+});
+
+// GET /copy-trade/config - Get user's copy trading config
+app.get('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const config = await prisma.copyTradingConfig.findUnique({
+            where: { userId: req.userId! }
+        });
+
+        res.json({ success: true, config });
+    } catch (error) {
+        console.error('Get copy config error:', error);
+        res.status(500).json({ error: 'Failed to fetch config' });
+    }
+});
+
+// GET /copy-trade/queue - Get pending trades for user
+app.get('/copy-trade/queue', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const items = await getPendingQueueItems(req.userId!);
+        res.json({ success: true, queue: items });
+    } catch (error) {
+        console.error('Get queue error:', error);
+        res.status(500).json({ error: 'Failed to fetch queue' });
+    }
+});
+
+// POST /copy-trade/execute/:queueId - Mark trade as executed
+app.post('/copy-trade/execute/:queueId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const queueId = req.params.queueId as string;
+        const { slOrderId, tpOrderId } = req.body;
+
+        // Verify queue item belongs to user
+        const queueItem = await prisma.copyTradeQueue.findFirst({
+            where: { id: queueId, userId: req.userId! }
+        });
+
+        if (!queueItem) {
+            res.status(404).json({ error: 'Queue item not found' });
+            return;
+        }
+
+        const success = await markTradeExecuted(queueId, slOrderId, tpOrderId);
+        
+        if (success) {
+            res.json({ success: true, message: 'Trade marked as executed' });
+        } else {
+            res.status(400).json({ error: 'Failed to execute trade' });
+        }
+    } catch (error) {
+        console.error('Execute trade error:', error);
+        res.status(500).json({ error: 'Failed to execute trade' });
+    }
+});
+
+// GET /copy-trade/positions - List user's open positions
+app.get('/copy-trade/positions', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const positions = await prisma.copyPosition.findMany({
+            where: { 
+                userId: req.userId!,
+                OR: [
+                    { status: 'open' },
+                    { status: 'sl_hit' },
+                    { status: 'tp_hit' }
+                ]
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        res.json({ success: true, positions });
+    } catch (error) {
+        console.error('Get positions error:', error);
+        res.status(500).json({ error: 'Failed to fetch positions' });
+    }
+});
+
+// POST /copy-trade/close/:positionId - Manual close position
+app.post('/copy-trade/close/:positionId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const positionId = req.params.positionId as string;
+
+        const position = await prisma.copyPosition.findFirst({
+            where: { id: positionId, userId: req.userId! }
+        });
+
+        if (!position) {
+            res.status(404).json({ error: 'Position not found' });
+            return;
+        }
+
+        if (position.status !== 'open') {
+            res.status(400).json({ error: 'Position already closed' });
+            return;
+        }
+
+        // Cancel SL/TP orders if they exist
+        if (position.slOrderId) {
+            await cancelLimitOrder(position.slOrderId);
+        }
+        if (position.tpOrderId) {
+            await cancelLimitOrder(position.tpOrderId);
+        }
+
+        // Update position status
+        await prisma.copyPosition.update({
+            where: { id: positionId as string },
+            data: { 
+                status: 'closed',
+                closedAt: new Date()
+            }
+        });
+
+        res.json({ success: true, message: 'Position closed' });
+    } catch (error) {
+        console.error('Close position error:', error);
+        res.status(500).json({ error: 'Failed to close position' });
+    }
+});
+
+// DELETE /copy-trade/config - Stop copying (soft delete)
+app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const config = await prisma.copyTradingConfig.findUnique({
+            where: { userId: req.userId! },
+            include: { positions: { where: { status: 'open' } } }
+        });
+
+        if (!config) {
+            res.status(404).json({ error: 'Config not found' });
+            return;
+        }
+
+        // Cancel all SL/TP orders for open positions
+        for (const position of config.positions) {
+            if (position.slOrderId) await cancelLimitOrder(position.slOrderId);
+            if (position.tpOrderId) await cancelLimitOrder(position.tpOrderId);
+        }
+
+        // Mark config as inactive
+        await prisma.copyTradingConfig.update({
+            where: { userId: req.userId! },
+            data: { isActive: false }
+        });
+
+        res.json({ success: true, message: 'Copy trading stopped' });
+    } catch (error) {
+        console.error('Stop copy trading error:', error);
+        res.status(500).json({ error: 'Failed to stop copy trading' });
+    }
+});
+
+// POST /webhooks/helius - Helius webhook for trader activity
+app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> => {
+    // Always return 200 to Helius immediately
+    res.status(200).json({ received: true });
+
+    try {
+        // Verify webhook secret
+        const authHeader = req.headers.authorization;
+        const expectedSecret = process.env.HELIUS_AUTH_HEADER;
+        
+        if (expectedSecret && authHeader !== expectedSecret) {
+            console.warn('Invalid webhook authorization');
+            return;
+        }
+
+        const payload = req.body;
+        
+        // Process each transaction in the webhook
+        const transactions = Array.isArray(payload) ? payload : [payload];
+        
+        for (const tx of transactions) {
+            // Check if it's a swap/transfer transaction
+            // Helius event types: TRANSFER, SWAP, UNKNOWN
+            const isRelevant = tx.type === 'SWAP' || tx.type === 'TRANSFER';
+            
+            if (!isRelevant) continue;
+
+            // Extract trader address (fee payer)
+            const traderAddress = tx.feePayer;
+            if (!traderAddress) continue;
+
+            // Find users copying this trader
+            const configs = await prisma.copyTradingConfig.findMany({
+                where: { 
+                    traderAddress,
+                    isActive: true
+                }
+            });
+
+            if (configs.length === 0) continue;
+
+            // Extract swap details from token transfers
+            const tokenTransfers = tx.tokenTransfers || [];
+            const nativeTransfers = tx.nativeTransfers || [];
+
+            // Determine swap direction and amounts
+            let inputMint = '';
+            let outputMint = '';
+            let inputAmount = 0;
+            let outputAmount = 0;
+            let inputSymbol = '';
+            let outputSymbol = '';
+
+            // Parse token transfers to find swap
+            if (tokenTransfers.length >= 2) {
+                // Usually swap has 2+ transfers (token in, token out)
+                // Find the transfer from trader (input) and to trader (output)
+                
+                for (const transfer of tokenTransfers) {
+                    if (transfer.fromUserAccount === traderAddress) {
+                        // Selling this token
+                        inputMint = transfer.mint;
+                        inputAmount = transfer.tokenAmount;
+                        inputSymbol = transfer.symbol || 'Unknown';
+                    }
+                    if (transfer.toUserAccount === traderAddress) {
+                        // Buying this token
+                        outputMint = transfer.mint;
+                        outputAmount = transfer.tokenAmount;
+                        outputSymbol = transfer.symbol || 'Unknown';
+                    }
+                }
+            }
+
+            // Handle SOL transfers (wrapped SOL)
+            if (nativeTransfers.length > 0) {
+                for (const transfer of nativeTransfers) {
+                    if (transfer.fromUserAccount === traderAddress) {
+                        inputMint = 'So11111111111111111111111111111111111111112';
+                        inputAmount = transfer.amount / 1e9;
+                        inputSymbol = 'SOL';
+                    }
+                    if (transfer.toUserAccount === traderAddress) {
+                        outputMint = 'So11111111111111111111111111111111111111112';
+                        outputAmount = transfer.amount / 1e9;
+                        outputSymbol = 'SOL';
+                    }
+                }
+            }
+
+            if (!inputMint || !outputMint) continue;
+
+            // Log trader activity
+            await prisma.traderActivity.create({
+                data: {
+                    traderAddress,
+                    txSignature: tx.signature,
+                    swapType: 'buy',
+                    inputMint,
+                    outputMint,
+                    inputAmount,
+                    outputAmount,
+                    timestamp: new Date(tx.timestamp * 1000)
+                }
+            }).catch(() => {}); // Ignore duplicates
+
+            // Queue copy trades for all users copying this trader
+            for (const config of configs) {
+                await queueCopyTrade({
+                    userId: config.userId,
+                    configId: config.id,
+                    traderAddress,
+                    traderTxSignature: tx.signature,
+                    inputMint: outputMint,  // We buy what trader bought
+                    inputSymbol: outputSymbol,
+                    outputMint: inputMint,  // We spend what trader spent
+                    outputSymbol: inputSymbol,
+                    inputAmount: outputAmount,
+                    outputAmount: inputAmount
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Webhook processing error:', error);
+    }
+});
+
 // GET /health (Unauthenticated - for Railway monitoring)
 app.get('/health', (_req: Request, res: Response): void => {
     res.json({
@@ -883,6 +1226,19 @@ app.get('/health', (_req: Request, res: Response): void => {
 app.use((_req: Request, res: Response): void => {
     res.status(404).json({ error: 'Endpoint not found' });
 });
+
+// ====== Cron Jobs ======
+
+import { monitorTraderExits, monitorLimitOrders, cleanExpiredQueueItems } from './cron/monitor';
+
+// Run every minute
+setInterval(async () => {
+    await Promise.all([
+        monitorTraderExits(),
+        monitorLimitOrders(),
+        cleanExpiredQueueItems()
+    ]);
+}, 60 * 1000);
 
 // ====== Start Server ======
 

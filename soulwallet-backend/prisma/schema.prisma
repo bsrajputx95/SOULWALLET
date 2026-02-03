@@ -31,6 +31,11 @@ model User {
   // Transaction History
   transactions Transaction[]
 
+  // Copy Trading Relations
+  copyTradingConfig CopyTradingConfig?
+  copyPositions     CopyPosition[]
+  copyTradeQueue    CopyTradeQueue[]
+
   @@index([username])
   @@index([email])
 }
@@ -66,4 +71,99 @@ model Transaction {
   @@index([userId, createdAt])
   @@index([signature])
   @@map("transactions")
+}
+
+// Copy Trading Models
+model CopyTradingConfig {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  traderAddress       String   // The wallet address being copied
+  totalInvestment     Float    // Max total budget (e.g., 1000 USDC)
+  perTradeAmount      Float    // Amount per copy trade (e.g., 100 USDC)
+  stopLossPercent     Float    @default(10)  // SL percentage (e.g., 10 = 10% loss)
+  takeProfitPercent   Float    @default(30)  // TP percentage (e.g., 30 = 30% profit)
+  exitWithTrader      Boolean  @default(true) // Auto-exit when trader exits
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions           CopyPosition[]
+  queueItems          CopyTradeQueue[]
+
+  @@index([traderAddress])
+  @@index([userId, isActive])
+  @@map("copy_trading_configs")
+}
+
+model CopyPosition {
+  id                  String   @id @default(cuid())
+  configId            String
+  userId              String
+  traderTxSignature   String   @unique // Original trader's transaction signature
+  inputMint           String   // Token bought (address)
+  inputSymbol         String   // Token symbol
+  outputMint          String   // Token sold/used to buy (usually USDC or SOL)
+  outputSymbol        String
+  entryAmount         Float    // Amount of output token spent
+  entryPrice          Float    // Price at entry (in USDC)
+  tokenAmount         Float    // Amount of tokens received
+  slPrice             Float?   // Stop loss price
+  tpPrice             Float?   // Take profit price
+  slOrderId           String?  // Jupiter Limit Order ID for SL
+  tpOrderId           String?  // Jupiter Limit Order ID for TP
+  status              String   @default("open") // "open", "closed", "sl_hit", "tp_hit"
+  closedAt            DateTime?
+  createdAt           DateTime @default(now())
+
+  config              CopyTradingConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([configId, status])
+  @@index([userId, status])
+  @@map("copy_positions")
+}
+
+model TraderActivity {
+  id              String   @id @default(cuid())
+  traderAddress   String
+  txSignature     String   @unique
+  swapType        String   // "buy" or "sell"
+  inputMint       String
+  outputMint      String
+  inputAmount     Float
+  outputAmount    Float
+  timestamp       DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([traderAddress])
+  @@index([timestamp])
+  @@map("trader_activity")
+}
+
+model CopyTradeQueue {
+  id                String   @id @default(cuid())
+  configId          String
+  userId            String
+  traderTxSignature String   @unique
+  traderAddress     String
+  inputMint         String
+  inputSymbol       String
+  outputMint        String
+  outputSymbol      String
+  inputAmount       Float
+  entryPrice        Float
+  slPrice           Float?
+  tpPrice           Float?
+  status            String   @default("pending") // "pending", "completed", "expired"
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+
+  config            CopyTradingConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([configId, status])
+  @@index([expiresAt])
+  @@map("copy_trade_queue")
 }

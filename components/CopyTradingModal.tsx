@@ -11,9 +11,12 @@ import {
     Image,
 } from 'react-native';
 import { X } from 'lucide-react-native';
+import * as SecureStore from 'expo-secure-store';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
+import { createCopyConfig } from '../services/copyTrading';
+import { showSuccessToast, showErrorToast } from '../utils/toast';
 
 interface CopyTradingModalProps {
     visible: boolean;
@@ -35,15 +38,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [minProfitForSharing, setMinProfitForSharing] = useState('0');
     const [isPending, setIsPending] = useState(false);
 
-    // Mock mutation - copy trading coming soon
-    const startCopyingMutation = {
-        isPending,
-        mutateAsync: async (_params: any) => {
-            Alert.alert('🚧 Coming Soon', 'Copy trading is not available yet. This feature is being developed.');
-            return {};
-        },
-    };
-
     const handleStartCopying = async () => {
         if (!trader?.walletAddress) {
             Alert.alert('Error', 'Trader wallet address not found.');
@@ -60,18 +54,31 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
 
         try {
             setIsPending(true);
-            await startCopyingMutation.mutateAsync({
-                walletAddress: trader.walletAddress,
-                totalBudget,
-                amountPerTrade: perTrade,
-                stopLoss: stopLoss ? -Math.abs(parseFloat(stopLoss)) : undefined,
-                takeProfit: takeProfit ? Math.abs(parseFloat(takeProfit)) : undefined,
-                maxSlippage: maxSlippage ? Math.abs(parseFloat(maxSlippage)) : 0.5,
-                exitWithTrader,
-                minProfitForSharing: minProfitForSharing ? Math.abs(parseFloat(minProfitForSharing)) : 0,
-            });
+
+            const authToken = await SecureStore.getItemAsync('token');
+            if (!authToken) {
+                Alert.alert('Error', 'Please login first');
+                return;
+            }
+
+            const result = await createCopyConfig({
+                traderAddress: trader.walletAddress,
+                totalInvestment: totalBudget,
+                perTradeAmount: perTrade,
+                stopLossPercent: parseFloat(stopLoss) || 10,
+                takeProfitPercent: parseFloat(takeProfit) || 30,
+                exitWithTrader
+            }, authToken);
+
+            if (result.success) {
+                showSuccessToast('Copy trading configured!');
+                Alert.alert('Success', `You are now copying ${trader.username}`);
+                onClose();
+            } else {
+                showErrorToast(result.error || 'Failed to start copy trading');
+            }
         } catch (error: any) {
-            console.error('[CopyTradingModal] Error:', error);
+            showErrorToast(error.message || 'Failed to start copy trading');
         } finally {
             setIsPending(false);
         }

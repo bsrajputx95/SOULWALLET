@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, ArrowUpDown, ChevronDown, Search } from 'lucide-react-native';
+import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../../constants/colors';
@@ -28,8 +28,10 @@ import { TraderCard } from '../../components/TraderCard';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { SendModal } from '../../components/SendModal';
 import { ReceiveModal } from '../../components/ReceiveModal';
+import { SwapModal } from '../../components/SwapModal';
 import * as SecureStore from 'expo-secure-store';
 import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding } from '../../services/wallet';
+import { showErrorToast } from '../../utils/toast';
 
 // Static fallback wallet data for UI display
 const DUMMY_WALLET = {
@@ -146,10 +148,12 @@ export default function HomeScreen() {
         if (portfolio) {
           setTotalBalance(portfolio.totalUsdValue);
           setHoldings(portfolio.holdings);
+        } else {
+          showErrorToast('Failed to load balances');
         }
       }
     } catch (error) {
-      console.error('Failed to load wallet data:', error);
+      showErrorToast('Failed to load wallet data');
     } finally {
       setIsLoadingWallet(false);
     }
@@ -408,43 +412,6 @@ export default function HomeScreen() {
   const [showReceiveModal, setShowReceiveModal] = React.useState(false);
   const [showSwapModal, setShowSwapModal] = React.useState(false);
 
-
-  // Swap form state - use mint addresses for any token
-  const [fromToken, setFromToken] = React.useState('So11111111111111111111111111111111111111112'); // SOL
-  const [toToken, setToToken] = React.useState('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'); // USDC
-  const [swapAmount, setSwapAmount] = React.useState('');
-  const [estimatedOutput, setEstimatedOutput] = React.useState('0.00');
-  const [showFromTokenDropdown, setShowFromTokenDropdown] = React.useState(false);
-  const [showToTokenDropdown, setShowToTokenDropdown] = React.useState(false);
-  const [fromTokenSearch, setFromTokenSearch] = React.useState('');
-  const [toTokenSearch, setToTokenSearch] = React.useState('');
-  const [slippage, setSlippage] = React.useState(0.5);
-
-  // Available tokens for dropdowns - use real Solana tokens if wallet is connected
-  const availableTokens = React.useMemo(() => {
-    if (solanaWallet) {
-      return getAvailableTokens();
-    }
-
-    // Fallback to demo tokens
-    const baseTokens = [
-      { symbol: 'SOL', name: 'Solana', logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png', balance: 0, mint: 'So11111111111111111111111111111111111111112', decimals: 9 },
-      { symbol: 'USDC', name: 'USD Coin', logo: 'https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png', balance: 0, mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 },
-      { symbol: 'WIF', name: 'Dogwifhat', logo: 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link', balance: 0, mint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', decimals: 6 },
-    ];
-
-    return baseTokens;
-  }, [solanaWallet, getAvailableTokens]);
-
-  // Filter tokens based on search
-  const getFilteredTokens = (search: string) => {
-    if (!search) return availableTokens;
-    return availableTokens.filter(token =>
-      token.symbol.toLowerCase().includes(search.toLowerCase()) ||
-      token.name.toLowerCase().includes(search.toLowerCase())
-    );
-  };
-
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -500,60 +467,6 @@ export default function HomeScreen() {
     return true;
   };
 
-  const handleSwap = async () => {
-    // Validate inputs
-    const amount = parseFloat(swapAmount);
-    if (!swapAmount || isNaN(amount) || amount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid amount to swap');
-      return;
-    }
-
-    // Validate token mint addresses
-    if (!fromToken || !validateSolanaAddress(fromToken)) {
-      Alert.alert('Invalid Token', 'From token address is invalid');
-      return;
-    }
-    if (!toToken || !validateSolanaAddress(toToken)) {
-      Alert.alert('Invalid Token', 'To token address is invalid');
-      return;
-    }
-
-    // Check balance
-    const fromTokenData = availableTokens.find(t => t.mint === fromToken);
-    if (fromTokenData && fromTokenData.balance < amount) {
-      Alert.alert('Insufficient Balance', `You don't have enough. Balance: ${fromTokenData.balance.toFixed(6)}`);
-      return;
-    }
-
-    try {
-      if (!solanaWallet) {
-        Alert.alert('Error', 'Wallet not connected');
-        return;
-      }
-
-      // Get decimals for amount conversion
-      const fromDecimals = fromTokenData?.decimals || 9;
-      const amountInSmallestUnit = Math.floor(amount * Math.pow(10, fromDecimals));
-
-      // Execute real swap via Jupiter
-      const result = await executeSwap({
-        inputMint: fromToken,
-        outputMint: toToken,
-        amount: amountInSmallestUnit,
-        slippageBps: Math.round(slippage * 100), // Convert 0.5% to 50 bps
-        expectedOutputAmount: parseFloat(estimatedOutput),
-      });
-
-      Alert.alert('Swap Successful!', `Transaction: ${result.signature.slice(0, 8)}...`);
-      setShowSwapModal(false);
-      setSwapAmount('');
-    } catch (error: any) {
-      console.error('Swap execution error:', error);
-      const errorMsg = error?.message || error?.data?.message || 'Failed to execute swap';
-      Alert.alert('Swap Failed', errorMsg);
-    }
-  };
-
   const handleBuy = () => {
     const base = process.env.EXPO_PUBLIC_FIAT_ONRAMP_URL;
     const key = process.env.EXPO_PUBLIC_MOONPAY_KEY;
@@ -566,25 +479,6 @@ export default function HomeScreen() {
       Alert.alert('Error', 'Could not open MoonPay');
     });
   };
-
-  // Mock function to estimate swap output
-  React.useEffect(() => {
-    if (swapAmount && fromToken && toToken) {
-      const mockRate = fromToken === 'SOL' ? 150 : 0.0067; // Mock exchange rates
-      const estimated = (parseFloat(swapAmount) * mockRate).toFixed(2);
-      setEstimatedOutput(estimated);
-    } else {
-      setEstimatedOutput('0.00');
-    }
-  }, [swapAmount, fromToken, toToken]);
-
-  const minReceived = React.useMemo(() => {
-    const est = parseFloat(estimatedOutput || '0');
-    const s = Number(slippage) || 0;
-    if (!isFinite(est) || est <= 0) return '0.00';
-    const val = est * (1 - s / 100);
-    return (val > 0 ? val : 0).toFixed(4);
-  }, [estimatedOutput, slippage]);
 
 
 
@@ -1156,221 +1050,19 @@ export default function HomeScreen() {
       </Modal>
 
       {/* Swap Modal */}
-      <Modal
+      <SwapModal
         visible={showSwapModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowSwapModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContainer, { width: width * 0.9, maxWidth: 400 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Swap Tokens</Text>
-              <TouchableOpacity onPress={() => setShowSwapModal(false)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
-              <View style={styles.swapContainer}>
-                <View style={styles.swapSection}>
-                  <Text style={styles.inputLabel}>From</Text>
-                  <View style={styles.swapInputContainer}>
-                    <TextInput
-                      style={styles.swapInput}
-                      placeholder="0.00"
-                      placeholderTextColor={COLORS.textSecondary}
-                      value={swapAmount}
-                      onChangeText={setSwapAmount}
-                      keyboardType="numeric"
-                    />
-                    <TouchableOpacity
-                      style={styles.swapTokenButton}
-                      onPress={() => setShowFromTokenDropdown(!showFromTokenDropdown)}
-                    >
-                      <View style={styles.tokenInfo}>
-                        {availableTokens.find(t => t.mint === fromToken)?.logo && (
-                          <Image
-                            source={{ uri: availableTokens.find(t => t.mint === fromToken)?.logo }}
-                            style={styles.tokenLogoSmall}
-                          />
-                        )}
-                        <Text style={styles.swapTokenText}>
-                          {availableTokens.find(t => t.mint === fromToken)?.symbol || 'Select'}
-                        </Text>
-                      </View>
-                      <ChevronDown size={16} color={COLORS.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-
-                  {showFromTokenDropdown && (
-                    <View style={styles.swapDropdownContainer}>
-                      <View style={styles.modalSearchContainer}>
-                        <Search size={16} color={COLORS.textSecondary} />
-                        <TextInput
-                          style={styles.modalSearchInput}
-                          placeholder="Search tokens..."
-                          placeholderTextColor={COLORS.textSecondary}
-                          value={fromTokenSearch}
-                          onChangeText={setFromTokenSearch}
-                        />
-                      </View>
-                      <ScrollView style={styles.swapDropdownList} showsVerticalScrollIndicator={false}>
-                        {getFilteredTokens(fromTokenSearch).map((token) => (
-                          <TouchableOpacity
-                            key={token.mint}
-                            style={styles.dropdownItem}
-                            onPress={() => {
-                              setFromToken(token.mint);
-                              setShowFromTokenDropdown(false);
-                              setFromTokenSearch('');
-                            }}
-                          >
-                            <View style={styles.tokenInfo}>
-                              {token.logo && (
-                                <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
-                              )}
-                              <View>
-                                <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                                <Text style={styles.tokenName}>{token.name}</Text>
-                              </View>
-                            </View>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.swapArrow}>
-                  <TouchableOpacity
-                    style={styles.swapArrowButton}
-                    onPress={() => {
-                      const temp = fromToken;
-                      setFromToken(toToken);
-                      setToToken(temp);
-                    }}
-                  >
-                    <ArrowUpDown size={20} color={COLORS.solana} />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.swapSection}>
-                  <Text style={styles.inputLabel}>To</Text>
-                  <View style={styles.swapInputContainer}>
-                    <Text style={styles.swapOutput}>{estimatedOutput}</Text>
-                    <TouchableOpacity
-                      style={styles.swapTokenButton}
-                      onPress={() => setShowToTokenDropdown(!showToTokenDropdown)}
-                    >
-                      <View style={styles.tokenInfo}>
-                        {availableTokens.find(t => t.mint === toToken)?.logo && (
-                          <Image
-                            source={{ uri: availableTokens.find(t => t.mint === toToken)?.logo }}
-                            style={styles.tokenLogoSmall}
-                          />
-                        )}
-                        <Text style={styles.swapTokenText}>
-                          {availableTokens.find(t => t.mint === toToken)?.symbol || 'Select'}
-                        </Text>
-                      </View>
-                      <ChevronDown size={16} color={COLORS.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-
-                  {showToTokenDropdown && (
-                    <View style={styles.swapDropdownContainer}>
-                      <View style={styles.modalSearchContainer}>
-                        <Search size={16} color={COLORS.textSecondary} />
-                        <TextInput
-                          style={styles.modalSearchInput}
-                          placeholder="Search tokens..."
-                          placeholderTextColor={COLORS.textSecondary}
-                          value={toTokenSearch}
-                          onChangeText={setToTokenSearch}
-                        />
-                      </View>
-                      <ScrollView style={styles.swapDropdownList} showsVerticalScrollIndicator={false}>
-                        {getFilteredTokens(toTokenSearch).map((token) => (
-                          <TouchableOpacity
-                            key={token.mint}
-                            style={styles.dropdownItem}
-                            onPress={() => {
-                              setToToken(token.mint);
-                              setShowToTokenDropdown(false);
-                              setToTokenSearch('');
-                            }}
-                          >
-                            <View style={styles.tokenInfo}>
-                              {token.logo && (
-                                <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
-                              )}
-                              <View>
-                                <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                                <Text style={styles.tokenName}>{token.name}</Text>
-                              </View>
-                            </View>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              {/* Slippage Tolerance */}
-              <View style={styles.slippageContainer}>
-                <Text style={styles.slippageLabel}>Slippage Tolerance</Text>
-                <View style={styles.slippageOptions}>
-                  {[0.1, 0.5, 1, 3].map((v) => (
-                    <TouchableOpacity
-                      key={v}
-                      style={[styles.slippageChip, slippage === v ? styles.activeSlippageChip : null]}
-                      onPress={() => setSlippage(v)}
-                    >
-                      <Text style={[styles.slippageChipText, slippage === v ? styles.activeSlippageChipText : null]}>{v}%</Text>
-                    </TouchableOpacity>
-                  ))}
-                  <View style={styles.slippageInputContainer}>
-                    <TextInput
-                      style={styles.slippageInput}
-                      value={String(slippage)}
-                      keyboardType="numeric"
-                      placeholder="Custom"
-                      placeholderTextColor={COLORS.textSecondary}
-                      onChangeText={(text) => {
-                        const num = Math.max(0, Math.min(50, parseFloat(text) || 0));
-                        const fixed = Number.isFinite(num) ? parseFloat(num.toFixed(2)) : 0;
-                        setSlippage(fixed);
-                      }}
-                    />
-                    <Text style={styles.slippagePercent}>%</Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.swapInfo}>
-                <Text style={styles.swapInfoText}>Rate: 1 {fromToken} ≈ {fromToken === 'SOL' ? '150' : '0.0067'} {toToken}</Text>
-                <Text style={styles.swapInfoText}>Minimum received at {slippage}%: {minReceived} {toToken}</Text>
-                <Text style={styles.swapInfoText}>Network: Solana</Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleSwap}
-              >
-                <LinearGradient
-                  colors={[COLORS.solana, COLORS.solana + '80']}
-                  style={styles.actionGradient}
-                >
-                  <RefreshCw size={20} color={COLORS.textPrimary} />
-                  <Text style={styles.actionText}>SWAP</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowSwapModal(false)}
+        onSuccess={refetch}
+        holdings={holdings.map(h => ({
+          symbol: h.symbol,
+          name: h.name,
+          mint: h.mint,
+          decimals: h.decimals,
+          balance: h.balance,
+          logo: WELL_KNOWN_TOKEN_LOGOS[h.symbol] || undefined
+        }))}
+      />
 
       {/* Send Modal */}
       <SendModal

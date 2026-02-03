@@ -9,6 +9,7 @@ import { COLORS } from "../constants/colors";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { performanceMonitor, trackBundleSize } from "../utils/performance";
 import { WebPreviewBanner } from "../components/WebPreviewBanner";
+import { registerBackgroundTasks } from "../services/backgroundTasks";
 
 // Initialize performance monitoring
 if (__DEV__) {
@@ -68,6 +69,13 @@ export default function RootLayout() {
         .catch((error) => {
           console.error('Failed to hide splash screen:', error);
         });
+    }
+  }, [appIsReady]);
+
+  // Register background tasks for copy trading
+  useEffect(() => {
+    if (appIsReady) {
+      registerBackgroundTasks();
     }
   }, [appIsReady]);
 

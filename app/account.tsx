@@ -75,7 +75,7 @@ export default function AccountScreen() {
         setProfile(json.user);
       }
     } catch (error) {
-      console.error('Failed to load profile:', error);
+      // Silent fail - user will see empty state
     } finally {
       setIsLoading(false);
     }

@@ -117,7 +117,6 @@ export const createWallet = async (authToken: string, userPin: string): Promise<
 
         return { success: true, publicKey };
     } catch (error: any) {
-        console.error('Create wallet error:', error);
         return { success: false, error: error.message || 'Failed to create wallet' };
     }
 };
@@ -134,13 +133,11 @@ export const fetchBalances = async (authToken: string): Promise<PortfolioData | 
         });
 
         if (!response.ok) {
-            console.warn('Failed to fetch balances:', response.status);
             return null;
         }
 
         return await response.json();
     } catch (error) {
-        console.error('Fetch balances error:', error);
         return null;
     }
 };
@@ -172,7 +169,6 @@ export const getKeypairForSigning = async (userPin: string): Promise<Keypair | n
         const secretKey = new Uint8Array(JSON.parse(decrypted));
         return Keypair.fromSecretKey(secretKey);
     } catch (error) {
-        console.error('Failed to decrypt keypair:', error);
         return null;
     }
 };
@@ -233,7 +229,6 @@ export const importWallet = async (
 
         return { success: true, publicKey, secretKey };
     } catch (error: any) {
-        console.error('Import wallet error:', error);
         return { success: false, error: error.message || 'Invalid private key format' };
     }
 };
@@ -302,7 +297,7 @@ export const sendTransaction = async (
                 // 4xx error - return specific message without retry
                 const errorMsg = result.data?.error || 'Failed to prepare transaction';
                 if (errorMsg.includes('insufficient') || errorMsg.includes('balance')) {
-                    return { success: false, error: 'Not enough SOL for transaction + fees' };
+                    return { success: false, error: 'Insufficient SOL. Need ~0.00001 SOL for fees.' };
                 }
                 return { success: false, error: errorMsg };
             }
@@ -381,7 +376,6 @@ export const sendTransaction = async (
             explorerUrl: broadcastData.explorerUrl,
         };
     } catch (error: any) {
-        console.error('Send transaction error:', error);
         // Better error messages based on error type
         if (error.message?.includes('network') || error.message?.includes('fetch')) {
             return { success: false, error: 'Check your internet connection' };
@@ -408,7 +402,6 @@ export const fetchTransactionHistory = async (authToken: string): Promise<Transa
         const data = await response.json();
         return data.transactions || [];
     } catch (error) {
-        console.error('Fetch transaction history error:', error);
         return [];
     }
 };
