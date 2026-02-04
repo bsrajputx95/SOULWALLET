@@ -9,6 +9,7 @@ import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } f
 import axios from 'axios';
 import bs58 from 'bs58';
 import prisma from './db';
+import { getConnection, executeRpcCall, getRpcStatus } from './services/rpcManager';
 
 // Load environment variables
 dotenv.config();
@@ -22,17 +23,6 @@ if (!JWT_SECRET) {
     console.error('FATAL ERROR: JWT_SECRET is not defined');
     process.exit(1);
 }
-
-// Solana RPC connection (lazy initialization)
-const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL?.trim() || 'https://api.mainnet-beta.solana.com';
-let connection: Connection | null = null;
-
-const getConnection = () => {
-    if (!connection) {
-        connection = new Connection(HELIUS_RPC_URL, 'confirmed');
-    }
-    return connection;
-};
 
 /**
  * Categorize RPC errors for specific error responses
@@ -191,7 +181,12 @@ const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): vo
 
 // GET /health - Healthcheck for Railway
 app.get('/health', (_req: Request, res: Response) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+    const rpcStatus = getRpcStatus();
+    res.status(200).json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        rpc: rpcStatus
+    });
 });
 
 // POST /register
@@ -542,10 +537,13 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
 
         const pubKey = new PublicKey(wallet.publicKey);
 
-        // 1. Get SOL Balance (with RPC error handling)
+        // 1. Get SOL Balance (with RPC fallback)
         let solBalance: number;
         try {
-            solBalance = await getConnection().getBalance(pubKey);
+            solBalance = await executeRpcCall(
+                conn => conn.getBalance(pubKey),
+                'getBalance'
+            );
         } catch (rpcErr) {
             const { statusCode, message } = handleRpcError(rpcErr);
             res.status(statusCode).json({ error: message });
@@ -553,12 +551,15 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
         }
         const solAmount = solBalance / LAMPORTS_PER_SOL;
 
-        // 2. Get Token Accounts (SPL tokens like USDC) (with RPC error handling)
+        // 2. Get Token Accounts (SPL tokens like USDC) (with RPC fallback)
         let tokenAccounts: any;
         try {
-            tokenAccounts = await getConnection().getParsedTokenAccountsByOwner(
-                pubKey,
-                { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+            tokenAccounts = await executeRpcCall(
+                conn => conn.getParsedTokenAccountsByOwner(
+                    pubKey,
+                    { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+                ),
+                'getParsedTokenAccountsByOwner'
             );
         } catch (rpcErr) {
             const { statusCode, message } = handleRpcError(rpcErr);
@@ -694,10 +695,13 @@ app.post('/transactions/prepare-send', authMiddleware, async (req: AuthRequest, 
             return;
         }
 
-        // Check balance (with RPC error handling)
+        // Check balance (with RPC fallback)
         let balance: number;
         try {
-            balance = await getConnection().getBalance(fromPubkey);
+            balance = await executeRpcCall(
+                conn => conn.getBalance(fromPubkey),
+                'getBalance'
+            );
         } catch (rpcErr) {
             const { statusCode, message } = handleRpcError(rpcErr);
             res.status(statusCode).json({ error: message });
@@ -725,11 +729,14 @@ app.post('/transactions/prepare-send', authMiddleware, async (req: AuthRequest, 
             })
         );
 
-        // Get latest blockhash (with RPC error handling)
+        // Get latest blockhash (with RPC fallback)
         let blockhash: string;
         let lastValidBlockHeight: number;
         try {
-            const blockInfo = await getConnection().getLatestBlockhash();
+            const blockInfo = await executeRpcCall(
+                conn => conn.getLatestBlockhash(),
+                'getLatestBlockhash'
+            );
             blockhash = blockInfo.blockhash;
             lastValidBlockHeight = blockInfo.lastValidBlockHeight;
         } catch (rpcErr) {
@@ -777,21 +784,30 @@ app.post('/transactions/broadcast', authMiddleware, async (req: AuthRequest, res
             return;
         }
 
-        // Decode and send the signed transaction
+        // Decode and send the signed transaction (with RPC fallback)
         const signedTxBuffer = bs58.decode(validatedData.signedTransaction);
 
-        const signature = await getConnection().sendRawTransaction(signedTxBuffer, {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed'
-        });
+        const signature = await executeRpcCall(
+            conn => conn.sendRawTransaction(signedTxBuffer, {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+            }),
+            'sendRawTransaction'
+        );
 
         // Wait for confirmation
-        const latestBlockhash = await getConnection().getLatestBlockhash();
-        await getConnection().confirmTransaction({
-            signature,
-            blockhash: latestBlockhash.blockhash,
-            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-        }, 'confirmed');
+        const latestBlockhash = await executeRpcCall(
+            conn => conn.getLatestBlockhash(),
+            'getLatestBlockhash'
+        );
+        await executeRpcCall(
+            conn => conn.confirmTransaction({
+                signature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+            }, 'confirmed'),
+            'confirmTransaction'
+        );
 
         // Save transaction to database
         await prisma.transaction.create({
