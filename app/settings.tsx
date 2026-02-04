@@ -21,7 +21,6 @@ import {
   Trash2,
   Shield,
   ExternalLink,
-  Zap,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
@@ -31,9 +30,6 @@ import { NeonCard, ErrorBoundary, NeonButton } from '@/components';
 import { 
   getLocalPublicKey, 
   clearWalletData, 
-  cachePinForAutoExecute, 
-  clearCachedPin, 
-  isAutoExecuteEnabled,
   api,
 } from '@/services';
 import { validateSession } from '@/utils';
@@ -58,8 +54,6 @@ export default function SettingsScreen() {
 
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [showMnemonic, setShowMnemonic] = useState(false);
-  const [autoExecuteEnabled, setAutoExecuteEnabled] = useState(false);
-  const [autoExecuteLoading, setAutoExecuteLoading] = useState(false);
 
   // Fetch user profile from backend
   const fetchProfile = async () => {
@@ -95,20 +89,10 @@ export default function SettingsScreen() {
     }
   };
 
-  // Load auto-execute status on mount
-  const loadAutoExecuteStatus = async () => {
-    try {
-      const enabled = await isAutoExecuteEnabled();
-      setAutoExecuteEnabled(enabled);
-    } catch {
-    }
-  };
-
   useEffect(() => {
     void validateSession();
     fetchProfile();
     loadWalletKey();
-    loadAutoExecuteStatus();
   }, []);
 
   // Get wallet address from either Solana wallet store or user auth store
@@ -154,56 +138,6 @@ export default function SettingsScreen() {
       Alert.alert('Copied!', `${label} copied to clipboard`);
     } catch (error) {
       Alert.alert('Error', 'Failed to copy to clipboard');
-    }
-  };
-
-  // Toggle auto-execute setting
-  const toggleAutoExecute = async () => {
-    if (autoExecuteEnabled) {
-      // Disable auto-execute
-      setAutoExecuteLoading(true);
-      try {
-        await clearCachedPin();
-        setAutoExecuteEnabled(false);
-        Alert.alert('Auto-Execute Disabled', 'Your PIN has been cleared. You will need to manually approve trades.');
-      } catch (error) {
-        Alert.alert('Error', 'Failed to disable auto-execute');
-      } finally {
-        setAutoExecuteLoading(false);
-      }
-    } else {
-      // Enable auto-execute - prompt for PIN
-      Alert.prompt(
-        'Enable Auto-Execute',
-        'Enter your wallet PIN to enable auto-execution of small trades (under $50). Your PIN will be cached securely for 24 hours.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Enable',
-            onPress: async (pin) => {
-              if (!pin || pin.length < 4) {
-                Alert.alert('Invalid PIN', 'PIN must be at least 4 characters');
-                return;
-              }
-              setAutoExecuteLoading(true);
-              try {
-                const success = await cachePinForAutoExecute(pin);
-                if (success) {
-                  setAutoExecuteEnabled(true);
-                  Alert.alert('Auto-Execute Enabled', 'Small trades (under $50) will be executed automatically in the background for 24 hours.');
-                } else {
-                  Alert.alert('Error', 'Failed to enable auto-execute');
-                }
-              } catch (error) {
-                Alert.alert('Error', 'Failed to enable auto-execute');
-              } finally {
-                setAutoExecuteLoading(false);
-              }
-            },
-          },
-        ],
-        'secure-text'
-      );
     }
   };
 
@@ -436,33 +370,6 @@ export default function SettingsScreen() {
 
 
 
-        {/* Auto-Execute Section - Only for users with wallet */}
-        {hasWallet && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Copy Trading</Text>
-            <TouchableOpacity
-              style={[styles.supportItem, autoExecuteEnabled && styles.supportItemActive]}
-              onPress={toggleAutoExecute}
-              disabled={autoExecuteLoading}
-            >
-              <Zap size={20} color={autoExecuteEnabled ? COLORS.solana : COLORS.textSecondary} />
-              <View style={{ flex: 1, marginLeft: SPACING.s }}>
-                <Text style={[styles.supportText, autoExecuteEnabled && { color: COLORS.solana }]}>
-                  Auto-Execute Trades
-                </Text>
-                <Text style={styles.supportSubtext}>
-                  {autoExecuteEnabled 
-                    ? 'Enabled - Small trades under $50 execute automatically' 
-                    : 'Disabled - Tap to enable automatic execution'}
-                </Text>
-              </View>
-              <View style={[styles.toggleIndicator, autoExecuteEnabled && styles.toggleIndicatorOn]}>
-                <View style={[styles.toggleCircle, autoExecuteEnabled && styles.toggleCircleOn]} />
-              </View>
-            </TouchableOpacity>
-          </View>
-        )}
-
         {/* Privacy & Data Section - Available to all authenticated users */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Privacy & Data</Text>
@@ -596,37 +503,6 @@ const styles = StyleSheet.create({
     ...FONTS.phantomMedium,
     color: COLORS.textPrimary,
     fontSize: 16,
-  },
-  supportSubtext: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  supportItemActive: {
-    borderColor: COLORS.solana + '50',
-    borderWidth: 1,
-  },
-  toggleIndicator: {
-    width: 44,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: COLORS.cardBackground,
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-  },
-  toggleIndicatorOn: {
-    backgroundColor: COLORS.solana,
-  },
-  toggleCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: COLORS.textSecondary,
-  },
-  toggleCircleOn: {
-    backgroundColor: COLORS.white,
-    transform: [{ translateX: 20 }],
   },
   warningCard: {
     backgroundColor: COLORS.error + '10',

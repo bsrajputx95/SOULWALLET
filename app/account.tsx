@@ -101,11 +101,32 @@ export default function AccountScreen() {
     }
   };
 
-  const uploadProfileImage = async (_base64: string, _mimeType: string) => {
-    Alert.alert('🚧 Coming Soon', 'Image upload to cloud storage is not configured yet. Store the URL directly for now.');
-    return { success: false };
+  // Image processing state - must be declared before use
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const isUploadingImage = isProcessingImage;
+
+  const uploadProfileImage = async (base64: string, mimeType: string) => {
+    try {
+      setIsProcessingImage(true);
+      
+      // Send base64 image to backend
+      const token = await SecureStore.getItemAsync('token');
+      const response = await api.put('/profile', {
+        profileImage: `data:${mimeType};base64,${base64}`
+      });
+      
+      if (response.success) {
+        setProfile(response.user);
+        return { success: true };
+      }
+      
+      return { success: false };
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to upload image');
+    } finally {
+      setIsProcessingImage(false);
+    }
   };
-  const isUploadingImage = false;
 
   // Real delete account handler
   const deleteAccountMutation = {
@@ -192,7 +213,6 @@ export default function AccountScreen() {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isProcessingImage, setIsProcessingImage] = useState(false);
 
   // Sync form state when profile data loads
   useEffect(() => {
@@ -222,7 +242,7 @@ export default function AccountScreen() {
               return;
             }
             const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              mediaTypes: ImagePicker.MediaType.Images,
               allowsEditing: true,
               aspect: [1, 1],
               quality: 1,
@@ -242,7 +262,7 @@ export default function AccountScreen() {
               return;
             }
             const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              mediaTypes: ImagePicker.MediaType.Images,
               allowsEditing: true,
               aspect: [1, 1],
               quality: 1,
@@ -288,6 +308,11 @@ export default function AccountScreen() {
       const result = await uploadProfileImage(base64, mimeType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif');
       if (result?.success) {
         Alert.alert('Success', 'Profile picture updated!');
+        // Refresh profile to show new image
+        await fetchProfile();
+      } else {
+        showErrorToast('Failed to upload profile image');
+        return;
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to upload image');
@@ -395,8 +420,8 @@ export default function AccountScreen() {
 
 
 
-  // Render guard: Show loading state until profile is available
-  if (isLoading || profile === null) {
+  // Show skeleton only while loading
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
@@ -440,6 +465,12 @@ export default function AccountScreen() {
         </ScrollView>
       </SafeAreaView>
     );
+  }
+
+  // Redirect to login if profile is null after loading completes
+  if (profile === null) {
+    router.replace('/(auth)/login');
+    return null;
   }
 
   return (

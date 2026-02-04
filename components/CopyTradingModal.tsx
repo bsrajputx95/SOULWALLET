@@ -35,7 +35,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [takeProfit, setTakeProfit] = useState('30');
     const [maxSlippage, setMaxSlippage] = useState('0.5');
     const [exitWithTrader, setExitWithTrader] = useState(false);
-    const [minProfitForSharing, setMinProfitForSharing] = useState('0');
     const [isPending, setIsPending] = useState(false);
 
     const handleStartCopying = async () => {
@@ -208,28 +207,8 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                         {/* Fee disclosure */}
                         <View style={styles.feeDisclosure}>
                             <Text style={styles.feeDisclosureText}>
-                                💡 5% of your profits will be shared with this trader when positions close in profit
-                                {parseFloat(minProfitForSharing) > 0
-                                    ? ` (only on profits above $${minProfitForSharing}).`
-                                    : '.'}
+                                5% of your profits will be shared with this trader when positions close in profit.
                             </Text>
-                        </View>
-
-                        {/* Minimum Profit Threshold */}
-                        <View style={styles.inputSection}>
-                            <Text style={styles.inputLabel}>Min Profit for Fee ($USDC)</Text>
-                            <View style={styles.inputContainer}>
-                                <Text style={styles.inputPrefix}>$</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="0 (any profit)"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                    value={minProfitForSharing}
-                                    onChangeText={setMinProfitForSharing}
-                                    keyboardType="numeric"
-                                />
-                            </View>
-                            <Text style={styles.inputHint}>Fee only applied on profits above this amount</Text>
                         </View>
 
 

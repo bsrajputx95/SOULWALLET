@@ -162,6 +162,8 @@ export default function SosioScreen() {
     setRefreshing(true);
     try {
       await feedQuery.refetch();
+    } catch (e) {
+      if (__DEV__) console.error('Error refreshing feed:', e);
     }
     setRefreshing(false);
   }, [feedQuery, activeTab]);
