@@ -22,12 +22,13 @@ export interface CopyTradeQueueItem {
     configId: string;
     traderTxSignature: string;
     traderAddress: string;
-    inputMint: string;    // Token to buy (what we receive)
+    type: 'entry' | 'exit';  // 'entry' = buy, 'exit' = sell
+    inputMint: string;    // For entry: token to buy; For exit: token to sell
     inputSymbol: string;
-    outputMint: string;   // Token to spend (what we pay with)
+    outputMint: string;   // For entry: token to spend; For exit: token to receive
     outputSymbol: string;
-    inputAmount: number;  // Amount to receive
-    outputAmount: number; // Amount to spend (perTradeAmount)
+    inputAmount: number;  // For entry: amount to receive; For exit: amount to sell
+    outputAmount: number; // For entry: amount to spend; For exit: amount to receive
     entryPrice: number;
     slPrice?: number;
     tpPrice?: number;
@@ -141,11 +142,11 @@ export async function checkCopyTradeQueue(
 }
 
 /**
- * Execute a copy trade from queue
+ * Execute a copy trade from queue (BUY flow for entry trades)
  * Step 1: Execute main swap
  * Step 2: Create SL limit order
  * Step 3: Create TP limit order
- * Step 4: Mark as executed
+ * Step 4: Mark as executed with actual amounts
  */
 export async function executeCopyTrade(
     queueItem: CopyTradeQueueItem,
@@ -183,6 +184,14 @@ export async function executeCopyTrade(
         if (!swapResult.success) {
             return { success: false, error: swapResult.error || 'Swap failed' };
         }
+
+        // Calculate actual executed amounts from the swap result
+        // quote.outAmount is the actual amount received in smallest units
+        const inputTokenDecimals = await getTokenDecimals(queueItem.inputMint);
+        const actualOutputAmount = parseFloat(quote.outAmount) / Math.pow(10, inputTokenDecimals);
+        const actualEntryPrice = actualOutputAmount > 0 
+            ? queueItem.outputAmount / actualOutputAmount 
+            : queueItem.entryPrice;
 
         // Get keypair for signing limit orders
         let keypair = await getKeypairForSigning(pin);
@@ -263,7 +272,13 @@ export async function executeCopyTrade(
         // @ts-ignore
         keypair = null;
 
-        // Step 4: Mark as executed
+        // Step 4: Mark as executed with actual executed amounts
+        const executedData = {
+            actualInputAmount: queueItem.outputAmount,  // What we spent
+            actualOutputAmount: actualOutputAmount,      // What we actually received
+            actualEntryPrice: actualEntryPrice           // Actual executed price
+        };
+
         const executeResponse = await fetch(
             `${API_URL}/copy-trade/execute/${queueItem.id}`,
             {
@@ -272,7 +287,7 @@ export async function executeCopyTrade(
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ slOrderId, tpOrderId })
+                body: JSON.stringify({ slOrderId, tpOrderId, executedData })
             }
         );
 
@@ -291,6 +306,90 @@ export async function executeCopyTrade(
 
     } catch (error: any) {
         return { success: false, error: error.message || 'Execution failed' };
+    }
+}
+
+/**
+ * Execute a copy trade SELL for exit trades (exit-with-trader flow)
+ * Step 1: Execute sell swap (sell position token back to stable/SOL)
+ * Step 2: Mark position as closed
+ */
+export async function executeCopyTradeSell(
+    queueItem: CopyTradeQueueItem,
+    pin: string,
+    authToken: string
+): Promise<{ 
+    success: boolean; 
+    signature?: string; 
+    error?: string;
+}> {
+    try {
+        // Validate this is an exit trade
+        if (queueItem.type !== 'exit') {
+            return { success: false, error: 'Queue item is not an exit trade' };
+        }
+
+        // Step 1: Execute sell swap
+        // For exit: inputMint = token to sell, outputMint = token to receive
+        const inputDecimals = await getTokenDecimals(queueItem.inputMint);
+        const amountInSmallestUnits = Math.floor(
+            queueItem.inputAmount * Math.pow(10, inputDecimals)
+        );
+
+        const quote = await getQuote(
+            queueItem.inputMint,   // From token (what we sell - the position token)
+            queueItem.outputMint,  // To token (what we receive - USDC/SOL)
+            amountInSmallestUnits,
+            50 // 0.5% slippage
+        );
+
+        if (!quote) {
+            return { success: false, error: 'Failed to get swap quote for sell' };
+        }
+
+        // Execute the swap
+        const swapResult = await executeSwap(quote, pin);
+
+        if (!swapResult.success) {
+            return { success: false, error: swapResult.error || 'Sell swap failed' };
+        }
+
+        // Calculate actual executed amounts
+        const outputDecimals = queueItem.outputMint === 'So11111111111111111111111111111111111111112' ? 9 : 6;
+        const actualOutputAmount = parseFloat(quote.outAmount) / Math.pow(10, outputDecimals);
+
+        // Step 2: Mark as executed with actual amounts (this will close the position)
+        const executedData = {
+            actualInputAmount: queueItem.inputAmount,  // What we sold
+            actualOutputAmount: actualOutputAmount,     // What we received
+            actualEntryPrice: queueItem.entryPrice      // Keep original entry price for P&L
+        };
+
+        const executeResponse = await fetch(
+            `${API_URL}/copy-trade/execute/${queueItem.id}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ executedData })
+            }
+        );
+
+        const executeData = await executeResponse.json();
+
+        if (!executeResponse.ok) {
+            return { success: false, error: executeData.error };
+        }
+
+        return {
+            success: true,
+            signature: swapResult.signature
+        };
+
+    } catch (error: any) {
+        return { success: false, error: error.message || 'Sell execution failed' };
     }
 }
 

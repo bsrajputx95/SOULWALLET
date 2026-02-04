@@ -62,12 +62,13 @@ export async function monitorTraderExits(): Promise<void> {
                         positionId: position.id,    // Unique per position
                         traderTxSignature: traderExit.txSignature,
                         traderAddress: position.config.traderAddress,
-                        inputMint: position.outputMint,    // We receive back what we spent (USDC/SOL)
-                        inputSymbol: position.outputSymbol,
-                        outputMint: position.inputMint,    // We sell what we bought
-                        outputSymbol: position.inputSymbol,
-                        inputAmount: position.entryAmount, // Approximate amount we'd receive
-                        outputAmount: position.tokenAmount, // Amount to sell
+                        type: 'exit',  // Mark as exit trade (sell flow)
+                        inputMint: position.inputMint,     // Token being sold (what we bought)
+                        inputSymbol: position.inputSymbol,
+                        outputMint: position.outputMint,   // Token received (stable/SOL)
+                        outputSymbol: position.outputSymbol,
+                        inputAmount: position.tokenAmount, // Amount to sell
+                        outputAmount: position.entryAmount, // Approximate amount we'd receive
                         entryPrice: position.entryPrice,
                         slPrice: null, // No SL/TP for exit trades
                         tpPrice: null,

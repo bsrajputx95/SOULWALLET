@@ -992,7 +992,7 @@ app.get('/copy-trade/queue', authMiddleware, async (req: AuthRequest, res: Respo
 app.post('/copy-trade/execute/:queueId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const queueId = req.params.queueId as string;
-        const { slOrderId, tpOrderId } = req.body;
+        const { slOrderId, tpOrderId, executedData } = req.body;
 
         // Verify queue item belongs to user
         const queueItem = await prisma.copyTradeQueue.findFirst({
@@ -1004,7 +1004,8 @@ app.post('/copy-trade/execute/:queueId', authMiddleware, async (req: AuthRequest
             return;
         }
 
-        const success = await markTradeExecuted(queueId, slOrderId, tpOrderId);
+        // Pass executed swap data if provided by client
+        const success = await markTradeExecuted(queueId, slOrderId, tpOrderId, executedData);
 
         if (success) {
             res.json({ success: true, message: 'Trade marked as executed' });

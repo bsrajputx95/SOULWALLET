@@ -106,6 +106,7 @@ export async function queueCopyTrade(params: QueueCopyTradeParams): Promise<bool
                 userId: params.userId,
                 traderTxSignature: params.traderTxSignature,
                 traderAddress: params.traderAddress,
+                type: 'entry',  // Mark as entry trade (buy flow)
                 inputMint: params.inputMint,
                 inputSymbol: params.inputSymbol,
                 outputMint: params.outputMint,
@@ -157,13 +158,22 @@ export async function checkBudget(configId: string): Promise<{ available: number
     }
 }
 
+interface ExecutedTradeData {
+    actualInputAmount?: number;  // Actual amount spent (for buy) or sold (for sell)
+    actualOutputAmount?: number; // Actual amount received
+    actualEntryPrice?: number;   // Actual executed price
+}
+
 /**
- * Mark queue item as completed and create position
+ * Mark queue item as completed and create/update position
+ * For entry trades: creates a new position
+ * For exit trades: updates existing position status to closed
  */
 export async function markTradeExecuted(
     queueId: string,
     slOrderId?: string,
-    tpOrderId?: string
+    tpOrderId?: string,
+    executedData?: ExecutedTradeData
 ): Promise<boolean> {
     try {
         const queueItem = await prisma.copyTradeQueue.findUnique({
@@ -180,28 +190,49 @@ export async function markTradeExecuted(
             data: { status: 'completed' }
         });
 
-        // Create position record
-        // entryAmount = what we spent (outputAmount)
-        // tokenAmount = what we received (inputAmount)
-        await prisma.copyPosition.create({
-            data: {
-                configId: queueItem.configId,
-                userId: queueItem.userId,
-                traderTxSignature: queueItem.traderTxSignature,
-                inputMint: queueItem.inputMint,
-                inputSymbol: queueItem.inputSymbol,
-                outputMint: queueItem.outputMint,
-                outputSymbol: queueItem.outputSymbol,
-                entryAmount: queueItem.outputAmount, // Amount spent
-                tokenAmount: queueItem.inputAmount,  // Amount received
-                entryPrice: queueItem.entryPrice,
-                slPrice: queueItem.slPrice,
-                tpPrice: queueItem.tpPrice,
-                slOrderId,
-                tpOrderId,
-                status: 'open'
+        // Use actual executed amounts if provided, otherwise fall back to queued estimates
+        const entryAmount = executedData?.actualInputAmount ?? queueItem.outputAmount;
+        const tokenAmount = executedData?.actualOutputAmount ?? queueItem.inputAmount;
+        const entryPrice = executedData?.actualEntryPrice ?? queueItem.entryPrice;
+
+        if (queueItem.type === 'exit') {
+            // For exit trades: update the existing position to closed
+            if (!queueItem.positionId) {
+                console.error('Exit trade queue item missing positionId:', queueId);
+                return false;
             }
-        });
+
+            await prisma.copyPosition.update({
+                where: { id: queueItem.positionId },
+                data: {
+                    status: 'closed',
+                    closedAt: new Date()
+                }
+            });
+        } else {
+            // For entry trades: create a new position
+            // entryAmount = what we spent (outputAmount)
+            // tokenAmount = what we received (inputAmount)
+            await prisma.copyPosition.create({
+                data: {
+                    configId: queueItem.configId,
+                    userId: queueItem.userId,
+                    traderTxSignature: queueItem.traderTxSignature,
+                    inputMint: queueItem.inputMint,
+                    inputSymbol: queueItem.inputSymbol,
+                    outputMint: queueItem.outputMint,
+                    outputSymbol: queueItem.outputSymbol,
+                    entryAmount: entryAmount,  // Actual amount spent
+                    tokenAmount: tokenAmount,  // Actual amount received
+                    entryPrice: entryPrice,    // Actual executed price
+                    slPrice: queueItem.slPrice,
+                    tpPrice: queueItem.tpPrice,
+                    slOrderId,
+                    tpOrderId,
+                    status: 'open'
+                }
+            });
+        }
 
         return true;
     } catch (error) {

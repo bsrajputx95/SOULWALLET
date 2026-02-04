@@ -1,7 +1,7 @@
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
-import { checkCopyTradeQueue, executeCopyTrade } from './copyTrading';
+import { checkCopyTradeQueue, executeCopyTrade, executeCopyTradeSell } from './copyTrading';
 
 const COPY_TRADE_CHECK_TASK = 'copy-trade-check';
 
@@ -35,14 +35,25 @@ TaskManager.defineTask(COPY_TRADE_CHECK_TASK, async () => {
         for (const item of result.queue) {
             const tradeValue = item.entryPrice * item.inputAmount;
 
+            // Route based on trade type: entry = buy, exit = sell
+            const isExitTrade = item.type === 'exit';
+
             if (canAutoExecute && tradeValue <= threshold) {
-                // Auto-execute small trades
-                console.log(`[Background] Auto-executing trade ${item.id} ($${tradeValue})`);
+                // Auto-execute small trades based on type
+                console.log(`[Background] Auto-executing ${item.type} trade ${item.id} ($${tradeValue})`);
                 const pin = cachedPinData; // In production, decrypt this
-                await executeCopyTrade(item, pin, authToken);
+                
+                if (isExitTrade) {
+                    // Exit trades use sell execution path
+                    await executeCopyTradeSell(item, pin, authToken);
+                } else {
+                    // Entry trades use buy execution path
+                    await executeCopyTrade(item, pin, authToken);
+                }
             } else {
                 // Show notification for manual execution
-                console.log(`[Background] Trade pending: ${item.inputSymbol} ($${tradeValue})`);
+                const action = isExitTrade ? 'Sell (exit)' : 'Buy';
+                console.log(`[Background] Trade pending: ${action} ${item.inputSymbol} ($${tradeValue})`);
                 // Notification would be shown here
             }
         }

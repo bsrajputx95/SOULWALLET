@@ -148,12 +148,13 @@ model CopyTradeQueue {
   positionId        String?  // Set for exit trades, null for entry trades
   traderTxSignature String
   traderAddress     String
-  inputMint         String   // Token bought (what we receive)
+  type              String   @default("entry") // "entry" (buy) or "exit" (sell)
+  inputMint         String   // For entry: token bought; For exit: token sold
   inputSymbol       String
-  outputMint        String   // Token spent (what we pay with)
+  outputMint        String   // For entry: token spent; For exit: token received
   outputSymbol      String
-  inputAmount       Float    // Amount of tokens received
-  outputAmount      Float    // Amount of tokens spent (perTradeAmount)
+  inputAmount       Float    // For entry: amount received; For exit: amount sold
+  outputAmount      Float    // For entry: amount spent; For exit: amount received
   entryPrice        Float
   slPrice           Float?
   tpPrice           Float?
