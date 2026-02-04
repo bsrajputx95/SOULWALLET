@@ -19,13 +19,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Settings, Search, X, Plus, Link, ShoppingBag } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { SocialPost } from '../../components/SocialPost';
-import { NeonButton } from '../../components/NeonButton';
-import { TokenBagModal } from '../../components/TokenBagModal';
-import { CopyTradingModal } from '../../components/CopyTradingModal';
-import { SocialPostSkeleton } from '../../components/SkeletonLoader';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import { SocialPost, NeonButton, TokenBagModal, CopyTradingModal, SocialPostSkeleton } from '@/components';
 import { useRouter } from 'expo-router';
 
 // Static dummy data for pure UI mode
@@ -167,8 +162,6 @@ export default function SosioScreen() {
     setRefreshing(true);
     try {
       await feedQuery.refetch();
-    } catch (error) {
-      console.error('[Sosio] Refresh error:', error);
     }
     setRefreshing(false);
   }, [feedQuery, activeTab]);
@@ -239,15 +232,12 @@ export default function SosioScreen() {
         mentionedTokenMint: mentionToken && tokenAddress ? tokenAddress : undefined,
       });
 
-      console.log('[Sosio] Post created successfully');
-
       setShowNewPostModal(false);
       setPostContent('');
       setMentionToken(false);
       setTokenName('');
       setTokenAddress('');
-    } catch (error) {
-      console.error('[Sosio] Failed to create post:', error);
+    } catch {
       // Could add an alert here
     }
   };
@@ -500,7 +490,7 @@ export default function SosioScreen() {
                     Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || post.mentionedTokenName || 'token'}!${amountText}`);
                   }
                 } catch (e: any) {
-                  console.error('iBuy error:', e);
+                  if (__DEV__) console.error('iBuy error:', e);
                   Alert.alert('iBuy Failed', e.message || 'Failed to complete purchase');
                 }
               }}
@@ -530,7 +520,7 @@ export default function SosioScreen() {
           // Infinite scroll - fetch more when reaching end
           if (feedQuery.data?.nextCursor && !feedQuery.isFetching) {
             // Note: Would need to implement fetchNextPage with useInfiniteQuery
-            console.log('[Sosio] Load more posts - cursor:', feedQuery.data.nextCursor);
+            if (__DEV__) console.log('[Sosio] Load more posts - cursor:', feedQuery.data.nextCursor);
           }
         }}
         onEndReachedThreshold={0.5}

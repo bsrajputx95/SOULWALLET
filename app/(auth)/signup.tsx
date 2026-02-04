@@ -19,16 +19,16 @@ import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
-import { COLORS } from '../../constants/colors';
-import { NeonButton } from '../../components/NeonButton';
-import { NeonDivider } from '../../components/NeonDivider';
-import { SocialButton } from '../../components/SocialButton';
-import { GlowingText } from '../../components/GlowingText';
+import { COLORS } from '@/constants';
+import { NeonButton, NeonDivider, SocialButton, GlowingText } from '@/components';
+import { api } from '@/services';
+import { useAuth } from '@/contexts/AuthContext';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
 
 export default function SignupNewScreen() {
     const router = useRouter();
+    const { setToken } = useAuth();
 
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
@@ -71,49 +71,30 @@ export default function SignupNewScreen() {
         setErrorMessage(null);
 
         try {
-            const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
-
-            const response = await fetch(`${API_URL}/register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    username: username.trim(),
-                    email: email.trim(),
-                    password,
-                    confirmPassword,
-                }),
+            const data = await api.post<{
+                token: string;
+                user: unknown;
+                error?: string;
+            }>('/register', {
+                username: username.trim(),
+                email: email.trim(),
+                password,
+                confirmPassword,
             });
-
-            const responseText = await response.text();
-
-            let data;
-            try {
-                data = JSON.parse(responseText);
-            } catch {
-                setErrorMessage(`Server error (${response.status}): ${responseText.slice(0, 100)}`);
-                return;
-            }
-
-            if (!response.ok) {
-                // Show detailed error message
-                const errorMsg = data.error || data.message || JSON.stringify(data);
-                setErrorMessage(`Error ${response.status}: ${errorMsg}`);
-                return;
-            }
 
             // Store JWT token securely
             if (data.token) {
                 await SecureStore.setItemAsync('token', data.token);
                 await SecureStore.setItemAsync('user_data', JSON.stringify(data.user));
+                // Update AuthContext with the new token
+                setToken(data.token);
             }
 
             // Navigate to main app on success
             router.replace('/(tabs)');
         } catch (error: unknown) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            setErrorMessage(`Network error: ${errorMsg}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            setErrorMessage(errorMessage);
         } finally {
             setIsLoading(false);
         }

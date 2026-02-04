@@ -112,7 +112,8 @@ model CopyPosition {
   tpPrice             Float?   // Take profit price
   slOrderId           String?  // Jupiter Limit Order ID for SL
   tpOrderId           String?  // Jupiter Limit Order ID for TP
-  status              String   @default("open") // "open", "pending_exit", "closed", "sl_hit", "tp_hit"
+  cancelTransactions  String?  // JSON string of cancel transactions for client to sign
+  status              String   @default("open") // "open", "pending_exit", "pending_cancel", "closed", "sl_hit", "tp_hit"
   closedAt            DateTime?
   createdAt           DateTime @default(now())
 
@@ -158,6 +159,7 @@ model CopyTradeQueue {
   entryPrice        Float
   slPrice           Float?
   tpPrice           Float?
+  cancelTransactions String? // JSON string of SL/TP cancel transactions for client to sign (exit trades only)
   status            String   @default("pending") // "pending", "completed", "expired", "cancelled"
   expiresAt         DateTime
   createdAt         DateTime @default(now())

@@ -13,16 +13,9 @@ import { useRouter } from 'expo-router';
 import { ShoppingCart } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-
-// Import TokenCard
-import { TokenCard } from '../../components/TokenCard';
-import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import { TokenCard, ErrorBoundary, QueueStatusBanner, MarketSkeleton, QuickBuyModal } from '@/components';
 import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
-import { QueueStatusBanner } from '../../components/QueueStatusBanner';
-import { MarketSkeleton } from '../../components/SkeletonLoader';
-import { QuickBuyModal } from '../../components/QuickBuyModal';
 
 // Static dummy market data for pure UI
 const DUMMY_TOKENS = [

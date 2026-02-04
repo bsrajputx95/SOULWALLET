@@ -17,21 +17,17 @@
     "module": "esnext",
     "baseUrl": ".",
     "paths": {
-      "@/components/*": [
-        "./components/*"
-      ],
-      "@/constants/*": [
-        "./constants/*"
-      ],
-      "@/lib/*": [
-        "./lib/*"
-      ],
-      "@/assets/*": [
-        "./assets/*"
-      ],
-      "@/utils/*": [
-        "./utils/*"
-      ]
+      "@/components/*": ["./components/*"],
+      "@/components": ["./components/index.ts"],
+      "@/constants/*": ["./constants/*"],
+      "@/constants": ["./constants/index.ts"],
+      "@/services/*": ["./services/*"],
+      "@/services": ["./services/index.ts"],
+      "@/utils/*": ["./utils/*"],
+      "@/utils": ["./utils/index.ts"],
+      "@/contexts/*": ["./contexts/*"],
+      "@/types/*": ["./types/*"],
+      "@/assets/*": ["./assets/*"]
     }
   },
   "include": [

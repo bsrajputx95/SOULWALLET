@@ -232,7 +232,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       });
       setShowSettings(false);
     } catch (error) {
-      console.error('Failed to save iBuy settings:', error);
+
     }
   };
 
@@ -348,7 +348,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
           : '';
       Alert.alert('Sold!', `${profitText}${feeText}`);
     } catch (error: any) {
-      console.error('Sell swap failed:', error);
       const errorMsg = error?.message || error?.data?.message || 'Failed to execute sell swap';
       Alert.alert('Swap Failed', errorMsg);
     } finally {
@@ -371,7 +370,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
     setBuyingToken(token.address);
     try {
-      console.log(`[iBuy] Buying more ${token.symbol} with ${inputCurrency}...`);
+
 
       // Use the selected input currency
       const inputMint = inputCurrency === 'USDC' ? USDC_MINT : SOL_MINT;
@@ -390,7 +389,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
         );
       }
     } catch (error: any) {
-      console.error('[iBuy] Buy More failed:', error);
       Alert.alert('Buy Failed', error.message || 'Failed to execute buy');
     } finally {
       setBuyingToken(null);

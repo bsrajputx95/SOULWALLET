@@ -24,6 +24,7 @@ export const COLORS = {
   success: "#00FF7F", // Fluorescent Green
   error: "#FF3D71",
   warning: "#FFAA00",
+  white: "#FFFFFF",
   
   // Gradients
   gradientPurple: ["#9945FF", "#14F195"] as const,

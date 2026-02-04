@@ -14,9 +14,8 @@ import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { MessageSquare, Repeat, Heart, Send, X, Share2 } from 'lucide-react-native';
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { NeonCard } from '../../components/NeonCard';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import { NeonCard } from '@/components';
 
 // Static dummy post for pure UI mode
 const DUMMY_POST = {

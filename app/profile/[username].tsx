@@ -16,11 +16,8 @@ import { ChevronDown, UserPlus, UserMinus, X, Zap, Copy } from 'lucide-react-nat
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { SocialPost } from '../../components/SocialPost';
-import { NeonCard } from '../../components/NeonCard';
-import { GlowingText } from '../../components/GlowingText';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import { SocialPost, NeonCard, GlowingText } from '@/components';
 
 // Mock hooks for local-only mode
 const useMockMutation = <T,>(_options: { onSuccess?: () => void; onError?: (e: any) => void }) => ({
@@ -247,7 +244,7 @@ export default function UserProfileScreen() {
                     await Clipboard.setStringAsync(walletAddress);
                     Alert.alert('Copied', 'Wallet address copied to clipboard');
                   } catch (e) {
-                    if (__DEV__) console.log('Clipboard copy failed', e);
+                    // Clipboard copy failed silently
                   }
                 }}
               >
@@ -669,8 +666,7 @@ export default function UserProfileScreen() {
                       exitWithTrader,
                       totpCode,
                     });
-                  } catch (error: any) {
-                    console.error('[Profile] Copy trading error:', error);
+                  } catch {
                   }
                 }}
               >

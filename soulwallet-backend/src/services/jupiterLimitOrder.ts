@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const JUPITER_LIMIT_API = process.env.JUPITER_LIMIT_API || 'https://jup.ag/api/limit/v1';
-const JUPITER_SWAP_API = process.env.JUPITER_SWAP_API || 'https://api.jup.ag/swap/v1';
+const JUPITER_QUOTE_API = process.env.JUPITER_QUOTE_API || 'https://quote-api.jup.ag/v6';
 const JUPITER_TOKEN_API = 'https://api.jup.ag/tokens?tags=verified';
 
 interface LimitOrderParams {
@@ -183,8 +183,8 @@ interface SwapTransaction {
  */
 export async function getSwapTransaction(params: SwapQuoteParams): Promise<SwapTransaction | null> {
     try {
-        // First get a quote
-        const quoteResponse = await axios.get(`${JUPITER_SWAP_API}/quote`, {
+        // First get a quote from Jupiter v6 quote API
+        const quoteResponse = await axios.get(`${JUPITER_QUOTE_API}/quote`, {
             params: {
                 inputMint: params.inputMint,
                 outputMint: params.outputMint,
@@ -200,8 +200,8 @@ export async function getSwapTransaction(params: SwapQuoteParams): Promise<SwapT
             return null;
         }
 
-        // Get swap transaction
-        const swapResponse = await axios.post(`${JUPITER_SWAP_API}/swap`, {
+        // Get swap transaction from Jupiter v6 swap API
+        const swapResponse = await axios.post(`${JUPITER_QUOTE_API}/swap`, {
             quoteResponse: quote,
             userPublicKey: params.userPublicKey,
             wrapAndUnwrapSol: true,

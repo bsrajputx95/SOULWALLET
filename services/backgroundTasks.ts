@@ -2,18 +2,16 @@ import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
 import { checkCopyTradeQueue, executeCopyTrade, executeCopyTradeSell } from './copyTrading';
+import { getCachedPin } from './wallet';
 
 const COPY_TRADE_CHECK_TASK = 'copy-trade-check';
 
 // Define the background task
 TaskManager.defineTask(COPY_TRADE_CHECK_TASK, async () => {
     try {
-        console.log('[Background] Checking copy trade queue...');
-
         // Get auth token
         const authToken = await SecureStore.getItemAsync('token');
         if (!authToken) {
-            console.log('[Background] No auth token');
             return BackgroundFetch.BackgroundFetchResult.NoData;
         }
 
@@ -28,9 +26,9 @@ TaskManager.defineTask(COPY_TRADE_CHECK_TASK, async () => {
             process.env.EXPO_PUBLIC_AUTO_EXECUTE_THRESHOLD || '50'
         );
 
-        // Get cached PIN (if user enabled auto-execute)
-        const cachedPinData = await SecureStore.getItemAsync('cached_pin');
-        const canAutoExecute = !!cachedPinData;
+        // Get cached PIN (if user enabled auto-execute and PIN not expired)
+        const cachedPin = await getCachedPin();
+        const canAutoExecute = !!cachedPin;
 
         for (const item of result.queue) {
             const tradeValue = item.entryPrice * item.inputAmount;
@@ -40,27 +38,21 @@ TaskManager.defineTask(COPY_TRADE_CHECK_TASK, async () => {
 
             if (canAutoExecute && tradeValue <= threshold) {
                 // Auto-execute small trades based on type
-                console.log(`[Background] Auto-executing ${item.type} trade ${item.id} ($${tradeValue})`);
-                const pin = cachedPinData; // In production, decrypt this
-                
                 if (isExitTrade) {
                     // Exit trades use sell execution path
-                    await executeCopyTradeSell(item, pin, authToken);
+                    await executeCopyTradeSell(item, cachedPin, authToken);
                 } else {
                     // Entry trades use buy execution path
-                    await executeCopyTrade(item, pin, authToken);
+                    await executeCopyTrade(item, cachedPin, authToken);
                 }
             } else {
                 // Show notification for manual execution
-                const action = isExitTrade ? 'Sell (exit)' : 'Buy';
-                console.log(`[Background] Trade pending: ${action} ${item.inputSymbol} ($${tradeValue})`);
                 // Notification would be shown here
             }
         }
 
         return BackgroundFetch.BackgroundFetchResult.NewData;
-    } catch (error) {
-        console.error('[Background] Task error:', error);
+    } catch {
         return BackgroundFetch.BackgroundFetchResult.Failed;
     }
 });
@@ -73,7 +65,6 @@ export async function registerBackgroundTasks(): Promise<void> {
         // Check if task is already registered
         const isRegistered = await TaskManager.isTaskRegisteredAsync(COPY_TRADE_CHECK_TASK);
         if (isRegistered) {
-            console.log('[Background] Task already registered');
             return;
         }
 
@@ -83,10 +74,7 @@ export async function registerBackgroundTasks(): Promise<void> {
             stopOnTerminate: false,
             startOnBoot: true,
         });
-
-        console.log('[Background] Task registered successfully');
-    } catch (error) {
-        console.error('[Background] Registration error:', error);
+    } catch {
     }
 }
 
@@ -98,10 +86,8 @@ export async function unregisterBackgroundTasks(): Promise<void> {
         const isRegistered = await TaskManager.isTaskRegisteredAsync(COPY_TRADE_CHECK_TASK);
         if (isRegistered) {
             await BackgroundFetch.unregisterTaskAsync(COPY_TRADE_CHECK_TASK);
-            console.log('[Background] Task unregistered');
         }
-    } catch (error) {
-        console.error('[Background] Unregister error:', error);
+    } catch {
     }
 }
 
@@ -116,8 +102,7 @@ export async function getBackgroundTaskStatus(): Promise<{
         const isRegistered = await TaskManager.isTaskRegisteredAsync(COPY_TRADE_CHECK_TASK);
         const status = await BackgroundFetch.getStatusAsync();
         return { isRegistered, status };
-    } catch (error) {
-        console.error('[Background] Status check error:', error);
+    } catch {
         return { isRegistered: false, status: null };
     }
 }

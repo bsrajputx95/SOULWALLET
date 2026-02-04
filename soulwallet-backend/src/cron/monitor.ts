@@ -29,7 +29,7 @@ export async function monitorTraderExits(): Promise<void> {
                 where: {
                     traderAddress: position.config.traderAddress,
                     swapType: 'sell',
-                    outputMint: position.inputMint, // Trader receives stable/SOL (selling the token we copied)
+                    inputMint: position.inputMint, // Trader sells the token we copied (input = token being sold)
                     timestamp: { gte: fiveMinutesAgo }
                 }
             });
@@ -38,18 +38,22 @@ export async function monitorTraderExits(): Promise<void> {
 
             console.log(`Trader ${position.config.traderAddress} exited ${position.inputSymbol}, creating sell queue for user ${position.userId}`);
 
-            // Cancel SL/TP orders first
-            const cancelTransactions = [];
+            // Cancel SL/TP orders first - collect unsigned cancel transactions
+            const cancelTransactions: { orderId: string; transaction: string | null }[] = [];
             if (position.slOrderId) {
                 const cancelTx = await cancelLimitOrder(position.slOrderId);
-                if (cancelTx) cancelTransactions.push({ orderId: position.slOrderId, transaction: cancelTx });
+                cancelTransactions.push({ orderId: position.slOrderId, transaction: cancelTx });
             }
             if (position.tpOrderId) {
                 const cancelTx = await cancelLimitOrder(position.tpOrderId);
-                if (cancelTx) cancelTransactions.push({ orderId: position.tpOrderId, transaction: cancelTx });
+                cancelTransactions.push({ orderId: position.tpOrderId, transaction: cancelTx });
             }
 
+            // Filter valid cancel transactions (those with transaction data)
+            const validCancelTransactions = cancelTransactions.filter(c => c.transaction);
+
             // Create a sell queue entry for the user to execute
+            // Include cancel transactions in the queue so app can sign them before sell
             // This represents the exit trade that mirrors the trader's exit
             // Include positionId to ensure uniqueness per position
             const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -73,11 +77,16 @@ export async function monitorTraderExits(): Promise<void> {
                         slPrice: null, // No SL/TP for exit trades
                         tpPrice: null,
                         status: 'pending',
-                        expiresAt
+                        expiresAt,
+                        // Include cancel transactions in queue so app signs them before sell
+                        cancelTransactions: validCancelTransactions.length > 0 
+                            ? JSON.stringify(validCancelTransactions) 
+                            : null
                     }
                 });
 
-                // Only mark position as pending exit after successful queue insert
+                // Mark position as pending_exit - user must sign cancel transactions + sell
+                // Position is NOT closed until user signs and broadcasts all transactions
                 await prisma.copyPosition.update({
                     where: { id: position.id },
                     data: { 

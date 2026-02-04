@@ -25,14 +25,11 @@ import {
   Users,
 } from 'lucide-react-native';
 
-import { COLORS } from '../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-
-import { SkeletonLoader } from '../components/SkeletonLoader';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import { SkeletonLoader, ErrorBoundary } from '@/components';
 import { ProfileForm } from '../components/account/ProfileForm';
-import { showSuccessToast, showErrorToast } from '../utils/toast';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { showSuccessToast, showErrorToast, validateSession } from '@/utils';
+import { api } from '@/services';
 
 // Profile type from backend
 interface UserProfile {
@@ -66,11 +63,7 @@ export default function AccountScreen() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await response.json();
-
+      const json = await api.get<{ success: boolean; user: UserProfile }>('/me');
       if (json.success) {
         setProfile(json.user);
       }
@@ -82,6 +75,7 @@ export default function AccountScreen() {
   };
 
   useEffect(() => {
+    void validateSession();
     fetchProfile();
   }, []);
 
@@ -89,28 +83,14 @@ export default function AccountScreen() {
   const updateProfile = async (data: any) => {
     try {
       setIsAccountUpdating(true);
-      const token = await SecureStore.getItemAsync('token');
-      const response = await fetch(`${API_URL}/profile`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          firstName: data.firstName || undefined,
-          lastName: data.lastName || undefined,
-          email: data.email || undefined,
-          phone: data.phone || undefined,
-          dateOfBirth: data.dateOfBirth || undefined,
-          profileImage: data.profileImage || undefined,
-        }),
+      const json = await api.put<{ success: boolean; user: UserProfile }>('/profile', {
+        firstName: data.firstName || undefined,
+        lastName: data.lastName || undefined,
+        email: data.email || undefined,
+        phone: data.phone || undefined,
+        dateOfBirth: data.dateOfBirth || undefined,
+        profileImage: data.profileImage || undefined,
       });
-
-      const json = await response.json();
-
-      if (!response.ok) {
-        throw new Error(json.error || 'Failed to update profile');
-      }
 
       setProfile(json.user);
       return json;
@@ -130,25 +110,16 @@ export default function AccountScreen() {
   // Real delete account handler
   const deleteAccountMutation = {
     mutateAsync: async (params: { password: string }) => {
-      const token = await SecureStore.getItemAsync('token');
-      const response = await fetch(`${API_URL}/account/delete`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ password: params.password }),
+      const json = await api.post<{ success: boolean; message?: string; error?: string }>('/account/delete', {
+        password: params.password,
       });
-
-      const json = await response.json();
-
-      if (!response.ok) {
-        throw new Error(json.error || 'Failed to delete account');
-      }
 
       // Clear local storage
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user_data');
+      // Clear cached PIN for auto-execute
+      await SecureStore.deleteItemAsync('cached_pin');
+      await SecureStore.deleteItemAsync('cached_pin_expiry');
 
       // Navigate to login
       router.replace('/(auth)/login');
@@ -185,26 +156,14 @@ export default function AccountScreen() {
                       return;
                     }
                     try {
-                      const token = await SecureStore.getItemAsync('token');
-                      const response = await fetch(`${API_URL}/auth/reset-password`, {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          Authorization: `Bearer ${token}`,
-                        },
-                        body: JSON.stringify({
-                          currentPassword,
-                          newPassword,
-                        }),
+                      await api.post('/auth/reset-password', {
+                        currentPassword,
+                        newPassword,
                       });
-                      const json = await response.json();
-                      if (response.ok) {
-                        Alert.alert('✅ Password Changed', 'Your password has been updated successfully');
-                      } else {
-                        Alert.alert('Error', json.error || 'Failed to update password');
-                      }
-                    } catch (error: any) {
-                      Alert.alert('Error', error.message || 'Failed to update password');
+                      Alert.alert('✅ Password Changed', 'Your password has been updated successfully');
+                    } catch (error: unknown) {
+                      const errorMessage = error instanceof Error ? error.message : 'Failed to update password';
+                      Alert.alert('Error', errorMessage);
                     }
                   },
                 },
@@ -499,11 +458,12 @@ export default function AccountScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        testID="account-scroll-view"
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-      >
+      <ErrorBoundary>
+        <ScrollView
+          testID="account-scroll-view"
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+        >
         <ProfileForm
           styles={styles}
           profile={profile}
@@ -591,6 +551,7 @@ export default function AccountScreen() {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+      </ErrorBoundary>
 
 
       {/* Delete Account Modal */}

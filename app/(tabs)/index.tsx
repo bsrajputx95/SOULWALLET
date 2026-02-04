@@ -19,23 +19,23 @@ import { useRouter } from 'expo-router';
 import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { WalletCard } from '../../components/WalletCard';
-import { QuickActionButton } from '../../components/QuickActionButton';
-import { TokenCard } from '../../components/TokenCard';
-import { TraderCard } from '../../components/TraderCard';
-import { ErrorBoundary } from '../../components/ErrorBoundary';
-import { SendModal } from '../../components/SendModal';
-import { ReceiveModal } from '../../components/ReceiveModal';
-import { SwapModal } from '../../components/SwapModal';
-import { CopyTradingModal } from '../../components/CopyTradingModal';
-import { CopyTradeExecutionModal } from '../../components/CopyTradeExecutionModal';
-import { QueueStatusBanner } from '../../components/QueueStatusBanner';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import {
+  WalletCard,
+  QuickActionButton,
+  TokenCard,
+  TraderCard,
+  ErrorBoundary,
+  SendModal,
+  ReceiveModal,
+  SwapModal,
+  CopyTradingModal,
+  CopyTradeExecutionModal,
+  QueueStatusBanner,
+} from '@/components';
 import * as SecureStore from 'expo-secure-store';
-import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding } from '../../services/wallet';
-import { showErrorToast } from '../../utils/toast';
-import { createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition } from '../../services/copyTrading';
+import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api, API_URL } from '@/services';
+import { showErrorToast, validateSession } from '@/utils';
 
 // Static fallback wallet data for UI display
 const DUMMY_WALLET = {
@@ -71,8 +71,6 @@ function getWellKnownTokenLogo(symbol?: string): string | undefined {
   return WELL_KNOWN_TOKEN_LOGOS[symbol.toUpperCase()];
 }
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
-
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -104,24 +102,16 @@ export default function HomeScreen() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUser(data.user || data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch user profile:', error);
+      const data = await api.get<{ user: unknown }>('/me');
+      setUser(data.user || data);
+    } catch {
     } finally {
       setAuthLoading(false);
     }
   };
 
   useEffect(() => {
+    void validateSession();
     fetchUserProfile();
   }, []);
 
@@ -346,8 +336,6 @@ export default function HomeScreen() {
       if (queueResult.success && queueResult.queue) {
         setCopyQueue(queueResult.queue.filter(item => item.status === 'pending'));
       }
-    } catch (error) {
-      console.error('Failed to load copy trading data:', error);
     } finally {
       setIsLoadingCopyData(false);
     }

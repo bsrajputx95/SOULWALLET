@@ -5,11 +5,11 @@ import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts, Orbitron_400Regular, Orbitron_500Medium, Orbitron_700Bold } from '@expo-google-fonts/orbitron';
 import { View, StyleSheet, Platform } from "react-native";
-import { COLORS } from "../constants/colors";
-import { ErrorBoundary } from "../components/ErrorBoundary";
-import { performanceMonitor, trackBundleSize } from "../utils/performance";
-import { WebPreviewBanner } from "../components/WebPreviewBanner";
-import { registerBackgroundTasks } from "../services/backgroundTasks";
+import { COLORS } from "@/constants";
+import { ErrorBoundary, WebPreviewBanner } from "@/components";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { performanceMonitor, trackBundleSize } from "@/utils";
+import { registerBackgroundTasks } from "@/services";
 
 // Initialize performance monitoring
 if (__DEV__) {
@@ -66,8 +66,8 @@ export default function RootLayout() {
             performanceMonitor.logSummary();
           }
         })
-        .catch((error) => {
-          console.error('Failed to hide splash screen:', error);
+        .catch(() => {
+          // Silently ignore splash screen errors
         });
     }
   }, [appIsReady]);
@@ -101,13 +101,15 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <View style={styles.container}>
-          {/* Web Preview Banner - shows only on web platform */}
-          <WebPreviewBanner />
-          <RootLayoutNav />
-        </View>
-      </GestureHandlerRootView>
+      <AuthProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View style={styles.container}>
+            {/* Web Preview Banner - shows only on web platform */}
+            <WebPreviewBanner />
+            <RootLayoutNav />
+          </View>
+        </GestureHandlerRootView>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }

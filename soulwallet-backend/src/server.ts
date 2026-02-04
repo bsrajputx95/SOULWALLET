@@ -1179,10 +1179,28 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
         // Store trader address before marking inactive
         const traderAddress = config.traderAddress;
 
-        // Cancel all SL/TP orders for open positions
+        // Collect cancel transactions for all SL/TP orders
+        // These must be signed and broadcast by the client to actually cancel orders
+        const cancelTransactions: { positionId: string; orderId: string; transaction: string | null }[] = [];
         for (const position of config.positions) {
-            if (position.slOrderId) await cancelLimitOrder(position.slOrderId);
-            if (position.tpOrderId) await cancelLimitOrder(position.tpOrderId);
+            if (position.slOrderId) {
+                const cancelTx = await cancelLimitOrder(position.slOrderId);
+                cancelTransactions.push({ positionId: position.id, orderId: position.slOrderId, transaction: cancelTx });
+            }
+            if (position.tpOrderId) {
+                const cancelTx = await cancelLimitOrder(position.tpOrderId);
+                cancelTransactions.push({ positionId: position.id, orderId: position.tpOrderId, transaction: cancelTx });
+            }
+            // Store cancel transactions on position for client retrieval
+            if (position.slOrderId || position.tpOrderId) {
+                await prisma.copyPosition.update({
+                    where: { id: position.id },
+                    data: { 
+                        cancelTransactions: JSON.stringify(cancelTransactions.filter(c => c.transaction)),
+                        status: 'pending_cancel' 
+                    }
+                });
+            }
         }
 
         // Cancel any pending queue items for this config
@@ -1194,7 +1212,7 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
             data: { status: 'cancelled' }
         });
 
-        // Mark config as inactive
+        // Mark config as inactive ONLY after preparing cancel transactions
         await prisma.copyTradingConfig.update({
             where: { userId: req.userId! },
             data: { isActive: false }
@@ -1209,7 +1227,17 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
             console.error(`[CopyTrading] Webhook deletion error:`, err);
         });
 
-        res.json({ success: true, message: 'Copy trading stopped' });
+        // Return cancel transactions to client - they must be signed and broadcast
+        // Orders are NOT canceled until the client signs these transactions
+        const validCancels = cancelTransactions.filter(c => c.transaction);
+        res.json({ 
+            success: true, 
+            message: validCancels.length > 0 
+                ? 'Copy trading stopped. Sign and broadcast cancel transactions to complete.' 
+                : 'Copy trading stopped',
+            cancelTransactions: validCancels,
+            pendingPositions: config.positions.map(p => ({ id: p.id, status: 'pending_cancel' }))
+        });
     } catch (error) {
         console.error('Stop copy trading error:', error);
         res.status(500).json({ error: 'Failed to stop copy trading' });
@@ -1341,19 +1369,43 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
 
             // Only queue copy trades for BUYs (when trader buys, we copy the buy)
             if (swapType === 'buy') {
+                // Validate input amounts to prevent divide-by-zero and NaN
+                // Skip trades with invalid amounts that would cause calculation errors
+                if (inputAmount <= 0 || outputAmount <= 0) {
+                    console.warn(`[Webhook] Skipping trade with invalid amounts: input=${inputAmount}, output=${outputAmount}, tx=${tx.signature}`);
+                    continue;
+                }
+
                 // Calculate price ratio from trader's swap
-                // price = outputAmount / inputAmount (what trader spent / what trader received)
-                const priceRatio = inputAmount > 0 ? inputAmount / outputAmount : 0;
+                // price = inputAmount / outputAmount (what trader spent / what trader received)
+                const priceRatio = inputAmount / outputAmount;
+
+                // Guard against NaN/Infinity from unexpected division
+                if (!Number.isFinite(priceRatio) || priceRatio <= 0) {
+                    console.warn(`[Webhook] Skipping trade with invalid price ratio: ${priceRatio}, tx=${tx.signature}`);
+                    continue;
+                }
 
                 for (const config of configs) {
                     // Cap the spend to user's perTradeAmount
                     const cappedOutputAmount = Math.min(config.perTradeAmount, inputAmount);
 
+                    // Skip if capped amount is invalid
+                    if (cappedOutputAmount <= 0) {
+                        console.warn(`[Webhook] Skipping config ${config.id}: invalid capped amount ${cappedOutputAmount}`);
+                        continue;
+                    }
+
                     // Calculate proportional input amount based on price ratio
-                    // If priceRatio is 0, fall back to using perTradeAmount directly
-                    const proportionalInputAmount = priceRatio > 0
-                        ? cappedOutputAmount / priceRatio
-                        : outputAmount * (cappedOutputAmount / inputAmount);
+                    // proportionalInputAmount = cappedOutputAmount / priceRatio
+                    // This ensures we get the correct amount of output tokens for our input
+                    const proportionalInputAmount = cappedOutputAmount / priceRatio;
+
+                    // Final validation before writing to database
+                    if (!Number.isFinite(proportionalInputAmount) || proportionalInputAmount < 0) {
+                        console.warn(`[Webhook] Skipping config ${config.id}: calculated NaN/Infinity input amount`);
+                        continue;
+                    }
 
                     await queueCopyTrade({
                         userId: config.userId,

@@ -28,13 +28,10 @@ import {
   Shield,
 } from 'lucide-react-native';
 import { WebView } from 'react-native-webview';
-import { SimpleCandlestickChart } from '../../components/SimpleCandlestickChart';
-import { COLORS } from '../../constants/colors';
-import { BORDER_RADIUS, FONTS, SPACING } from '../../constants/theme';
-import { NeonCard } from '../../components/NeonCard';
-import { NeonButton } from '../../components/NeonButton';
-import { GlowingText } from '../../components/GlowingText';
-import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '../../lib/priceFormatter';
+import { SimpleCandlestickChart } from '@/components/SimpleCandlestickChart';
+import { COLORS, BORDER_RADIUS, FONTS, SPACING } from '@/constants';
+import { NeonCard, NeonButton, GlowingText } from '@/components';
+import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '@/utils';
 
 type Timeframe = '1h' | '1d' | '1w' | '1m' | '1y';
 type ChartTimeframe = '5m' | '15m' | '1h' | '4h' | '1d';

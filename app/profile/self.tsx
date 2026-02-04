@@ -18,10 +18,8 @@ import { Settings, Shield, Plus, X, DollarSign } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { NeonCard } from '../../components/NeonCard';
-import { SocialPost } from '../../components/SocialPost';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import { NeonCard, SocialPost } from '@/components';
 
 // Static dummy data for pure UI mode
 const DUMMY_USER = {
@@ -499,7 +497,7 @@ export default function SelfProfileScreen() {
                 <TouchableOpacity
                   style={styles.optionButton}
                   onPress={() => {
-                    if (__DEV__) console.log('Instant verification selected');
+
                     setShowVerification(false);
                   }}
                 >
@@ -518,7 +516,7 @@ export default function SelfProfileScreen() {
                 <TouchableOpacity
                   style={styles.optionButton}
                   onPress={() => {
-                    if (__DEV__) console.log('Organic verification selected');
+
                     setShowVerification(false);
                   }}
                 >

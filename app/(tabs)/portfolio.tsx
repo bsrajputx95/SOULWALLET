@@ -19,16 +19,10 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
-import { NeonCard } from '../../components/NeonCard';
-import { NeonButton } from '../../components/NeonButton';
-import { NeonInput } from '../../components/NeonInput';
-import { QueueStatusBanner } from '../../components/QueueStatusBanner';
-import { PortfolioSkeleton } from '../../components/SkeletonLoader';
-import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding } from '../../services/wallet';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
+import { NeonCard, NeonButton, NeonInput, QueueStatusBanner, PortfolioSkeleton, ErrorBoundary } from '@/components';
+import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, api } from '@/services';
+import { validateSession } from '@/utils';
 
 // Static dummy types for pure UI mode
 type Token = {
@@ -80,18 +74,9 @@ export default function PortfolioScreen() {
       const token = await SecureStore.getItemAsync('token');
       if (!token) return;
 
-      const response = await fetch(`${API_URL}/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUser(data.user || data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch profile:', error);
+      const data = await api.get<{ user: unknown }>('/me');
+      setUser(data.user || data);
+    } catch {
     }
   }, []);
 
@@ -125,8 +110,7 @@ export default function PortfolioScreen() {
           })));
         }
       }
-    } catch (error) {
-      console.error('Failed to fetch wallet data:', error);
+    } catch {
     }
   }, []);
 
@@ -137,6 +121,7 @@ export default function PortfolioScreen() {
 
   // Load data on mount
   useEffect(() => {
+    void validateSession();
     const loadData = async () => {
       setIsLoading(true);
       await Promise.all([fetchUserProfile(), fetchWalletData()]);
@@ -264,20 +249,21 @@ export default function PortfolioScreen() {
         </Pressable>
       </View>
 
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={[
-          styles.contentContainer,
-          {
-            paddingHorizontal: responsivePadding,
-            paddingTop: SPACING.s
+      <ErrorBoundary>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={[
+            styles.contentContainer,
+            {
+              paddingHorizontal: responsivePadding,
+              paddingTop: SPACING.s
+            }
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-        ]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+        >
         {/* Settings now open in a dedicated screen; inline panel removed */}
         <QueueStatusBanner testID="queue-banner-portfolio" onRetry={() => refetch()} />
 
@@ -666,6 +652,7 @@ export default function PortfolioScreen() {
           </>
         )}
       </ScrollView>
+      </ErrorBoundary>
 
       {/* Token Details Modal */}
       <Modal

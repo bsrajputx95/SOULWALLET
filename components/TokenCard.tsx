@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
-import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '../lib/priceFormatter';
+import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '../utils/formatPrice';
 
 interface TokenCardProps {
   symbol: string;
@@ -64,13 +64,10 @@ export const TokenCard: React.FC<TokenCardProps> = ({
   };
 
   const handlePress = () => {
-    if (__DEV__) console.log('TokenCard pressed:', symbol);
     if (onPress) {
-      if (__DEV__) console.log('Using custom onPress handler');
       onPress();
     } else {
       const route = `/coin/${symbol.toLowerCase()}` as any;
-      if (__DEV__) console.log('Navigating to:', route);
       router.push(route);
     }
   };

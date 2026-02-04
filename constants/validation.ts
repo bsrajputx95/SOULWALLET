@@ -13,5 +13,19 @@ export const VALIDATION = {
   IMAGES_PER_POST_MAX: 4,
   MAX_SLIPPAGE_PERCENT: 5,
   MAX_SLIPPAGE_BPS: 500,
+  PIN: {
+    MIN_LENGTH: 4,
+    MAX_LENGTH: 6,
+    PATTERN: /^\d+$/,
+  },
+  SOLANA_ADDRESS: {
+    PATTERN: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
+    MIN_LENGTH: 32,
+    MAX_LENGTH: 44,
+  },
+  AMOUNT: {
+    MIN_SOL: 0.00001,
+    MAX_DECIMALS: 9,
+  },
 } as const;
 

@@ -1,8 +1,8 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Home, BarChart3, Users, Wallet } from 'lucide-react-native';
-import { COLORS } from '../../constants/colors';
-import { TabBar } from '../../components/TabBar';
+import { COLORS } from '@/constants';
+import { TabBar } from '@/components';
 
 export default function TabLayout() {
   return (

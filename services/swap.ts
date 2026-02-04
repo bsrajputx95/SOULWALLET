@@ -1,5 +1,5 @@
 import 'react-native-get-random-values';
-import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 import { getKeypairForSigning, getLocalPublicKey } from './wallet';
 
 const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
@@ -48,7 +48,7 @@ export const getTokenList = async (): Promise<JupiterToken[]> => {
             throw new Error('Failed to fetch token list');
         }
 
-        const tokens: any[] = await response.json();
+        const tokens: JupiterToken[] = await response.json();
         tokenListCache = tokens
             .filter(t => t.tags?.includes('verified') && t.symbol && t.name && t.address && t.decimals !== undefined)
             .map(t => ({
@@ -173,8 +173,8 @@ export const executeSwap = async (
         for (let i = 0; i < secretKeyRef.length; i++) {
             secretKeyRef[i] = 0;
         }
-        // @ts-ignore
-        keypair = null;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        keypair = null as unknown as Keypair;
 
         const connection = new Connection(HELIUS_RPC, 'confirmed');
 

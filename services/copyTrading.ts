@@ -1,9 +1,9 @@
 import * as SecureStore from 'expo-secure-store';
-import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 import { executeSwap, getQuote, getTokenDecimals } from './swap';
 import { getKeypairForSigning } from './wallet';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { api } from './api';
 
 // Types
 export interface CopyTradingConfig {
@@ -32,6 +32,7 @@ export interface CopyTradeQueueItem {
     entryPrice: number;
     slPrice?: number;
     tpPrice?: number;
+    cancelTransactions?: string; // JSON string of cancel transactions (exit trades only)
     status: string;
     expiresAt: string;
     createdAt: string;
@@ -74,21 +75,7 @@ export async function createCopyConfig(
     authToken: string
 ): Promise<{ success: boolean; config?: CopyTradingConfig; error?: string }> {
     try {
-        const response = await fetch(`${API_URL}/copy-trade/config`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${authToken}`
-            },
-            body: JSON.stringify(config)
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            return { success: false, error: data.error || 'Failed to create config' };
-        }
-
+        const data = await api.post<{ success: boolean; config: CopyTradingConfig; error?: string }>('/copy-trade/config', config);
         return { success: true, config: data.config };
     } catch (error: any) {
         return { success: false, error: error.message || 'Network error' };
@@ -102,19 +89,11 @@ export async function fetchCopyConfig(
     authToken: string
 ): Promise<{ success: boolean; config?: CopyTradingConfig; error?: string }> {
     try {
-        const response = await fetch(`${API_URL}/copy-trade/config`, {
-            headers: { Authorization: `Bearer ${authToken}` }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            return { success: false, error: data.error };
-        }
-
+        const data = await api.get<{ success: boolean; config: CopyTradingConfig }>('/copy-trade/config');
         return { success: true, config: data.config };
-    } catch (error: any) {
-        return { success: false, error: error.message };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return { success: false, error: errorMessage };
     }
 }
 
@@ -125,16 +104,7 @@ export async function checkCopyTradeQueue(
     authToken: string
 ): Promise<{ success: boolean; queue?: CopyTradeQueueItem[]; error?: string }> {
     try {
-        const response = await fetch(`${API_URL}/copy-trade/queue`, {
-            headers: { Authorization: `Bearer ${authToken}` }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            return { success: false, error: data.error };
-        }
-
+        const data = await api.get<{ success: boolean; queue: CopyTradeQueueItem[] }>('/copy-trade/queue');
         return { success: true, queue: data.queue };
     } catch (error: any) {
         return { success: false, error: error.message };
@@ -259,8 +229,7 @@ export async function executeCopyTrade(
                     }
                 }
             }
-        } catch (e) {
-            console.warn('Failed to create SL/TP orders:', e);
+        } catch {
             // Continue even if SL/TP creation fails - main swap succeeded
         }
 
@@ -269,8 +238,8 @@ export async function executeCopyTrade(
         for (let i = 0; i < secretKeyRef.length; i++) {
             secretKeyRef[i] = 0;
         }
-        // @ts-ignore
-        keypair = null;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        keypair = null as unknown as Keypair;
 
         // Step 4: Mark as executed with actual executed amounts
         const executedData = {
@@ -279,23 +248,7 @@ export async function executeCopyTrade(
             actualEntryPrice: actualEntryPrice           // Actual executed price
         };
 
-        const executeResponse = await fetch(
-            `${API_URL}/copy-trade/execute/${queueItem.id}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${authToken}`
-                },
-                body: JSON.stringify({ slOrderId, tpOrderId, executedData })
-            }
-        );
-
-        const executeData = await executeResponse.json();
-
-        if (!executeResponse.ok) {
-            return { success: false, error: executeData.error };
-        }
+        await api.post(`/copy-trade/execute/${queueItem.id}`, { slOrderId, tpOrderId, executedData });
 
         return {
             success: true,
@@ -304,8 +257,9 @@ export async function executeCopyTrade(
             tpOrderId
         };
 
-    } catch (error: any) {
-        return { success: false, error: error.message || 'Execution failed' };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Execution failed';
+        return { success: false, error: errorMessage };
     }
 }
 
@@ -321,6 +275,7 @@ export async function executeCopyTradeSell(
 ): Promise<{ 
     success: boolean; 
     signature?: string; 
+    cancelSignatures?: string[];
     error?: string;
 }> {
     try {
@@ -329,7 +284,37 @@ export async function executeCopyTradeSell(
             return { success: false, error: 'Queue item is not an exit trade' };
         }
 
-        // Step 1: Execute sell swap
+        // Get keypair for signing (needed for both cancels and sell)
+        let keypair = await getKeypairForSigning(pin);
+        if (!keypair) {
+            return { success: false, error: 'Invalid PIN' };
+        }
+
+        const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${process.env.EXPO_PUBLIC_HELIUS_API_KEY}`;
+        const connection = new Connection(HELIUS_RPC, 'confirmed');
+
+        // Step 1: Sign and broadcast cancel transactions for SL/TP orders
+        // These MUST be submitted before the sell to prevent race conditions
+        const cancelSignatures: string[] = [];
+        if (queueItem.cancelTransactions) {
+            try {
+                const cancelTxs: { orderId: string; transaction: string }[] = JSON.parse(queueItem.cancelTransactions);
+                for (const cancel of cancelTxs) {
+                    if (cancel.transaction) {
+                        const result = await signAndSubmitLimitOrder(cancel.transaction, keypair, connection);
+                        if (result.success) {
+                            cancelSignatures.push(result.signature!);
+                        } else {
+                            // Continue even if cancel fails - sell should still go through
+                        }
+                    }
+                }
+            } catch {
+                // Continue with sell even if cancels fail
+            }
+        }
+
+        // Step 2: Execute sell swap
         // For exit: inputMint = token to sell, outputMint = token to receive
         const inputDecimals = await getTokenDecimals(queueItem.inputMint);
         const amountInSmallestUnits = Math.floor(
@@ -358,38 +343,24 @@ export async function executeCopyTradeSell(
         const outputDecimals = queueItem.outputMint === 'So11111111111111111111111111111111111111112' ? 9 : 6;
         const actualOutputAmount = parseFloat(quote.outAmount) / Math.pow(10, outputDecimals);
 
-        // Step 2: Mark as executed with actual amounts (this will close the position)
+        // Step 3: Mark as executed with actual amounts (this will close the position)
         const executedData = {
             actualInputAmount: queueItem.inputAmount,  // What we sold
             actualOutputAmount: actualOutputAmount,     // What we received
             actualEntryPrice: queueItem.entryPrice      // Keep original entry price for P&L
         };
 
-        const executeResponse = await fetch(
-            `${API_URL}/copy-trade/execute/${queueItem.id}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${authToken}`
-                },
-                body: JSON.stringify({ executedData })
-            }
-        );
-
-        const executeData = await executeResponse.json();
-
-        if (!executeResponse.ok) {
-            return { success: false, error: executeData.error };
-        }
+        await api.post(`/copy-trade/execute/${queueItem.id}`, { executedData });
 
         return {
             success: true,
-            signature: swapResult.signature
+            signature: swapResult.signature,
+            cancelSignatures
         };
 
-    } catch (error: any) {
-        return { success: false, error: error.message || 'Sell execution failed' };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Sell execution failed';
+        return { success: false, error: errorMessage };
     }
 }
 
@@ -400,19 +371,11 @@ export async function fetchCopyPositions(
     authToken: string
 ): Promise<{ success: boolean; positions?: CopyPosition[]; error?: string }> {
     try {
-        const response = await fetch(`${API_URL}/copy-trade/positions`, {
-            headers: { Authorization: `Bearer ${authToken}` }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            return { success: false, error: data.error };
-        }
-
+        const data = await api.get<{ success: boolean; positions: CopyPosition[] }>('/copy-trade/positions');
         return { success: true, positions: data.positions };
-    } catch (error: any) {
-        return { success: false, error: error.message };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return { success: false, error: errorMessage };
     }
 }
 
@@ -427,23 +390,7 @@ export async function closeCopyPosition(
 ): Promise<{ success: boolean; sellSignature?: string; error?: string }> {
     try {
         // Step 1: Get close transactions from backend
-        const response = await fetch(
-            `${API_URL}/copy-trade/close/${positionId}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${authToken}`
-                }
-            }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            return { success: false, error: data.error };
-        }
-
+        const data = await api.post<{ success: boolean; cancelTransactions: { orderId: string; transaction: string }[]; sellTransaction: { transaction: string } }>(`/copy-trade/close/${positionId}`, {});
         const { cancelTransactions, sellTransaction } = data;
 
         // Step 2: Get keypair for signing
@@ -503,55 +450,111 @@ export async function closeCopyPosition(
         for (let i = 0; i < secretKeyRef.length; i++) {
             secretKeyRef[i] = 0;
         }
-        // @ts-ignore
-        keypair = null;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        keypair = null as unknown as Keypair;
 
         // Step 5: Confirm close with backend
-        const confirmResponse = await fetch(
-            `${API_URL}/copy-trade/confirm-close/${positionId}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${authToken}`
-                },
-                body: JSON.stringify({ sellSignature })
-            }
-        );
-
-        const confirmData = await confirmResponse.json();
-
-        if (!confirmResponse.ok) {
-            return { success: false, error: confirmData.error };
-        }
+        await api.post(`/copy-trade/confirm-close/${positionId}`, { sellSignature });
 
         return { success: true, sellSignature };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return { success: false, error: errorMessage };
+    }
+}
+
+interface CancelTransaction {
+    positionId: string;
+    orderId: string;
+    transaction: string;
+}
+
+interface StopCopyTradingResult {
+    success: boolean;
+    message?: string;
+    cancelTransactions?: CancelTransaction[];
+    pendingPositions?: { id: string; status: string }[];
+    error?: string;
+}
+
+/**
+ * Stop copy trading (delete config)
+ * Returns cancel transactions that must be signed and broadcast to complete SL/TP cancellation
+ */
+export async function stopCopyTrading(
+    authToken: string
+): Promise<StopCopyTradingResult> {
+    try {
+        const data = await api.delete<{ success: boolean; message: string; cancelTransactions: CancelTransaction[]; pendingPositions: { id: string; status: string }[] }>('/copy-trade/config');
+        return { 
+            success: true, 
+            message: data.message,
+            cancelTransactions: data.cancelTransactions,
+            pendingPositions: data.pendingPositions
+        };
     } catch (error: any) {
         return { success: false, error: error.message };
     }
 }
 
 /**
- * Stop copy trading (delete config)
+ * Submit signed cancel transactions for SL/TP orders
+ * Call this after user confirms they want to cancel orders during stop-copy
  */
-export async function stopCopyTrading(
-    authToken: string
-): Promise<{ success: boolean; error?: string }> {
+export async function submitCancelTransactions(
+    cancelTransactions: CancelTransaction[],
+    pin: string
+): Promise<{ 
+    success: boolean; 
+    signatures?: string[]; 
+    failed?: { orderId: string; error: string }[];
+    error?: string;
+}> {
     try {
-        const response = await fetch(`${API_URL}/copy-trade/config`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${authToken}` }
-        });
+        const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${process.env.EXPO_PUBLIC_HELIUS_API_KEY}`;
+        const connection = new Connection(HELIUS_RPC, 'confirmed');
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            return { success: false, error: data.error };
+        // Get keypair for signing
+        let keypair = await getKeypairForSigning(pin);
+        if (!keypair) {
+            return { success: false, error: 'Invalid PIN' };
         }
 
-        return { success: true };
-    } catch (error: any) {
-        return { success: false, error: error.message };
+        const signatures: string[] = [];
+        const failed: { orderId: string; error: string }[] = [];
+
+        // Sign and broadcast each cancel transaction
+        for (const cancel of cancelTransactions) {
+            if (!cancel.transaction) continue;
+
+            try {
+                const result = await signAndSubmitLimitOrder(cancel.transaction, keypair, connection);
+                if (result.success) {
+                    signatures.push(result.signature!);
+                } else {
+                    failed.push({ orderId: cancel.orderId, error: result.error || 'Unknown error' });
+                }
+            } catch (e: any) {
+                failed.push({ orderId: cancel.orderId, error: e.message || 'Failed to sign cancel' });
+            }
+        }
+
+        // Clear keypair from memory
+        const secretKeyRef = keypair.secretKey;
+        for (let i = 0; i < secretKeyRef.length; i++) {
+            secretKeyRef[i] = 0;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        keypair = null as unknown as Keypair;
+
+        return { 
+            success: failed.length === 0, 
+            signatures,
+            failed: failed.length > 0 ? failed : undefined
+        };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return { success: false, error: errorMessage };
     }
 }
 
@@ -603,7 +606,6 @@ async function signAndSubmitLimitOrder(
 
         return { success: true, signature };
     } catch (error: any) {
-        console.error('Failed to sign/submit limit order:', error);
         return { success: false, error: error.message };
     }
 }
@@ -622,13 +624,11 @@ async function createJupiterLimitOrder(
         });
 
         if (!response.ok) {
-            console.warn('Jupiter limit order creation failed:', await response.text());
             return null;
         }
 
         return await response.json();
-    } catch (error) {
-        console.warn('Failed to create Jupiter limit order:', error);
+    } catch {
         return null;
     }
 }

@@ -36,6 +36,10 @@ module.exports = function (api) {
               root: ['./'],
               alias: {
                 '@': './',
+                '@/components': './components/index.ts',
+                '@/constants': './constants/index.ts',
+                '@/services': './services/index.ts',
+                '@/utils': './utils/index.ts',
                 'stream': 'stream-browserify',
                 'crypto': 'react-native-crypto',
               },

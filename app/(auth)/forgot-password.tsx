@@ -14,11 +14,8 @@ import { useRouter } from 'expo-router';
 import { Mail, Lock, ArrowLeft, Shield } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
-import { COLORS } from '../../constants/colors';
-import { FONTS, SPACING } from '../../constants/theme';
-import { NeonInput } from '../../components/NeonInput';
-import { NeonButton } from '../../components/NeonButton';
-import { GlowingText } from '../../components/GlowingText';
+import { COLORS, FONTS, SPACING } from '@/constants';
+import { NeonInput, NeonButton, GlowingText } from '@/components';
 
 // Local logo asset
 const logoImage = require('../../assets/images/icon-rounded.png');

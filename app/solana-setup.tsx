@@ -21,6 +21,7 @@ import bs58 from 'bs58';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
+import { VALIDATION } from '../constants/validation';
 import { createWallet, importWallet, decryptWalletSecret } from '../services/wallet';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
 
@@ -67,16 +68,16 @@ export default function SolanaSetupScreen() {
         return;
       }
       // Numeric-only check
-      if (!/^\d+$/.test(walletPassword)) {
+      if (!VALIDATION.PIN.PATTERN.test(walletPassword)) {
         Alert.alert('Error', 'PIN must contain only digits (0-9)');
         return;
       }
-      if (walletPassword.length < 4) {
-        Alert.alert('Error', 'PIN must be at least 4 digits');
+      if (walletPassword.length < VALIDATION.PIN.MIN_LENGTH) {
+        Alert.alert('Error', `PIN must be at least ${VALIDATION.PIN.MIN_LENGTH} digits`);
         return;
       }
-      if (walletPassword.length > 6) {
-        Alert.alert('Error', 'PIN must not exceed 6 digits');
+      if (walletPassword.length > VALIDATION.PIN.MAX_LENGTH) {
+        Alert.alert('Error', `PIN must not exceed ${VALIDATION.PIN.MAX_LENGTH} digits`);
         return;
       }
 
@@ -188,7 +189,7 @@ export default function SolanaSetupScreen() {
       setIsLoading(false);
       showErrorToast('Invalid private key');
       Alert.alert('Error', 'Invalid private key. Please check and try again.');
-      if (__DEV__) console.error('Import wallet error:', error);
+
     }
   };
 

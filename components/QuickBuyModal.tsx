@@ -85,7 +85,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         const address = tokenAddress.trim();
 
         try {
-            console.log('[QuickBuy] Verifying token locally');
+
             // Mock token verification - simulate network delay then accept valid addresses
             await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -100,8 +100,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                 hasMetadata: false,
             });
             setIsVerifying(false);
-        } catch (err) {
-            console.error('[QuickBuy] Token verification failed:', err);
+        } catch {
             setError('Unable to verify token.');
             setIsVerifying(false);
         }

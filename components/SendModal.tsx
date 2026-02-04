@@ -21,6 +21,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
+import { VALIDATION } from '../constants/validation';
 import { sendTransaction, getLocalPublicKey } from '../services/wallet';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
 
@@ -112,8 +113,8 @@ export const SendModal: React.FC<SendModalProps> = ({
             setAddressError('Cannot send to yourself');
             return false;
         }
-        // Basic Solana address validation (32-44 chars, base58)
-        const isValid = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed);
+        // Basic Solana address validation using centralized constants
+        const isValid = VALIDATION.SOLANA_ADDRESS.PATTERN.test(trimmed);
         if (!isValid) {
             setAddressError('Invalid Solana address format');
             return false;

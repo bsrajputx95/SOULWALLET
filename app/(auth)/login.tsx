@@ -19,16 +19,16 @@ import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
-import { COLORS } from '../../constants/colors';
-import { NeonButton } from '../../components/NeonButton';
-import { NeonDivider } from '../../components/NeonDivider';
-import { SocialButton } from '../../components/SocialButton';
-import { GlowingText } from '../../components/GlowingText';
+import { COLORS } from '@/constants';
+import { NeonButton, NeonDivider, SocialButton, GlowingText } from '@/components';
+import { api } from '@/services';
+import { useAuth } from '@/contexts/AuthContext';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
 
 export default function LoginNewScreen() {
     const router = useRouter();
+    const { setToken } = useAuth();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -58,38 +58,28 @@ export default function LoginNewScreen() {
         setErrorMessage(null);
 
         try {
-            // TODO: Replace with your actual backend URL (e.g., Railway deployment URL)
-            const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
-
-            const response = await fetch(`${API_URL}/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    emailOrUsername: email.trim(),
-                    password,
-                }),
+            const data = await api.post<{
+                token: string;
+                user: unknown;
+                error?: string;
+            }>('/login', {
+                emailOrUsername: email.trim(),
+                password,
             });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                setErrorMessage(data.error || 'Login failed');
-                return;
-            }
 
             // Store JWT token securely
             if (data.token) {
                 await SecureStore.setItemAsync('token', data.token);
                 await SecureStore.setItemAsync('user_data', JSON.stringify(data.user));
+                // Update AuthContext with the new token
+                setToken(data.token);
             }
 
             // Navigate to main app on success
             router.replace('/(tabs)');
-        } catch (error) {
-            console.error('Login error:', error);
-            setErrorMessage('Network error. Please check your connection.');
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Network error. Please check your connection.';
+            setErrorMessage(errorMessage);
         } finally {
             setIsLoading(false);
         }

@@ -4,8 +4,7 @@ import 'react-native-get-random-values';
 import { Keypair, Transaction } from '@solana/web3.js';
 import * as SecureStore from 'expo-secure-store';
 import bs58 from 'bs58';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { api } from './api';
 
 // Simple XOR encryption helper (temporary for beta - replace with AES-256 in production)
 const simpleEncrypt = (text: string, pin: string): string => {
@@ -96,48 +95,21 @@ export const createWallet = async (authToken: string, userPin: string): Promise<
         await SecureStore.setItemAsync('wallet_pin_hash', btoa(userPin)); // Store hashed PIN for verification
 
         // 4. Link public key to user account on backend
-        const response = await fetch(`${API_URL}/wallet/link`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({ publicKey }),
-        });
-
-        const json = await response.json();
-
-        if (!response.ok) {
-            // Rollback local storage on failure
-            await SecureStore.deleteItemAsync('wallet_secret');
-            await SecureStore.deleteItemAsync('wallet_pubkey');
-            await SecureStore.deleteItemAsync('wallet_pin_hash');
-            return { success: false, error: json.error || 'Failed to link wallet' };
-        }
-
+        await api.post('/wallet/link', { publicKey });
         return { success: true, publicKey };
-    } catch (error: any) {
-        return { success: false, error: error.message || 'Failed to create wallet' };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to create wallet';
+        return { success: false, error: errorMessage };
     }
 };
 
 /**
  * Fetch wallet balances from backend (SOL + SPL tokens with USD prices)
  */
-export const fetchBalances = async (authToken: string): Promise<PortfolioData | null> => {
+export const fetchBalances = async (_authToken: string): Promise<PortfolioData | null> => {
     try {
-        const response = await fetch(`${API_URL}/wallet/balances`, {
-            headers: {
-                Authorization: `Bearer ${authToken}`,
-            },
-        });
-
-        if (!response.ok) {
-            return null;
-        }
-
-        return await response.json();
-    } catch (error) {
+        return await api.get<PortfolioData>('/wallet/balances');
+    } catch {
         return null;
     }
 };
@@ -180,6 +152,68 @@ export const clearWalletData = async (): Promise<void> => {
     await SecureStore.deleteItemAsync('wallet_secret');
     await SecureStore.deleteItemAsync('wallet_pubkey');
     await SecureStore.deleteItemAsync('wallet_pin_hash');
+    // Also clear cached PIN for auto-execute
+    await SecureStore.deleteItemAsync('cached_pin');
+    await SecureStore.deleteItemAsync('cached_pin_expiry');
+};
+
+// PIN cache expiry time (24 hours in milliseconds)
+const PIN_CACHE_EXPIRY = 24 * 60 * 60 * 1000;
+
+/**
+ * Cache PIN for auto-execute functionality
+ * Stores PIN with expiry timestamp
+ */
+export const cachePinForAutoExecute = async (pin: string): Promise<boolean> => {
+    try {
+        const expiry = Date.now() + PIN_CACHE_EXPIRY;
+        await SecureStore.setItemAsync('cached_pin', pin);
+        await SecureStore.setItemAsync('cached_pin_expiry', expiry.toString());
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+/**
+ * Get cached PIN if not expired
+ * Returns null if no PIN or expired
+ */
+export const getCachedPin = async (): Promise<string | null> => {
+    try {
+        const pin = await SecureStore.getItemAsync('cached_pin');
+        const expiryStr = await SecureStore.getItemAsync('cached_pin_expiry');
+        
+        if (!pin || !expiryStr) return null;
+        
+        const expiry = parseInt(expiryStr, 10);
+        if (Date.now() > expiry) {
+            // PIN expired, clear it
+            await SecureStore.deleteItemAsync('cached_pin');
+            await SecureStore.deleteItemAsync('cached_pin_expiry');
+            return null;
+        }
+        
+        return pin;
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * Clear cached PIN (disable auto-execute)
+ */
+export const clearCachedPin = async (): Promise<void> => {
+    await SecureStore.deleteItemAsync('cached_pin');
+    await SecureStore.deleteItemAsync('cached_pin_expiry');
+};
+
+/**
+ * Check if auto-execute is enabled (cached PIN exists and not expired)
+ */
+export const isAutoExecuteEnabled = async (): Promise<boolean> => {
+    const pin = await getCachedPin();
+    return !!pin;
 };
 
 /**
@@ -187,7 +221,7 @@ export const clearWalletData = async (): Promise<void> => {
  * Encrypts with PIN and links to backend
  */
 export const importWallet = async (
-    authToken: string,
+    _authToken: string,
     privateKeyBase58: string,
     userPin: string
 ): Promise<{ success: boolean; publicKey?: string; secretKey?: Uint8Array; error?: string }> => {
@@ -207,29 +241,17 @@ export const importWallet = async (
         await SecureStore.setItemAsync('wallet_pubkey', publicKey);
         await SecureStore.setItemAsync('wallet_pin_hash', btoa(userPin));
 
-        // 5. Link public key to user account on backend
-        const response = await fetch(`${API_URL}/wallet/link`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({ publicKey }),
-        });
-
-        const json = await response.json();
-
-        if (!response.ok) {
-            // Rollback local storage on failure
-            await SecureStore.deleteItemAsync('wallet_secret');
-            await SecureStore.deleteItemAsync('wallet_pubkey');
-            await SecureStore.deleteItemAsync('wallet_pin_hash');
-            return { success: false, error: json.error || 'Failed to link wallet' };
-        }
+        // 5. Link public key to user account on backend (uses centralized api client)
+        await api.post('/wallet/link', { publicKey });
 
         return { success: true, publicKey, secretKey };
-    } catch (error: any) {
-        return { success: false, error: error.message || 'Invalid private key format' };
+    } catch (error: unknown) {
+        // Rollback local storage on failure
+        await SecureStore.deleteItemAsync('wallet_secret');
+        await SecureStore.deleteItemAsync('wallet_pubkey');
+        await SecureStore.deleteItemAsync('wallet_pin_hash');
+        const errorMessage = error instanceof Error ? error.message : 'Invalid private key format';
+        return { success: false, error: errorMessage };
     }
 };
 
@@ -244,9 +266,10 @@ const retryWithBackoff = async <T>(
     for (let i = 0; i < maxRetries; i++) {
         try {
             return await fn();
-        } catch (error: any) {
+        } catch (error: unknown) {
             // Don't retry on validation/auth errors
-            if (error.status === 400 || error.status === 401) throw error;
+            const err = error as { status?: number };
+            if (err.status === 400 || err.status === 401) throw error;
             if (i === maxRetries - 1) throw error;
             await new Promise(resolve => setTimeout(resolve, baseDelay * Math.pow(2, i)));
         }
@@ -258,53 +281,31 @@ const retryWithBackoff = async <T>(
  * Send SOL transaction - prepares on backend, signs locally, broadcasts
  */
 export const sendTransaction = async (
-    authToken: string,
+    _authToken: string,
     toAddress: string,
     amount: number,
     pin: string,
     token: string = 'SOL'
 ): Promise<{ success: boolean; signature?: string; explorerUrl?: string; error?: string }> => {
     try {
-        // 1. Request unsigned transaction from backend (with retry for network/5xx issues only)
-        let prepareData: any;
+        // 1. Request unsigned transaction from backend (uses centralized api client with retry)
+        let prepareData: { transaction: string };
 
         try {
-            const result = await retryWithBackoff(async () => {
-                const response = await fetch(`${API_URL}/transactions/prepare-send`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${authToken}`,
-                    },
-                    body: JSON.stringify({ toAddress, amount, token }),
+            prepareData = await retryWithBackoff(async () => {
+                return await api.post<{ transaction: string }>('/transactions/prepare-send', {
+                    toAddress,
+                    amount,
+                    token,
                 });
-                const data = await response.json();
-
-                // For 4xx errors, return data without throwing (no retry needed)
-                if (response.status >= 400 && response.status < 500) {
-                    return { success: false, data, status: response.status };
-                }
-                // For 5xx errors, throw to trigger retry
-                if (!response.ok) {
-                    const error: any = new Error(data.error || 'Server error');
-                    error.status = response.status;
-                    throw error;
-                }
-                return { success: true, data };
             });
-
-            if (!result.success) {
-                // 4xx error - return specific message without retry
-                const errorMsg = result.data?.error || 'Failed to prepare transaction';
-                if (errorMsg.includes('insufficient') || errorMsg.includes('balance')) {
-                    return { success: false, error: 'Insufficient SOL. Need ~0.00001 SOL for fees.' };
-                }
-                return { success: false, error: errorMsg };
+        } catch (error: any) {
+            // Handle specific error messages from api client
+            const errorMsg = error.message || 'Failed to prepare transaction';
+            if (errorMsg.includes('insufficient') || errorMsg.includes('balance')) {
+                return { success: false, error: 'Insufficient SOL. Need ~0.00001 SOL for fees.' };
             }
-            prepareData = result.data;
-        } catch (retryError: any) {
-            // All retries exhausted for 5xx errors
-            return { success: false, error: retryError.message || 'Failed to prepare transaction' };
+            return { success: false, error: errorMsg };
         }
 
         // 2. Get encrypted private key and decrypt with PIN
@@ -336,38 +337,26 @@ export const sendTransaction = async (
         for (let i = 0; i < secretKeyRef.length; i++) {
             secretKeyRef[i] = 0;
         }
-        // @ts-ignore - intentionally nullifying after use
-        keypair = null;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        keypair = null as unknown as Keypair;
 
-        // 6. Broadcast signed transaction (with retry for RPC issues)
-        const { broadcastResponse, broadcastData } = await retryWithBackoff(async () => {
-            const response = await fetch(`${API_URL}/transactions/broadcast`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${authToken}`,
-                },
-                body: JSON.stringify({
+        // 6. Broadcast signed transaction (uses centralized api client with retry)
+        let broadcastData: { signature: string; explorerUrl: string };
+        
+        try {
+            broadcastData = await retryWithBackoff(async () => {
+                return await api.post<{ signature: string; explorerUrl: string }>('/transactions/broadcast', {
                     signedTransaction: signedTx,
                     txData: { toAddress, amount, token },
-                }),
+                });
             });
-            const data = await response.json();
-            // Throw on error to trigger retry, but not for validation errors
-            if (!response.ok && response.status >= 500) {
-                const error: any = new Error(data.error || 'Failed to broadcast transaction');
-                error.status = response.status;
-                throw error;
-            }
-            return { broadcastResponse: response, broadcastData: data };
-        });
-
-        if (!broadcastResponse.ok) {
+        } catch (error: any) {
             // Specific error messages for common issues
-            if (broadcastData.error?.includes('insufficient')) {
+            const errorMsg = error.message || '';
+            if (errorMsg.includes('insufficient')) {
                 return { success: false, error: 'Not enough SOL for transaction + fees' };
             }
-            return { success: false, error: broadcastData.error || 'Transaction rejected by network' };
+            return { success: false, error: errorMsg || 'Transaction rejected by network' };
         }
 
         return {
@@ -387,21 +376,11 @@ export const sendTransaction = async (
 /**
  * Fetch transaction history from backend
  */
-export const fetchTransactionHistory = async (authToken: string): Promise<TransactionRecord[]> => {
+export const fetchTransactionHistory = async (_authToken: string): Promise<TransactionRecord[]> => {
     try {
-        const response = await fetch(`${API_URL}/transactions/history`, {
-            headers: {
-                Authorization: `Bearer ${authToken}`,
-            },
-        });
-
-        if (!response.ok) {
-            return [];
-        }
-
-        const data = await response.json();
+        const data = await api.get<{ transactions: TransactionRecord[] }>('/transactions/history');
         return data.transactions || [];
-    } catch (error) {
+    } catch {
         return [];
     }
 };

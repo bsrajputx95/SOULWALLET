@@ -1,25 +1,6 @@
-# Dependencies
 node_modules/
-
-# Build output
 dist/
-
-# Environment files
 .env
-
-# IDE
-.idea/
-.vscode/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Logs
+.env.local
 *.log
-npm-debug.log*
-
-# Prisma
-prisma/migrations/
-*.db
-*.db-journal
+.DS_Store
