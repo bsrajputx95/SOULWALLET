@@ -60,8 +60,8 @@ model Transaction {
   type          String   // "send" or "receive"
   amount        Float
   token         String   // "SOL", "USDC", etc.
-  fromAddress   String
-  toAddress     String
+  fromAddress   String?
+  toAddress     String?
   fee           Float    @default(0.000005)
   status        String   @default("pending") // "pending", "confirmed", "failed"
   createdAt     DateTime @default(now())
