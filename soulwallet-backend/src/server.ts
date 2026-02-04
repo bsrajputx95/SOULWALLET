@@ -989,7 +989,7 @@ app.post('/copy-trade/execute/:queueId', authMiddleware, async (req: AuthRequest
         }
 
         const success = await markTradeExecuted(queueId, slOrderId, tpOrderId);
-        
+
         if (success) {
             res.json({ success: true, message: 'Trade marked as executed' });
         } else {
@@ -1005,7 +1005,7 @@ app.post('/copy-trade/execute/:queueId', authMiddleware, async (req: AuthRequest
 app.get('/copy-trade/positions', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const positions = await prisma.copyPosition.findMany({
-            where: { 
+            where: {
                 userId: req.userId!,
                 OR: [
                     { status: 'open' },
@@ -1058,7 +1058,7 @@ app.post('/copy-trade/close/:positionId', authMiddleware, async (req: AuthReques
 
         // Get cancel transactions for SL/TP orders
         const cancelTransactions: { orderId: string; transaction: string | null }[] = [];
-        
+
         if (position.slOrderId) {
             const cancelTx = await cancelLimitOrder(position.slOrderId);
             cancelTransactions.push({ orderId: position.slOrderId, transaction: cancelTx });
@@ -1070,7 +1070,7 @@ app.post('/copy-trade/close/:positionId', authMiddleware, async (req: AuthReques
 
         // Get decimals for the input token (the one being sold) from Jupiter token list
         const inputDecimals = await getTokenDecimals(position.inputMint);
-        
+
         // Calculate raw amount to sell (tokenAmount in smallest units)
         const sellAmountRaw = Math.floor(position.tokenAmount * Math.pow(10, inputDecimals));
 
@@ -1088,8 +1088,8 @@ app.post('/copy-trade/close/:positionId', authMiddleware, async (req: AuthReques
             return;
         }
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             message: 'Close transactions ready - sign and broadcast to complete close',
             cancelTransactions,
             sellTransaction: {
@@ -1129,14 +1129,14 @@ app.post('/copy-trade/confirm-close/:positionId', authMiddleware, async (req: Au
         // Update position status to closed
         await prisma.copyPosition.update({
             where: { id: positionId as string },
-            data: { 
+            data: {
                 status: 'closed',
                 closedAt: new Date()
             }
         });
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             message: 'Position closed',
             sellSignature
         });
@@ -1170,7 +1170,7 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
 
         // Cancel any pending queue items for this config
         await prisma.copyTradeQueue.updateMany({
-            where: { 
+            where: {
                 configId: config.id,
                 status: 'pending'
             },
@@ -1208,22 +1208,22 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
         // Verify webhook secret
         const authHeader = req.headers.authorization;
         const expectedSecret = process.env.HELIUS_AUTH_HEADER;
-        
+
         if (expectedSecret && authHeader !== expectedSecret) {
             console.warn('Invalid webhook authorization');
             return;
         }
 
         const payload = req.body;
-        
+
         // Process each transaction in the webhook
         const transactions = Array.isArray(payload) ? payload : [payload];
-        
+
         for (const tx of transactions) {
             // Check if it's a swap/transfer transaction
             // Helius event types: TRANSFER, SWAP, UNKNOWN
             const isRelevant = tx.type === 'SWAP' || tx.type === 'TRANSFER';
-            
+
             if (!isRelevant) continue;
 
             // Extract trader address (fee payer)
@@ -1232,7 +1232,7 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
 
             // Find users copying this trader
             const configs = await prisma.copyTradingConfig.findMany({
-                where: { 
+                where: {
                     traderAddress,
                     isActive: true
                 }
@@ -1256,7 +1256,7 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
             if (tokenTransfers.length >= 2) {
                 // Usually swap has 2+ transfers (token in, token out)
                 // Find the transfer from trader (input) and to trader (output)
-                
+
                 for (const transfer of tokenTransfers) {
                     if (transfer.fromUserAccount === traderAddress) {
                         // Selling this token
@@ -1298,7 +1298,7 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
             const stableMints = ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'];
             const isTraderSellingStable = stableMints.includes(inputMint) || inputMint === 'So11111111111111111111111111111111111111112';
             const isTraderBuyingStable = stableMints.includes(outputMint) || outputMint === 'So11111111111111111111111111111111111111112';
-            
+
             // Default: if trader is spending stable/SOL, they're buying tokens (BUY)
             // If trader is receiving stable/SOL, they're selling tokens (SELL)
             let swapType: 'buy' | 'sell' = 'buy';
@@ -1320,24 +1320,24 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
                     outputAmount,
                     timestamp: new Date(tx.timestamp * 1000)
                 }
-            }).catch(() => {}); // Ignore duplicates
+            }).catch(() => { }); // Ignore duplicates
 
             // Only queue copy trades for BUYs (when trader buys, we copy the buy)
             if (swapType === 'buy') {
                 // Calculate price ratio from trader's swap
                 // price = outputAmount / inputAmount (what trader spent / what trader received)
                 const priceRatio = inputAmount > 0 ? inputAmount / outputAmount : 0;
-                
+
                 for (const config of configs) {
                     // Cap the spend to user's perTradeAmount
                     const cappedOutputAmount = Math.min(config.perTradeAmount, inputAmount);
-                    
+
                     // Calculate proportional input amount based on price ratio
                     // If priceRatio is 0, fall back to using perTradeAmount directly
-                    const proportionalInputAmount = priceRatio > 0 
-                        ? cappedOutputAmount / priceRatio 
+                    const proportionalInputAmount = priceRatio > 0
+                        ? cappedOutputAmount / priceRatio
                         : outputAmount * (cappedOutputAmount / inputAmount);
-                    
+
                     await queueCopyTrade({
                         userId: config.userId,
                         configId: config.id,
@@ -1356,14 +1356,6 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
     } catch (error) {
         console.error('Webhook processing error:', error);
     }
-});
-
-// GET /health (Unauthenticated - for Railway monitoring)
-app.get('/health', (_req: Request, res: Response): void => {
-    res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-    });
 });
 
 // 404 Handler - Catch-all for undefined endpoints
