@@ -1466,50 +1466,61 @@ function shouldRefreshTrending(): boolean {
     return lastUpdateUTC < todayAt15UTC;
 }
 
-// Fetch trending tokens from DexScreener (FREE public API - Solana only, sorted by 24h price change)
+// Fetch trending tokens from DexScreener (FREE public API - Solana only, sorted by boosts/trending)
 async function fetchTrendingTokens(): Promise<any[]> {
     try {
-        console.log('[Trending] Fetching from DexScreener FREE public API...');
+        console.log('[Trending] Fetching from DexScreener token-boosts API...');
 
-        // DexScreener FREE search - get Solana pairs sorted by price change
-        const response = await axios.get('https://api.dexscreener.com/latest/dex/search', {
-            params: { q: 'sol' },
+        // DexScreener token-boosts API - returns trending/boosted tokens
+        const response = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
             timeout: 10000
         });
 
-        const pairs = response.data?.pairs || [];
+        const tokens = response.data || [];
         
-        // Filter for Solana chain, remove duplicates, sort by 24h price change (trending)
-        const seenTokens = new Set();
-        const solanaPairs = pairs
-            .filter((p: any) => p.chainId === 'solana')
-            .filter((p: any) => {
-                const addr = p.baseToken?.address;
-                if (!addr || seenTokens.has(addr)) return false;
-                seenTokens.add(addr);
-                return true;
-            })
-            .sort((a: any, b: any) => Math.abs(b.priceChange?.h24 || 0) - Math.abs(a.priceChange?.h24 || 0)) // Sort by biggest price moves
-            .slice(0, 10); // Top 10 trending
+        // Filter for Solana chain only, take top 10
+        const solanaTokens = tokens
+            .filter((t: any) => t.chainId === 'solana')
+            .slice(0, 10);
         
-        if (solanaPairs.length === 0) {
+        if (solanaTokens.length === 0) {
             console.log('[Trending] No Solana tokens returned, using fallback data');
             return trendingTokensCache.length > 0 ? trendingTokensCache : getFallbackTokens();
         }
 
+        // Fetch detailed pair data for each token
+        const tokenAddresses = solanaTokens.map((t: any) => t.tokenAddress).join(',');
+        const pairsResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddresses}`, {
+            timeout: 10000
+        });
+        
+        const pairsData = pairsResponse.data?.pairs || [];
+        
+        // Create a map of token address to best pair data
+        const tokenPairMap = new Map();
+        for (const pair of pairsData) {
+            const addr = pair.baseToken?.address;
+            if (addr && (!tokenPairMap.has(addr) || (pair.liquidity?.usd || 0) > (tokenPairMap.get(addr).liquidity?.usd || 0))) {
+                tokenPairMap.set(addr, pair);
+            }
+        }
+
         // Transform to frontend format
-        const transformedTokens = solanaPairs.map((pair: any) => ({
-            address: pair.baseToken?.address,
-            symbol: pair.baseToken?.symbol,
-            name: pair.baseToken?.name,
-            price: parseFloat(pair.priceUsd) || 0,
-            priceChange24h: pair.priceChange?.h24 || 0,
-            volume24h: pair.volume?.h24 || 0,
-            marketCap: pair.marketCap || pair.fdv || 0,
-            liquidity: pair.liquidity?.usd || 0,
-            logo: pair.info?.imageUrl,
-            banner: pair.info?.header
-        }));
+        const transformedTokens = solanaTokens.map((token: any) => {
+            const pair = tokenPairMap.get(token.tokenAddress);
+            return {
+                address: token.tokenAddress,
+                symbol: pair?.baseToken?.symbol || token.tokenAddress.slice(0, 6),
+                name: pair?.baseToken?.name || 'Unknown',
+                price: parseFloat(pair?.priceUsd) || 0,
+                priceChange24h: pair?.priceChange?.h24 || 0,
+                volume24h: pair?.volume?.h24 || 0,
+                marketCap: pair?.marketCap || pair?.fdv || 0,
+                liquidity: pair?.liquidity?.usd || 0,
+                logo: token.icon || pair?.info?.imageUrl,
+                banner: pair?.info?.header
+            };
+        });
 
         console.log('[Trending] Tokens:', transformedTokens.map((t: any) => t.symbol).join(', '));
         return transformedTokens;
@@ -1546,41 +1557,62 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
             return;
         }
 
-        // Fetch from DexScreener FREE public API - Solana pairs sorted by volume
-        const response = await axios.get('https://api.dexscreener.com/latest/dex/search', {
-            params: { q: 'sol' },
+        // Fetch from DexScreener token-boosts API - returns trending/boosted tokens
+        const response = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
             timeout: 10000
         });
 
-        const pairs = response.data?.pairs || [];
+        const tokens = response.data || [];
         
-        // Filter for Solana chain only, remove duplicates, sort by 24h volume
-        const seenTokens = new Set();
-        const solanaPairs = pairs
-            .filter((p: any) => p.chainId === 'solana')
-            .filter((p: any) => {
-                // Dedupe by token address
-                const addr = p.baseToken?.address;
-                if (!addr || seenTokens.has(addr)) return false;
-                seenTokens.add(addr);
-                return true;
-            })
-            .sort((a: any, b: any) => (b.volume?.h24 || 0) - (a.volume?.h24 || 0))
-            .slice(0, 50); // Top 50
+        // Filter for Solana chain only, take top 50
+        const solanaTokens = tokens
+            .filter((t: any) => t.chainId === 'solana')
+            .slice(0, 50);
         
+        if (solanaTokens.length === 0) {
+            // Return stale cache if available
+            const stale = tokenCache.get('top_tokens');
+            if (stale) {
+                res.json({ success: true, tokens: stale, cached: true, stale: true });
+                return;
+            }
+            res.status(500).json({ error: 'No tokens available' });
+            return;
+        }
+
+        // Fetch detailed pair data for each token (batch request)
+        const tokenAddresses = solanaTokens.map((t: any) => t.tokenAddress).join(',');
+        const pairsResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddresses}`, {
+            timeout: 15000
+        });
+        
+        const pairsData = pairsResponse.data?.pairs || [];
+        
+        // Create a map of token address to best pair data (highest liquidity)
+        const tokenPairMap = new Map();
+        for (const pair of pairsData) {
+            const addr = pair.baseToken?.address;
+            if (addr && (!tokenPairMap.has(addr) || (pair.liquidity?.usd || 0) > (tokenPairMap.get(addr).liquidity?.usd || 0))) {
+                tokenPairMap.set(addr, pair);
+            }
+        }
+
         // Transform to frontend format
-        const transformedTokens = solanaPairs.map((pair: any) => ({
-            address: pair.baseToken?.address,
-            symbol: pair.baseToken?.symbol,
-            name: pair.baseToken?.name,
-            price: parseFloat(pair.priceUsd) || 0,
-            priceChange24h: pair.priceChange?.h24 || 0,
-            volume24h: pair.volume?.h24 || 0,
-            marketCap: pair.marketCap || pair.fdv || 0,
-            liquidity: pair.liquidity?.usd || 0,
-            logo: pair.info?.imageUrl,
-            banner: pair.info?.header
-        }));
+        const transformedTokens = solanaTokens.map((token: any) => {
+            const pair = tokenPairMap.get(token.tokenAddress);
+            return {
+                address: token.tokenAddress,
+                symbol: pair?.baseToken?.symbol || token.tokenAddress.slice(0, 6),
+                name: pair?.baseToken?.name || 'Unknown',
+                price: parseFloat(pair?.priceUsd) || 0,
+                priceChange24h: pair?.priceChange?.h24 || 0,
+                volume24h: pair?.volume?.h24 || 0,
+                marketCap: pair?.marketCap || pair?.fdv || 0,
+                liquidity: pair?.liquidity?.usd || 0,
+                logo: token.icon || pair?.info?.imageUrl,
+                banner: pair?.info?.header
+            };
+        });
 
         // Cache the results
         tokenCache.set('top_tokens', transformedTokens);
