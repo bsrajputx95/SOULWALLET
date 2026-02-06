@@ -1466,43 +1466,50 @@ function shouldRefreshTrending(): boolean {
     return lastUpdateUTC < todayAt15UTC;
 }
 
-// Fetch trending tokens from CoinGecko (FREE public API - no API key needed)
+// Fetch trending tokens from DexScreener (FREE public API - Solana only, sorted by 24h price change)
 async function fetchTrendingTokens(): Promise<any[]> {
     try {
-        console.log('[Trending] Fetching from CoinGecko FREE public API...');
+        console.log('[Trending] Fetching from DexScreener FREE public API...');
 
-        // CoinGecko FREE trending endpoint - no API key required
-        const response = await axios.get('https://api.coingecko.com/api/v3/search/trending', {
+        // DexScreener FREE search - get Solana pairs sorted by price change
+        const response = await axios.get('https://api.dexscreener.com/latest/dex/search', {
+            params: { q: 'sol' },
             timeout: 10000
         });
 
-        const coins = response.data?.coins || [];
-        console.log(`[Trending] Got ${coins.length} trending coins from CoinGecko`);
+        const pairs = response.data?.pairs || [];
         
-        if (coins.length === 0) {
-            console.log('[Trending] No coins returned, using fallback data');
+        // Filter for Solana chain, remove duplicates, sort by 24h price change (trending)
+        const seenTokens = new Set();
+        const solanaPairs = pairs
+            .filter((p: any) => p.chainId === 'solana')
+            .filter((p: any) => {
+                const addr = p.baseToken?.address;
+                if (!addr || seenTokens.has(addr)) return false;
+                seenTokens.add(addr);
+                return true;
+            })
+            .sort((a: any, b: any) => Math.abs(b.priceChange?.h24 || 0) - Math.abs(a.priceChange?.h24 || 0)) // Sort by biggest price moves
+            .slice(0, 10); // Top 10 trending
+        
+        if (solanaPairs.length === 0) {
+            console.log('[Trending] No Solana tokens returned, using fallback data');
             return trendingTokensCache.length > 0 ? trendingTokensCache : getFallbackTokens();
         }
 
-        // Take top 10 trending
-        const topCoins = coins.slice(0, 10);
-        
         // Transform to frontend format
-        const transformedTokens = topCoins.map((coin: any) => {
-            const item = coin.item;
-            return {
-                address: item.id, // CoinGecko uses id instead of contract address
-                symbol: item.symbol,
-                name: item.name,
-                price: item.data?.price || 0,
-                priceChange24h: item.data?.price_change_percentage_24h?.usd || 0,
-                volume24h: parseFloat(item.data?.total_volume?.replace(/[^0-9.]/g, '')) * 1000000 || 0, // Approximate from string like "$117M"
-                marketCap: parseFloat(item.data?.market_cap?.replace(/[^0-9.]/g, '')) * 1000000 || 0,
-                liquidity: 0, // Not provided by trending endpoint
-                logo: item.large || item.small || item.thumb,
-                banner: undefined
-            };
-        });
+        const transformedTokens = solanaPairs.map((pair: any) => ({
+            address: pair.baseToken?.address,
+            symbol: pair.baseToken?.symbol,
+            name: pair.baseToken?.name,
+            price: parseFloat(pair.priceUsd) || 0,
+            priceChange24h: pair.priceChange?.h24 || 0,
+            volume24h: pair.volume?.h24 || 0,
+            marketCap: pair.marketCap || pair.fdv || 0,
+            liquidity: pair.liquidity?.usd || 0,
+            logo: pair.info?.imageUrl,
+            banner: pair.info?.header
+        }));
 
         console.log('[Trending] Tokens:', transformedTokens.map((t: any) => t.symbol).join(', '));
         return transformedTokens;
@@ -1529,7 +1536,7 @@ function getFallbackTokens(): any[] {
     ];
 }
 
-// GET /market/tokens - Get top tokens from CoinGecko FREE public API with caching
+// GET /market/tokens - Get top SOLANA DEX tokens from DexScreener FREE public API with caching
 app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
     try {
         // Check cache first
@@ -1539,32 +1546,40 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
             return;
         }
 
-        // Fetch from CoinGecko FREE public API - no API key needed
-        const response = await axios.get('https://api.coingecko.com/api/v3/coins/markets', {
-            params: {
-                vs_currency: 'usd',
-                order: 'market_cap_desc',
-                per_page: 50,
-                page: 1,
-                sparkline: false
-            },
+        // Fetch from DexScreener FREE public API - Solana pairs sorted by volume
+        const response = await axios.get('https://api.dexscreener.com/latest/dex/search', {
+            params: { q: 'sol' },
             timeout: 10000
         });
 
-        const tokens = response.data || [];
+        const pairs = response.data?.pairs || [];
+        
+        // Filter for Solana chain only, remove duplicates, sort by 24h volume
+        const seenTokens = new Set();
+        const solanaPairs = pairs
+            .filter((p: any) => p.chainId === 'solana')
+            .filter((p: any) => {
+                // Dedupe by token address
+                const addr = p.baseToken?.address;
+                if (!addr || seenTokens.has(addr)) return false;
+                seenTokens.add(addr);
+                return true;
+            })
+            .sort((a: any, b: any) => (b.volume?.h24 || 0) - (a.volume?.h24 || 0))
+            .slice(0, 50); // Top 50
         
         // Transform to frontend format
-        const transformedTokens = tokens.map((token: any) => ({
-            address: token.id, // CoinGecko uses id
-            symbol: token.symbol.toUpperCase(),
-            name: token.name,
-            price: token.current_price || 0,
-            priceChange24h: token.price_change_percentage_24h || 0,
-            volume24h: token.total_volume || 0,
-            marketCap: token.market_cap || 0,
-            liquidity: 0, // Not directly provided
-            logo: token.image,
-            banner: undefined
+        const transformedTokens = solanaPairs.map((pair: any) => ({
+            address: pair.baseToken?.address,
+            symbol: pair.baseToken?.symbol,
+            name: pair.baseToken?.name,
+            price: parseFloat(pair.priceUsd) || 0,
+            priceChange24h: pair.priceChange?.h24 || 0,
+            volume24h: pair.volume?.h24 || 0,
+            marketCap: pair.marketCap || pair.fdv || 0,
+            liquidity: pair.liquidity?.usd || 0,
+            logo: pair.info?.imageUrl,
+            banner: pair.info?.header
         }));
 
         // Cache the results
