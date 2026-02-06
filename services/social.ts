@@ -1,0 +1,216 @@
+import { api } from './api';
+
+export interface Post {
+  id: string;
+  userId: string;
+  content: string;
+  visibility: string;
+  tokenAddress?: string;
+  tokenSymbol?: string;
+  tokenName?: string;
+  likesCount: number;
+  commentsCount: number;
+  createdAt: string;
+  user: {
+    username: string;
+    profileImage?: string;
+  };
+  isLiked?: boolean;
+}
+
+export interface Comment {
+  id: string;
+  postId: string;
+  userId: string;
+  content: string;
+  createdAt: string;
+  user: {
+    username: string;
+    profileImage?: string;
+  };
+}
+
+export interface UserProfile {
+  id: string;
+  username: string;
+  profileImage?: string;
+  walletAddress?: string;
+  followers: number;
+  following: number;
+  postsCount: number;
+  copyTraderCount: number;
+  isFollowing: boolean;
+  isCopying: boolean;
+  roi30d: number;
+  winRate: number;
+  maxDrawdown?: number;
+  followersEquity?: number;
+}
+
+export const createPost = async (
+  content: string,
+  visibility: string = 'public',
+  tokenAddress?: string
+): Promise<{ success: boolean; post?: Post; error?: string }> => {
+  try {
+    const response = await api.post<{ success: boolean; post: Post }>('/posts', {
+      content,
+      visibility,
+      tokenAddress
+    });
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const fetchMe = async (): Promise<{ success: boolean; user?: { id: string; username: string; email: string; profileImage?: string }; error?: string }> => {
+  try {
+    const response = await api.get<{ success: boolean; user: { id: string; username: string; email: string; profileImage?: string } }>('/me');
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const fetchFeed = async (
+  cursor?: string,
+  mode?: string
+): Promise<{ success: boolean; posts?: Post[]; nextCursor?: string | null; error?: string }> => {
+  try {
+    let url = `/feed?limit=20`;
+    if (cursor) url += `&cursor=${cursor}`;
+    if (mode) url += `&mode=${mode}`;
+    const response = await api.get<{ success: boolean; posts: Post[]; nextCursor?: string | null }>(url);
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const fetchPost = async (
+  postId: string
+): Promise<{ success: boolean; post?: Post & { comments: Comment[] }; error?: string }> => {
+  try {
+    const response = await api.get<{ success: boolean; post: Post & { comments: Comment[] } }>(`/posts/${postId}`);
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const deletePost = async (
+  postId: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const response = await api.delete<{ success: boolean }>(`/posts/${postId}`);
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const toggleLike = async (
+  postId: string
+): Promise<{ success: boolean; liked?: boolean; error?: string }> => {
+  try {
+    const response = await api.post<{ success: boolean; liked: boolean }>(`/posts/${postId}/like`, {});
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const addComment = async (
+  postId: string,
+  content: string
+): Promise<{ success: boolean; comment?: Comment; error?: string }> => {
+  try {
+    const response = await api.post<{ success: boolean; comment: Comment }>(`/posts/${postId}/comment`, {
+      content
+    });
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const fetchUserProfile = async (
+  username: string
+): Promise<{ success: boolean; user?: UserProfile; error?: string }> => {
+  try {
+    const response = await api.get<{ success: boolean; user: UserProfile }>(`/users/${username}`);
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const fetchUserPosts = async (
+  username: string,
+  visibility?: 'public' | 'followers' | 'vip'
+): Promise<{ success: boolean; posts?: Post[]; error?: string }> => {
+  try {
+    const url = visibility 
+      ? `/users/${username}/posts?visibility=${visibility}`
+      : `/users/${username}/posts`;
+    const response = await api.get<{ success: boolean; posts: Post[] }>(url);
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const toggleFollow = async (
+  userId: string
+): Promise<{ success: boolean; following?: boolean; error?: string }> => {
+  try {
+    const response = await api.post<{ success: boolean; following: boolean }>(`/users/${userId}/follow`, {});
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export interface TrendingToken {
+  address: string;
+  symbol: string;
+  name: string;
+  price: number;
+  priceChange24h: number;
+  volume24h: number;
+  marketCap: number;
+  liquidity: number;
+  logo: string;
+  banner?: string;
+}
+
+export const fetchTrendingTokens = async (): Promise<{ success: boolean; tokens?: TrendingToken[]; lastUpdated?: string; error?: string }> => {
+  try {
+    const response = await api.get<{ success: boolean; tokens: TrendingToken[]; lastUpdated: string }>('/market/trending');
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const verifyToken = async (
+  address: string
+): Promise<{ valid: boolean; symbol?: string; price?: number }> => {
+  try {
+    const res = await fetch(`https://price.jup.ag/v6/price?ids=${address}`);
+    const data = await res.json();
+
+    if (data.data && data.data[address]) {
+      return {
+        valid: true,
+        symbol: data.data[address].mintSymbol,
+        price: data.data[address].price
+      };
+    }
+
+    return { valid: false };
+  } catch {
+    return { valid: false };
+  }
+};

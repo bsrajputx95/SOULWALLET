@@ -22,55 +22,69 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { SocialPost, NeonButton, TokenBagModal, CopyTradingModal, SocialPostSkeleton } from '@/components';
 import { useRouter } from 'expo-router';
-
-// Static dummy data for pure UI mode
-const DUMMY_USER = { username: 'demo_user', profileImage: null as string | null };
-const DUMMY_POSTS: { id: string; username: string; profileImage: string; content: string; timestamp: string; likes: number; comments: number; mentionedToken: string; isVerified: boolean; visibility: 'public' | 'vip' | 'followers' }[] = [
-  { id: '1', username: 'crypto_trader', profileImage: '', content: 'Just made a great trade on $SOL! 🚀', timestamp: '2h ago', likes: 42, comments: 5, mentionedToken: 'SOL', isVerified: true, visibility: 'public' },
-  { id: '2', username: 'defi_degen', profileImage: '', content: 'BONK looking bullish today! 🐕', timestamp: '4h ago', likes: 28, comments: 3, mentionedToken: 'BONK', isVerified: false, visibility: 'public' },
-];
-const DUMMY_FOLLOWED_USERS: string[] = [];
+import { fetchFeed, createPost, toggleLike, Post } from '@/services/social';
 
 type FeedTab = 'forYou' | 'following';
 
 export default function SosioScreen() {
   const router = useRouter();
 
-  // Static dummy data - pure UI mode (no hooks)
-  const user = DUMMY_USER;
-  const allPosts = DUMMY_POSTS;
-  const followedUsers = DUMMY_FOLLOWED_USERS;
+  // Real posts from API
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [followingList, setFollowingList] = useState<string[]>([]);
+  
+  // User state
+  const [user] = useState({ username: 'demo_user', profileImage: null as string | null });
 
   // Mock profile query - use local user data
   const profileQuery = { data: { profileImage: null }, isLoading: false };
 
-  // Mock iBuy mutation - coming soon
-  const ibuyMutation = {
-    mutateAsync: async (_params: any): Promise<{ swapTransaction: string }> => {
-      Alert.alert('🚧 Coming Soon', 'iBuy feature is not available yet.');
-      throw new Error('iBuy feature not available');
-    },
-    isPending: false,
+  // Remove unused variables
+  void user; void profileQuery;
+
+  // Load feed from API
+  useEffect(() => {
+    loadFeed();
+    loadFollowingList();
+  }, []);
+
+  // Reload feed when active tab changes
+  useEffect(() => {
+    loadFeed(true);
+  }, [activeTab]);
+
+  const loadFollowingList = async () => {
+    // TODO: Implement API endpoint to get following list
+    // For now, we'll extract from feed posts
   };
 
-  // Mock iBuy settings - uses default values
-  const ibuySettingsQuery = { data: { buyAmount: 10, slippage: 'medium' }, isLoading: false };
-
-  // Mock record purchase mutation
-  const recordPurchaseMutation = {
-    mutateAsync: async (_params: any) => {
-      throw new Error('Feature not available');
-    },
-    isPending: false,
+  const loadFeed = async (reset = false) => {
+    setLoading(true);
+    const mode = activeTab === 'following' ? 'following' : undefined;
+    const result = await fetchFeed(reset ? undefined : (nextCursor || undefined), mode);
+    if (result.success && result.posts) {
+      if (reset) {
+        setPosts(result.posts);
+      } else {
+        setPosts(prev => [...prev, ...result.posts]);
+      }
+      setNextCursor(result.nextCursor || null);
+    }
+    setLoading(false);
   };
 
-  // Static dummy data - pure UI mode (no hooks)
-  const executeSwap = async (_params: any) => { Alert.alert('🚧 Demo Mode', 'Swap simulated.'); return { success: true, signature: 'demo_sig_' + Date.now(), outputAmount: 0 }; };
-  const publicKey = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
-  const balance = 10.5;
-  const tokenBalances: any[] = [];
+  const loadMorePosts = async () => {
+    if (!nextCursor || loading) return;
+    const mode = activeTab === 'following' ? 'following' : undefined;
+    const result = await fetchFeed(nextCursor, mode);
+    if (result.success && result.posts && result.posts.length > 0) {
+      setPosts(prev => [...prev, ...result.posts]);
+      setNextCursor(result.nextCursor || null);
+    }
+  };
 
-  const [activeFeed, setActiveFeed] = useState<'all' | 'following' | 'vip' | 'forYou'>('forYou');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchBar, setShowSearchBar] = useState(false);
 
@@ -99,29 +113,22 @@ export default function SosioScreen() {
   // Calculate proper bottom padding: TabBar height (85px) + bottom safe area + extra spacing
   const bottomPadding = 85 + insets.bottom + 20;
 
-  // Filter posts based on active feed and search query
+  // Filter posts based on search query only (feed filtering is done server-side)
   const filteredPosts = React.useMemo(() => {
-    let filtered = allPosts;
-
-    // Filter by feed type
-    if (activeFeed === 'following') {
-      filtered = filtered.filter(post => followedUsers.includes(post.username));
-    } else if (activeFeed === 'vip') {
-      filtered = filtered.filter(post => post.visibility === 'vip');
-    }
+    let filtered = posts;
 
     // Filter by search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(post =>
         post.content.toLowerCase().includes(query) ||
-        post.username.toLowerCase().includes(query) ||
-        (post.mentionedToken && post.mentionedToken.toLowerCase().includes(query))
+        post.user.username.toLowerCase().includes(query) ||
+        (post.tokenSymbol && post.tokenSymbol.toLowerCase().includes(query))
       );
     }
 
     return filtered;
-  }, [allPosts, activeFeed, searchQuery, followedUsers]);
+  }, [posts, searchQuery]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<FeedTab>('forYou');
@@ -148,25 +155,11 @@ export default function SosioScreen() {
   const lastScrollY = useRef(0);
   const tabsHidden = useRef(false);
 
-  // Mock feed query - uses local posts from social store
-  const feedQuery = {
-    data: { posts: filteredPosts, nextCursor: null },
-    isLoading: false,
-    isFetching: false,
-    refetch: async () => ({}),
-  };
-
-
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    try {
-      await feedQuery.refetch();
-    } catch (e) {
-      if (__DEV__) console.error('Error refreshing feed:', e);
-    }
+    await loadFeed(true);
     setRefreshing(false);
-  }, [feedQuery, activeTab]);
+  }, []);
 
   // Removed auto-hide header behavior on scroll; only tabs hide/show smoothly
   const handleTabsScroll = Animated.event(
@@ -199,17 +192,6 @@ export default function SosioScreen() {
     }
   );
 
-  // Mock create post mutation - coming soon
-  const createPostMutation = {
-    mutateAsync: async (_params: any) => {
-      Alert.alert('🚧 Coming Soon', 'Creating posts is not available yet.');
-      throw new Error('Feature not available');
-    },
-    isPending: false,
-  };
-
-
-
   const handleCreatePost = async () => {
     if (!postContent.trim()) return;
 
@@ -219,40 +201,27 @@ export default function SosioScreen() {
       return;
     }
 
-    try {
-      // Map visibility to PostVisibility enum
-      const visibilityMap = {
-        'public': 'PUBLIC' as const,
-        'vip': 'VIP' as const,
-        'followers': 'FOLLOWERS' as const,
-      };
+    const result = await createPost(
+      postContent.trim(),
+      postVisibility,
+      mentionToken ? tokenAddress : undefined
+    );
 
-      await createPostMutation.mutateAsync({
-        content: postContent.trim(),
-        visibility: visibilityMap[postVisibility],
-        mentionedTokenName: mentionToken && tokenName ? tokenName : undefined,
-        mentionedTokenMint: mentionToken && tokenAddress ? tokenAddress : undefined,
-      });
-
-      setShowNewPostModal(false);
+    if (result.success) {
       setPostContent('');
       setMentionToken(false);
       setTokenName('');
       setTokenAddress('');
-    } catch {
-      // Could add an alert here
+      setShowNewPostModal(false);
+      await loadFeed();
+    } else {
+      Alert.alert('Error', result.error || 'Failed to create post');
     }
   };
 
   const handleTabChange = (tab: FeedTab) => {
     setActiveTab(tab);
-
-    // Map tabs to feed types
-    if (tab === 'forYou') {
-      setActiveFeed('forYou');
-    } else if (tab === 'following') {
-      setActiveFeed('following');
-    }
+    // Feed will be reloaded via useEffect when activeTab changes
   };
 
   return (
@@ -364,7 +333,7 @@ export default function SosioScreen() {
             paddingBottom: bottomPadding
           }
         ]}
-        data={feedQuery.data?.posts || filteredPosts}
+        data={filteredPosts}
         keyExtractor={(item: any) => item.id}
         ListHeaderComponent={
           // User Search Results - shown when searching
@@ -423,84 +392,45 @@ export default function SosioScreen() {
             formattedTimestamp = '';
           }
 
+          const handleLike = async () => {
+            const result = await toggleLike(post.id);
+            if (result.success) {
+              // Refresh the feed to get updated like status
+              loadFeed();
+            }
+          };
+
           return (
             <SocialPost
               key={post.id}
               id={post.id}
-              username={post.username || post.user?.username}
-              profileImage={post.profileImage || post.user?.profileImage}
+              username={post.user?.username}
+              profileImage={post.user?.profileImage}
               content={post.content}
-              images={post.images || []}
-              comments={post.comments || post._count?.comments || 0}
-              likes={post.likes || post._count?.likes || 0}
+              images={[]}
+              comments={post.commentsCount || 0}
+              likes={post.likesCount || 0}
+              isLiked={post.isLiked}
               timestamp={formattedTimestamp}
-              mentionedToken={post.mentionedToken || post.mentionedTokenName}
-              mentionedTokenMint={post.mentionedTokenMint}
-              walletAddress={post.walletAddress || post.user?.walletAddress}
-              isVerified={post.isVerified || post.user?.isVerified}
+              mentionedToken={post.tokenSymbol || post.tokenName}
+              mentionedTokenMint={post.tokenAddress}
+              walletAddress={undefined}
+              isVerified={false}
+              onLike={handleLike}
               onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
               onCopyPress={() => {
-                const walletAddr = post.walletAddress || post.user?.walletAddress;
-                if (walletAddr) {
-                  setSelectedTrader({
-                    username: post.username || post.user?.username,
-                    walletAddress: walletAddr,
-                    profileImage: post.profileImage || post.user?.profileImage,
-                  });
-                  setShowCopyTradingModal(true);
-                } else {
-                  router.push(`/profile/${post.username || post.user?.username}`);
-                }
+                router.push(`/profile/${post.user?.username}`);
               }}
               onBuyPress={async () => {
-                const tokenMint = post.mentionedTokenMint;
+                const tokenMint = post.tokenAddress;
                 if (!tokenMint) return;
-
-                if (!publicKey) {
-                  Alert.alert('Connect Wallet', 'Please connect your wallet to use iBuy.', [{ text: 'OK' }]);
-                  return;
-                }
-
-                const buyAmount = ibuySettingsQuery.data?.buyAmount || 10;
-
-                if ((balance || 0) < 0.01) {
-                  Alert.alert('Low SOL Balance', 'You need at least 0.01 SOL for transaction fees.', [{ text: 'OK' }]);
-                  return;
-                }
-
-                const usdcToken = tokenBalances?.find((t: { symbol: string }) => t.symbol === 'USDC');
-                const usdcBalance = usdcToken?.uiAmount || 0;
-                if (usdcBalance < buyAmount) {
-                  Alert.alert('Insufficient USDC', `Your USDC balance (${usdcBalance.toFixed(2)}) is less than your iBuy amount (${buyAmount} USDC).`, [{ text: 'OK' }]);
-                  return;
-                }
-
-                try {
-                  const res = await ibuyMutation.mutateAsync({ postId: post.id, tokenMint });
-                  const swapResult = await executeSwap(res.swapTransaction);
-                  if (swapResult?.signature) {
-                    await recordPurchaseMutation.mutateAsync({
-                      postId: post.id,
-                      tokenMint,
-                      tokenSymbol: post.mentionedToken || post.mentionedTokenName,
-                      tokenName: post.mentionedToken || post.mentionedTokenName,
-                      amountBought: swapResult.outputAmount || 0,
-                      priceInUsdc: buyAmount,
-                      transactionSig: swapResult.signature,
-                    });
-                    const amountText = swapResult.outputAmount ? ` (${swapResult.outputAmount.toFixed(4)} tokens)` : '';
-                    Alert.alert('iBuy Success', `Successfully bought ${post.mentionedToken || post.mentionedTokenName || 'token'}!${amountText}`);
-                  }
-                } catch (e: any) {
-                  if (__DEV__) console.error('iBuy error:', e);
-                  Alert.alert('iBuy Failed', e.message || 'Failed to complete purchase');
-                }
+                Alert.alert('Coming Soon', 'iBuy feature will be available soon.');
               }}
             />
           );
         }}
         ListEmptyComponent={
-          feedQuery.isLoading ? (
+          loading ? (
             <View style={styles.skeletonContainer}>
               <SocialPostSkeleton />
               <SocialPostSkeleton />
@@ -520,9 +450,9 @@ export default function SosioScreen() {
         }
         onEndReached={() => {
           // Infinite scroll - fetch more when reaching end
-          if (feedQuery.data?.nextCursor && !feedQuery.isFetching) {
-            // Note: Would need to implement fetchNextPage with useInfiniteQuery
-            if (__DEV__) console.log('[Sosio] Load more posts - cursor:', feedQuery.data.nextCursor);
+          if (nextCursor && !loading) {
+            if (__DEV__) console.log('[Sosio] Load more posts - nextCursor:', nextCursor);
+            loadMorePosts();
           }
         }}
         onEndReachedThreshold={0.5}

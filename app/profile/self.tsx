@@ -1,5 +1,4 @@
-import React from 'react';
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -20,28 +19,70 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, SocialPost } from '@/components';
-
-// Static dummy data for pure UI mode
-const DUMMY_USER = {
-  id: 'demo-user-id',
-  username: 'demo_user',
-  email: 'demo@example.com',
-  walletAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-};
+import { fetchUserProfile, fetchMe, fetchUserPosts, deletePost, Post } from '@/services/social';
+import * as SecureStore from 'expo-secure-store';
 
 export default function SelfProfileScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
-  // Static dummy data - pure UI mode (no hooks)
-  const user = DUMMY_USER;
-
+  // Real user data from API
+  const [user, setUser] = useState<any>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'public' | 'followers' | 'vip'>('public');
   const [showVipSetup, setShowVipSetup] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
   const [vipPrice, setVipPrice] = useState('');
   const [vipDuration, setVipDuration] = useState<'monthly' | 'lifetime'>('monthly');
+
+  // Load user profile on mount
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  // Reload posts when tab changes
+  useEffect(() => {
+    if (user?.username) {
+      loadPosts();
+    }
+  }, [activeTab, user?.username]);
+
+  const loadProfile = async () => {
+    try {
+      setLoading(true);
+      // Get current user's info from /me endpoint
+      const meResult = await fetchMe();
+      if (meResult.success && meResult.user) {
+        const username = meResult.user.username;
+        const result = await fetchUserProfile(username);
+        if (result.success) {
+          setUser(result.user);
+          // Initial posts load
+          await loadPosts(username);
+        }
+      }
+    } catch {
+      // Fallback to empty state
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadPosts = async (username?: string) => {
+    const targetUsername = username || user?.username;
+    if (!targetUsername) return;
+    
+    try {
+      const postsResult = await fetchUserPosts(targetUsername, activeTab);
+      if (postsResult.success && postsResult.posts) {
+        setPosts(postsResult.posts);
+      }
+    } catch {
+      // Keep existing posts on error
+    }
+  };
 
   // Responsive padding logic like Home screen
   const isSmallScreen = width < 375;
@@ -50,54 +91,27 @@ export default function SelfProfileScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Simulate refresh
-    setTimeout(() => setRefreshing(false), 1000);
+    await loadProfile();
+    setRefreshing(false);
   }, []);
-
-  // Mock profile data - using local user data
-  const profileQuery = {
-    data: {
-      id: user?.id || 'local-user',
-      profileImage: null,
-      stats: { followersCount: 0, followingCount: 0, copyTradersCount: 0, roi: 0, vipSubscribersCount: 0 },
-      tradingStats: { pnl24h: 0, winRate: 0, maxDrawdown: 0, followerEquity: 0 },
-    },
-    isLoading: false,
-    refetch: async () => ({}),
-  };
 
   // Use real data from API or fallback to defaults
   const stats = {
-    followers: profileQuery.data?.stats?.followersCount || 0,
-    following: profileQuery.data?.stats?.followingCount || 0,
-    copyTraders: profileQuery.data?.stats?.copyTradersCount || 0,
-    roi30d: profileQuery.data?.stats?.roi || 0,
-    vipSubs: profileQuery.data?.stats?.vipSubscribersCount || 0,
+    followers: user?.followers || 0,
+    following: user?.following || 0,
+    copyTraders: user?.copyTraderCount || 0,
+    roi30d: user?.roi30d || 0,
+    vipSubs: 0, // Not implemented yet
   };
 
   const tradingSummary = {
-    pnl24h: profileQuery.data?.tradingStats?.pnl24h || 0,
-    winRate: profileQuery.data?.tradingStats?.winRate || 0,
-    maxDrawdown: profileQuery.data?.tradingStats?.maxDrawdown || 0,
-    followerEquity: profileQuery.data?.tradingStats?.followerEquity || 0,
+    pnl24h: 0, // Not in API yet
+    winRate: user?.winRate || 0,
+    maxDrawdown: user?.maxDrawdown || 0,
+    followerEquity: user?.followersEquity || 0,
   };
 
-  // Mock user posts - using local social store
-  const userPostsQuery = {
-    data: { posts: [] as any[] },
-    isLoading: false,
-    refetch: async () => ({}),
-  };
-
-  // Mock delete post mutation - coming soon
-  const deletePostMutation = {
-    mutate: (_params: { postId: string }) => {
-      Alert.alert('🚧 Coming Soon', 'Post deletion is not available yet.');
-    },
-    isPending: false,
-  };
-
-  const handleDeletePost = (postId: string) => {
+  const handleDeletePost = async (postId: string) => {
     Alert.alert(
       'Delete Post',
       'Are you sure you want to delete this post?',
@@ -106,20 +120,27 @@ export default function SelfProfileScreen() {
         {
           text: 'Yes',
           style: 'destructive',
-          onPress: () => deletePostMutation.mutate({ postId }),
+          onPress: async () => {
+            const result = await deletePost(postId);
+            if (result.success) {
+              // Remove post from local state
+              setPosts(prev => prev.filter(p => p.id !== postId));
+            } else {
+              Alert.alert('Error', result.error || 'Failed to delete post');
+            }
+          },
         },
       ]
     );
   };
 
   // Filter posts by visibility tab
-  const allPosts = userPostsQuery.data?.posts || [];
   const getPostsForTab = (tab: 'public' | 'followers' | 'vip') => {
-    return allPosts.filter((post: any) => {
-      const visibility = (post.visibility || 'PUBLIC').toUpperCase();
-      if (tab === 'public') return visibility === 'PUBLIC';
-      if (tab === 'followers') return visibility === 'FOLLOWERS';
-      if (tab === 'vip') return visibility === 'VIP';
+    return posts.filter((post: Post) => {
+      const visibility = (post.visibility || 'public').toLowerCase();
+      if (tab === 'public') return visibility === 'public';
+      if (tab === 'followers') return visibility === 'followers';
+      if (tab === 'vip') return visibility === 'vip';
       return false;
     });
   };
@@ -127,7 +148,7 @@ export default function SelfProfileScreen() {
   const renderTabContent = () => {
     const visiblePosts = getPostsForTab(activeTab);
 
-    if (userPostsQuery.isLoading) {
+    if (loading) {
       return (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>Loading posts...</Text>
@@ -183,8 +204,8 @@ export default function SelfProfileScreen() {
     <SafeAreaView style={styles.container} edges={['top']} >
       <View style={[styles.header, { paddingHorizontal: responsivePadding }]}>
         <View style={styles.profileInfo}>
-          {profileQuery.data?.profileImage ? (
-            <Image source={{ uri: profileQuery.data.profileImage }} style={styles.avatar} />
+          {user?.profileImage ? (
+            <Image source={{ uri: user.profileImage }} style={styles.avatar} />
           ) : (
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>

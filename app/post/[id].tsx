@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -16,88 +16,106 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { MessageSquare, Repeat, Heart, Send, X, Share2 } from 'lucide-react-native';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard } from '@/components';
+import { fetchPost, toggleLike, addComment } from '@/services/social';
 
-// Static dummy post for pure UI mode
-const DUMMY_POST = {
-  id: '1',
-  username: 'crypto_trader',
-  profileImage: '',
-  content: 'Just made a great trade on $SOL! 🚀 The market is looking bullish today.',
-  timestamp: '2h ago',
-  likes: 42,
-  comments: 5,
-  reposts: 3,
-  mentionedToken: 'SOL',
-  isVerified: true,
-  createdAt: new Date().toISOString(),
-  agreeCount: 15,
-  disagreeCount: 3,
-  user: { username: 'crypto_trader', profileImage: '', isVerified: true },
-  commentsList: [] as any[],
-};
+// Post data interface
+interface PostData {
+  id: string;
+  content: string;
+  userId: string;
+  likesCount: number;
+  commentsCount: number;
+  createdAt: string;
+  isLiked?: boolean;
+  tokenSymbol?: string;
+  user: {
+    username: string;
+    profileImage?: string;
+  };
+  comments?: Array<{
+    id: string;
+    content: string;
+    createdAt: string;
+    user: {
+      username: string;
+      profileImage?: string;
+    };
+  }>;
+}
 
 
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const [post, setPost] = useState<PostData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [newComment, setNewComment] = useState('');
   const [sortMode, setSortMode] = useState<'new' | 'old' | 'liked'>('new');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Static dummy data - pure UI mode (no hooks)
-  const getPostById = (_id: string) => DUMMY_POST;
-  const toggleLike = (_postId: string) => { Alert.alert('🚧 Demo Mode', 'Like functionality is simulated.'); };
-  const isPostLiked = (_postId: string) => false;
-  const toggleRepost = (_postId: string) => { Alert.alert('🚧 Demo Mode', 'Repost functionality is simulated.'); };
-  const isPostReposted = (_postId: string) => false;
-  const voteOnPost = (_postId: string, _vote: string) => { Alert.alert('🚧 Demo Mode', 'Vote functionality is simulated.'); };
-  const getPostVote = (_postId: string) => null;
-  const addComment = async (_postId: string, _content: string) => {
-    Alert.alert('🚧 Demo Mode', 'Comment functionality is simulated.');
+  // Load post on mount
+  useEffect(() => {
+    loadPost();
+  }, [id]);
+
+  const loadPost = async () => {
+    if (!id) return;
+    setLoading(true);
+    const result = await fetchPost(id);
+    if (result.success && result.post) {
+      setPost(result.post as PostData);
+    }
+    setLoading(false);
   };
 
-  // Get post data from store - this stays in sync across screens
-  const post = id ? getPostById(id) : null;
+  // Get counts from post
+  const likeCount = post?.likesCount || 0;
+  const isLiked = post?.isLiked || false;
 
-  // Derive like/repost/vote state from store
-  const isLiked = id ? isPostLiked(id) : false;
-  const isReposted = id ? isPostReposted(id) : false;
-  const userVote = id ? getPostVote(id) : null;
-
-  // Get counts from post (store keeps these in sync)
-  const likeCount = post?.likes || 0;
-  const agreeCount = post?.agreeCount || 0;
-  const disagreeCount = post?.disagreeCount || 0;
-
-  // Handlers that call store methods
-  const handleLike = () => {
-    if (id) {
-      toggleLike(id);
+  // Handlers
+  const handleLike = async () => {
+    if (!id) return;
+    const result = await toggleLike(id);
+    if (result.success) {
+      await loadPost();
     }
   };
 
   const handleRepost = () => {
-    if (id) {
-      toggleRepost(id);
-      Alert.alert('Reposted!', 'Post shared to your followers.');
-    }
+    Alert.alert('Coming Soon', 'Repost functionality will be available soon.');
   };
 
-  const handleAddComment = () => {
+  const handleAddComment = async () => {
     if (!newComment.trim() || !id) return;
     setIsSubmitting(true);
-    addComment(id, newComment.trim());
-    setNewComment('');
+    const result = await addComment(id, newComment.trim());
+    if (result.success) {
+      setNewComment('');
+      await loadPost();
+    }
     setIsSubmitting(false);
   };
 
-  const handleVote = (choice: 'agree' | 'disagree') => {
-    if (userVote !== null) return;
-    if (!id) return;
-    voteOnPost(id, choice);
+  const handleVote = (_choice: 'agree' | 'disagree') => {
+    Alert.alert('Coming Soon', 'Voting functionality will be available soon.');
   };
 
+  // Format timestamp helper
+  const formatTimestamp = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
 
   const handleShare = async () => {
     if (!id) return;
@@ -149,15 +167,21 @@ export default function PostDetailScreen() {
 
 
   // Show loading fallback if no post data
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.solana} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!post) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen
-          options={{
-            headerShown: false,
-          }}
-        />
+        <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Post not found</Text>
         </View>
@@ -165,6 +189,10 @@ export default function PostDetailScreen() {
     );
   }
 
+  // Voting state (not yet implemented)
+  const agreeCount = 0;
+  const disagreeCount = 0;
+  const userVote = null;
   const totalVotes = Math.max(agreeCount + disagreeCount, 0.0001);
   const agreePercent = Math.round((agreeCount / totalVotes) * 100);
   const disagreePercent = 100 - agreePercent;
@@ -207,7 +235,7 @@ export default function PostDetailScreen() {
                     <X size={18} color={COLORS.textSecondary} />
                   </TouchableOpacity>
                 </View>
-                <Text style={styles.timestamp}>{post.timestamp}</Text>
+                <Text style={styles.timestamp}>{formatTimestamp(post.createdAt)}</Text>
               </View>
             </View>
           </View>
@@ -235,20 +263,14 @@ export default function PostDetailScreen() {
             <TouchableOpacity
               style={styles.action}
               onPress={handleRepost}
-              disabled={false}
             >
-              <Repeat
-                size={20}
-                color={isReposted ? COLORS.success : COLORS.textSecondary}
-              />
-              <Text style={[styles.actionCount, isReposted && styles.repostedText]}>
-                {post.reposts}
-              </Text>
+              <Repeat size={20} color={COLORS.textSecondary} />
+              <Text style={styles.actionCount}>0</Text>
             </TouchableOpacity>
 
             <View style={styles.action}>
               <MessageSquare size={20} color={COLORS.textSecondary} />
-              <Text style={styles.actionCount}>{post.comments}</Text>
+              <Text style={styles.actionCount}>{post.commentsCount || 0}</Text>
             </View>
 
             <TouchableOpacity style={styles.action} onPress={handleShare}>
@@ -316,7 +338,7 @@ export default function PostDetailScreen() {
         {/* Comments */}
         <View style={styles.commentsSection}>
           <Text style={styles.commentsTitle}>
-            Comments ({post?.commentsList?.length || post?.comments || 0})
+            Comments ({post?.comments?.length || post?.commentsCount || 0})
           </Text>
           <View style={styles.sortRow}>
             <TouchableOpacity
@@ -341,7 +363,7 @@ export default function PostDetailScreen() {
 
           {/* Use comments from store */}
           {(() => {
-            const comments = post?.commentsList || [];
+            const comments = post?.comments || [];
 
             if (comments.length > 0) {
               return [...comments].sort((a: any, b: any) => {

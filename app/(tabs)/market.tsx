@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -16,13 +16,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { TokenCard, ErrorBoundary, QueueStatusBanner, MarketSkeleton, QuickBuyModal } from '@/components';
 import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
-
-// Static dummy market data for pure UI
-const DUMMY_TOKENS = [
-  { id: '1', symbol: 'SOL', name: 'Solana', price: 105.25, change24h: 2.5, liquidity: 500000, volume: 150000, transactions: 1200, contractAddress: 'So11111111111111111111111111111111111111112', pairAddress: 'SOL-USDC', logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' },
-  { id: '2', symbol: 'BONK', name: 'Bonk', price: 0.000025, change24h: -3.2, liquidity: 300000, volume: 80000, transactions: 850, contractAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', pairAddress: 'BONK-SOL', logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I' },
-  { id: '3', symbol: 'JUP', name: 'Jupiter', price: 0.82, change24h: 5.1, liquidity: 450000, volume: 120000, transactions: 980, contractAddress: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', pairAddress: 'JUP-USDC', logo: 'https://static.jup.ag/jup/icon.png' },
-];
+import { fetchMarketTokens, MarketToken } from '@/services/market';
+import { showErrorToast } from '@/utils';
 
 type MarketTab = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
 
@@ -30,14 +25,10 @@ export default function MarketScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
-  // Static dummy data - pure UI mode (no hooks)
-  const tokens = DUMMY_TOKENS;
-  const isLoading = false;
-  const searchQuery = '';
-  const refetch = async () => { };
-  const hasMore = false;
-  const loadMore = () => { };
-  const totalCount = DUMMY_TOKENS.length;
+  // Real market data from API
+  const [tokens, setTokens] = useState<MarketToken[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Responsive padding logic like Home screen
   const isSmallScreen = width < 375;
@@ -51,24 +42,41 @@ export default function MarketScreen() {
   // Loading state for skeleton - only show on initial cold start
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  // Set initial load to false once we have data
-  React.useEffect(() => {
-    if (tokens.length > 0) {
+  // Fetch tokens from API
+  const loadTokens = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await fetchMarketTokens();
+      if (response.success) {
+        setTokens(response.tokens);
+      } else {
+        setError('Failed to load tokens');
+        showErrorToast('Failed to load market tokens');
+      }
+    } catch (err) {
+      setError('Network error');
+      showErrorToast('Network error while fetching tokens');
+    } finally {
+      setIsLoading(false);
       setIsInitialLoad(false);
     }
-    const timer = setTimeout(() => setIsInitialLoad(false), 3000);
-    return () => clearTimeout(timer);
-  }, [tokens.length]);
+  }, []);
+
+  // Load tokens on mount
+  useEffect(() => {
+    loadTokens();
+  }, [loadTokens]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
+    await loadTokens();
     setRefreshing(false);
-  }, [refetch]);
+  }, [loadTokens]);
 
   // Tokens are already filtered in the store, use directly
-  // totalCount shows total filtered results, tokens shows paginated subset
   const visibleTokens = tokens;
+  const totalCount = tokens.length;
 
   // Check if current tab requires WebView (non-scrollable container)
   const isWebViewTab = activeTab !== 'soulmarket';
@@ -77,7 +85,7 @@ export default function MarketScreen() {
     return (
       <View style={styles.tabContent}>
         {/* Queue Status Banner for transaction monitoring */}
-        <QueueStatusBanner onRetry={() => refetch()} />
+        <QueueStatusBanner onRetry={() => loadTokens()} />
 
         {/* Loading State */}
         {isLoading && tokens.length === 0 && (
@@ -87,24 +95,29 @@ export default function MarketScreen() {
           </View>
         )}
 
-        {/* Empty State */}
-        {!isLoading && visibleTokens.length === 0 && (
+        {/* Error State */}
+        {error && tokens.length === 0 && (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>
-              {searchQuery ? 'No tokens found' : 'No tokens available'}
-            </Text>
-            <Text style={styles.emptySubtitle}>
-              {searchQuery
-                ? 'Try a different search term'
-                : 'Quality tokens will appear here'}
-            </Text>
+            <Text style={styles.emptyTitle}>Failed to load tokens</Text>
+            <Text style={styles.emptySubtitle}>{error}</Text>
+            <Pressable style={styles.retryButton} onPress={loadTokens}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Empty State */}
+        {!isLoading && !error && visibleTokens.length === 0 && (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>No tokens available</Text>
+            <Text style={styles.emptySubtitle}>Quality tokens will appear here</Text>
           </View>
         )}
 
         {/* Token Count */}
         {totalCount > 0 && (
           <Text style={styles.tokenCount}>
-            Showing {visibleTokens.length} of {totalCount} tokens
+            Showing {visibleTokens.length} tokens
           </Text>
         )}
 
@@ -116,14 +129,13 @@ export default function MarketScreen() {
             {/* Tokens List */}
             {visibleTokens.map(token => (
               <TokenCard
-                key={token.id}
+                key={token.address}
                 symbol={token.symbol}
                 name={token.name}
                 price={token.price}
-                change={token.change24h}
+                change={token.priceChange24h}
                 {...(token.liquidity !== undefined ? { liquidity: token.liquidity } : {})}
-                {...(token.volume !== undefined ? { volume: token.volume } : {})}
-                {...(token.transactions !== undefined ? { transactions: token.transactions } : {})}
+                {...(token.volume24h !== undefined ? { volume: token.volume24h } : {})}
                 {...(token.logo ? { logo: token.logo } : {})}
                 onPress={() => {
                   // Navigate to coin details page with all available data
@@ -133,23 +145,16 @@ export default function MarketScreen() {
                       symbol: token.symbol,
                       name: token.name,
                       price: token.price.toString(),
-                      change: token.change24h.toString(),
+                      change: token.priceChange24h.toString(),
                       logo: token.logo || '',
-                      contractAddress: token.contractAddress || '',
-                      pairAddress: token.pairAddress || '',
+                      contractAddress: token.address || '',
+                      pairAddress: '',
                     }
                   });
                 }}
               />
             ))}
           </>
-        )}
-
-        {/* Load More Button */}
-        {hasMore && (
-          <Pressable style={styles.loadMoreButton} onPress={loadMore}>
-            <Text style={styles.loadMoreText}>Load More</Text>
-          </Pressable>
         )}
       </View>
     );
@@ -327,6 +332,10 @@ export default function MarketScreen() {
       <QuickBuyModal
         visible={showQuickBuyModal}
         onClose={() => setShowQuickBuyModal(false)}
+        onSuccess={() => {
+          // Refresh tokens after successful swap
+          loadTokens();
+        }}
       />
     </SafeAreaView>
   );
@@ -620,6 +629,19 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 14,
     textAlign: 'center',
+    marginBottom: SPACING.m,
+  },
+  retryButton: {
+    backgroundColor: COLORS.solana,
+    paddingHorizontal: SPACING.l,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.medium,
+    marginTop: SPACING.s,
+  },
+  retryButtonText: {
+    ...FONTS.phantomSemiBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
   },
   // Filter badge
   filterBadge: {
@@ -646,22 +668,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     marginBottom: SPACING.s,
-  },
-  // Load more button
-  loadMoreButton: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    paddingVertical: SPACING.m,
-    marginTop: SPACING.m,
-    marginBottom: SPACING.l,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.solana + '30',
-  },
-  loadMoreText: {
-    ...FONTS.sfProMedium,
-    color: COLORS.solana,
-    fontSize: 14,
   },
   // Floating cart button
   floatingCartButton: {

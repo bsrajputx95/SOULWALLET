@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -18,6 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { SocialPost, NeonCard, GlowingText } from '@/components';
+import { fetchUserProfile, toggleFollow, fetchUserPosts, Post } from '@/services/social';
 
 // Mock hooks for local-only mode
 const useMockMutation = <T,>(_options: { onSuccess?: () => void; onError?: (e: any) => void }) => ({
@@ -32,25 +33,21 @@ const useMockMutation = <T,>(_options: { onSuccess?: () => void; onError?: (e: a
   isPending: false,
 });
 
-// Static dummy data for pure UI mode
-const DUMMY_POSTS = [
-  { id: '1', username: 'crypto_trader', profileImage: '', content: 'Great trade on SOL today! 🚀', timestamp: '2h ago', likes: 42, comments: 5, mentionedToken: 'SOL', isVerified: true },
-];
-const DUMMY_PROFILE = {
-  username: 'demo_trader',
-  profileImage: null as string | null,
-  isVerified: false,
-  stats: { followersCount: 150, followingCount: 75, roi: 25.5, pnl: 1250 },
-  followers: 150,
-  following: 75,
-  copyTraders: 10,
-  vipFollowers: 5,
-  roi30d: 25.5,
-  pnl24h: 125.0,
-  maxDrawdown: 15.0,
-  winRate: 72.5,
-  vipPrice: 0.1,
-};
+// Profile data type
+interface ProfileData {
+  id: string;
+  username: string;
+  profileImage?: string;
+  walletAddress?: string;
+  followers: number;
+  following: number;
+  copyTraderCount: number;
+  isFollowing: boolean;
+  isCopying: boolean;
+  roi30d: number;
+  winRate: number;
+  maxDrawdown?: number;
+}
 
 
 type TimeFilter = '24h' | '7d' | '30d' | '90d';
@@ -64,9 +61,12 @@ type PostVisibility = 'public' | 'followers' | 'vip';
 export default function UserProfileScreen() {
   useRouter(); // Keep router available for future navigation
   const { username } = useLocalSearchParams<{ username: string }>();
-  // Static dummy data - pure UI mode (no hooks)
-  const getTraderProfile = (_username: string) => DUMMY_PROFILE;
-  const posts = DUMMY_POSTS;
+  
+  // Real profile data from API
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('24h');
   const [activePostsTab, setActivePostsTab] = useState<PostVisibility>('public');
@@ -80,9 +80,39 @@ export default function UserProfileScreen() {
   const [takeProfit, setTakeProfit] = useState('30');
   const [maxSlippage, setMaxSlippage] = useState('0.5');
   const [exitWithTrader, setExitWithTrader] = useState(false);
-  const [_targetUserId] = useState<string | null>(null); // Not needed in pure UI mode
   const [totpCode, setTotpCode] = useState('');
-  const [isFollowingUser, setIsFollowingUser] = useState(false);
+
+  // Load profile on mount
+  useEffect(() => {
+    loadProfile();
+  }, [username]);
+
+  // Load posts when tab changes
+  useEffect(() => {
+    if (username) {
+      loadPosts();
+    }
+  }, [username, activePostsTab]);
+
+  const loadProfile = async () => {
+    if (!username) return;
+    setLoading(true);
+    const result = await fetchUserProfile(username);
+    if (result.success && result.user) {
+      setProfile(result.user);
+    }
+    setLoading(false);
+  };
+
+  const loadPosts = async () => {
+    if (!username) return;
+    setPostsLoading(true);
+    const result = await fetchUserPosts(username, activePostsTab);
+    if (result.success && result.posts) {
+      setPosts(result.posts);
+    }
+    setPostsLoading(false);
+  };
 
   // Mock copy trading mutation - coming soon
   const startCopyingMutation = useMockMutation({
@@ -96,40 +126,33 @@ export default function UserProfileScreen() {
     },
   });
 
-  // Mock toggle follow mutation - coming soon
-  const toggleFollowMutation = useMockMutation({
-    onSuccess: () => {
-      setIsFollowingUser(!isFollowingUser);
-    },
-    onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to follow user');
-    },
-  });
-
-  const handleFollowPress = () => {
-    toggleFollowMutation.mutate({ userId: _targetUserId });
+  const handleFollowPress = async () => {
+    if (!profile) return;
+    const result = await toggleFollow(profile.id);
+    if (result.success) {
+      await loadProfile();
+    } else {
+      Alert.alert('Error', result.error || 'Failed to follow user');
+    }
   };
 
-  // Use mock profile data from social store
-  const mockProfile = username ? getTraderProfile(username) : null;
-
-  // Create unified profile object from mock data
-  const userProfile = mockProfile ? {
-    username: mockProfile.username || username || '',
-    profileImage: mockProfile.profileImage,
-    walletAddress: (mockProfile as any).walletAddress,
-    isVerified: mockProfile.isVerified || false,
-    followers: mockProfile.followers || 0,
-    following: mockProfile.following || 0,
-    copyTraders: mockProfile.copyTraders || 0,
-    vipFollowers: mockProfile.vipFollowers || 0,
-    roi30d: mockProfile.roi30d || 0,
-    pnl24h: mockProfile.pnl24h || 0,
-    maxDrawdown: mockProfile.maxDrawdown || 0,
-    winRate: mockProfile.winRate || 0,
-    vipPrice: mockProfile.vipPrice,
+  // Create unified profile object from API data
+  const userProfile = profile ? {
+    username: profile.username,
+    profileImage: profile.profileImage,
+    walletAddress: profile.walletAddress,
+    isVerified: false,
+    followers: profile.followers || 0,
+    following: profile.following || 0,
+    copyTraders: profile.copyTraderCount || 0,
+    vipFollowers: 0,
+    roi30d: profile.roi30d || 0,
+    pnl24h: 0,
+    maxDrawdown: profile.maxDrawdown || 0,
+    winRate: profile.winRate || 0,
+    vipPrice: undefined,
   } : username ? {
-    // Placeholder profile when no mock exists
+    // Placeholder profile when loading
     username: username,
     profileImage: undefined,
     walletAddress: undefined,
@@ -148,19 +171,12 @@ export default function UserProfileScreen() {
   const walletAddress = userProfile?.walletAddress || (userProfile ? `${userProfile.username}...` : '');
   const trustScore = 0.9; // Mock trust score
 
-  // Use mock posts from social store
-  const userPosts = userProfile ? posts.filter((p: any) => p.username === userProfile.username) : [];
-  const visiblePosts = userPosts.filter((p: any) => {
-    if (activePostsTab === 'public') {
-      return p.visibility === 'public' || p.visibility === 'PUBLIC' || !p.visibility;
-    }
-    return p.visibility?.toLowerCase() === activePostsTab;
-  });
+  // Posts fetched from API based on active tab
+  const visiblePosts = posts;
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    // Simulate refresh delay (data is local mock)
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await Promise.all([loadProfile(), loadPosts()]);
     setRefreshing(false);
   }, []);
 
@@ -413,7 +429,11 @@ export default function UserProfileScreen() {
             ))}
           </View>
 
-          {activePostsTab === 'followers' && !isFollowingUser ? (
+          {postsLoading ? (
+            <View style={styles.gatedContainer}>
+              <Text style={styles.gatedText}>Loading posts...</Text>
+            </View>
+          ) : activePostsTab === 'followers' && !isFollowingUser ? (
             <View style={styles.gatedContainer}>
               <Text style={styles.gatedText}>Follow @{userProfile.username} to view followers-only posts.</Text>
               <TouchableOpacity
@@ -441,18 +461,18 @@ export default function UserProfileScreen() {
           ) : (
             <View>
               {visiblePosts.length > 0 ? (
-                visiblePosts.map((post) => (
+                visiblePosts.map((post: any) => (
                   <SocialPost
                     key={post.id}
                     id={post.id}
-                    username={post.username || userProfile.username}
-                    profileImage={post.profileImage || userProfile.profileImage || ''}
+                    username={post.user?.username || userProfile.username}
+                    profileImage={post.user?.profileImage || userProfile.profileImage || ''}
                     content={post.content}
-                    comments={post.comments || 0}
-                    likes={post.likes || 0}
-                    timestamp={post.timestamp}
-                    mentionedToken={post.mentionedToken || ''}
-                    isVerified={post.isVerified || userProfile.isVerified}
+                    comments={post.commentsCount || 0}
+                    likes={post.likesCount || 0}
+                    timestamp={new Date(post.createdAt).toLocaleString()}
+                    mentionedToken={post.tokenSymbol || post.tokenName || ''}
+                    isVerified={userProfile.isVerified}
                   />
                 ))
               ) : (

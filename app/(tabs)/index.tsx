@@ -34,7 +34,7 @@ import {
   QueueStatusBanner,
 } from '@/components';
 import * as SecureStore from 'expo-secure-store';
-import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api, API_URL } from '@/services';
+import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api, API_URL, fetchTrendingTokens } from '@/services';
 import { showErrorToast, validateSession } from '@/utils';
 
 // Static fallback wallet data for UI display
@@ -214,35 +214,56 @@ export default function HomeScreen() {
   // Mock profile query - use local user data
   const profileQuery = { data: { profileImage: null }, isLoading: false };
 
-  // Mock trending data - using static mock data
-  const trendingData: any = { pairs: [] };
-  const trendingLoading = false;
+  // Real trending tokens from API (refreshes daily at 15:00 UTC)
+  const [trendingTokens, setTrendingTokens] = useState<any[]>([]);
+  const [trendingLoading, setTrendingLoading] = useState(true);
+  const [lastTrendingUpdate, setLastTrendingUpdate] = useState<string | null>(null);
 
-  // Transform trending data to displayable format
-  // Comment 3: Include liquidity, volume, and transactions for TokenCard
+  // Fetch trending tokens on mount
+  useEffect(() => {
+    loadTrendingTokens();
+  }, []);
+
+  const loadTrendingTokens = async () => {
+    setTrendingLoading(true);
+    const result = await fetchTrendingTokens();
+    if (result.success && result.tokens) {
+      // Transform to match TokenCard format
+      const transformed = result.tokens.map((token: any) => ({
+        id: token.address,
+        symbol: token.symbol,
+        name: token.name,
+        price: token.price || 0,
+        change24h: token.priceChange24h || 0,
+        volume24h: token.volume24h || 0,
+        logo: token.logo || getWellKnownTokenLogo(token.symbol),
+        banner: token.banner,
+        liquidity: token.liquidity || 0,
+        contractAddress: token.address,
+        marketCap: token.marketCap || 0,
+      }));
+      setTrendingTokens(transformed);
+      setLastTrendingUpdate(result.lastUpdated || null);
+    }
+    setTrendingLoading(false);
+  };
+
+  // Transform trending tokens for display
   const topCoins = React.useMemo(() => {
-    if (!trendingData?.pairs) return [];
-
-    return trendingData.pairs.slice(0, 20).map((pair: any) => {
-      const symbol = pair.baseToken?.symbol || 'UNKNOWN';
-      return {
-        id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
-        symbol,
-        name: pair.baseToken?.name || 'Unknown Token',
-        price: parseFloat(pair.priceUsd || '0'),
-        change1h: parseFloat(pair.priceChange?.h1 || '0'),
-        change24h: parseFloat(pair.priceChange?.h24 || '0'),
-        change7d: parseFloat(pair.priceChange?.h24 || '0') * 1.5, // Estimated from 24h (API limitation)
-        volume24h: parseFloat(pair.volume?.h24 || '0'),
-        // Use DexScreener logo, header image, or well-known token logos as fallback
-        logo: pair.info?.imageUrl || pair.info?.header || getWellKnownTokenLogo(symbol),
-        liquidity: parseFloat(pair.liquidity?.usd || '0'),
-        transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
-        contractAddress: pair.baseToken?.address || '',
-        pairAddress: pair.pairAddress || '',
-      };
-    });
-  }, [trendingData]);
+    return trendingTokens.map((token: any) => ({
+      id: token.id,
+      symbol: token.symbol,
+      name: token.name,
+      price: token.price,
+      change24h: token.change24h,
+      volume24h: token.volume24h,
+      logo: token.logo,
+      liquidity: token.liquidity,
+      marketCap: token.marketCap,
+      contractAddress: token.contractAddress,
+      pairAddress: token.contractAddress, // Use address as pair address for navigation
+    }));
+  }, [trendingTokens]);
 
   // Mock custodial wallet data - coming soon
   const custodialWalletData: any = { hasWallet: false, balance: 0 };
@@ -467,7 +488,7 @@ export default function HomeScreen() {
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), loadTrendingTokens()]);
     setRefreshing(false);
   }, [refetch]);
 
@@ -561,51 +582,51 @@ export default function HomeScreen() {
 
 
               {/* Loading state */}
-              {isLoadingCoins ? (
+              {trendingLoading ? (
                 <View style={styles.loadingContainer}>
-                  <RefreshCw size={32} color={COLORS.primary} />
-                  <Text style={styles.loadingText}>Loading coins...</Text>
+                  <RefreshCw size={32} color={COLORS.solana} />
+                  <Text style={styles.loadingText}>Loading trending tokens...</Text>
                 </View>
-              ) : displayCoins.length === 0 ? (
+              ) : topCoins.length === 0 ? (
                 <View style={styles.emptyContainer}>
                   <Globe size={48} color={COLORS.textSecondary} style={{ opacity: 0.5 }} />
-                  <Text style={styles.emptyTitle}>
-                    {debouncedCoinsSearch ? 'No coins found' : 'No trending coins'}
-                  </Text>
+                  <Text style={styles.emptyTitle}>No trending tokens</Text>
                   <Text style={styles.emptySubtitle}>
-                    {debouncedCoinsSearch
-                      ? 'Try a different search term'
-                      : 'Check back later for trending tokens'}
+                    Check back later for top performing tokens
                   </Text>
                 </View>
               ) : (
-                displayCoins.map((coin: any) => (
-                  <TokenCard
-                    key={coin.id}
-                    symbol={coin.symbol}
-                    name={coin.name}
-                    price={coin.price}
-                    change={coin.change24h || 0}
-                    liquidity={coin.liquidity}
-                    volume={coin.volume24h}
-                    transactions={coin.transactions}
-                    {...(coin.logo ? { logo: coin.logo } : {})}
-                    onPress={() => {
-                      // Navigate with token data to ensure consistency
-                      router.push({
-                        pathname: `/coin/${coin.symbol.toLowerCase()}` as any,
-                        params: {
-                          price: coin.price.toString(),
-                          change: (coin.change24h || 0).toString(),
-                          logo: coin.logo || '',
-                          contractAddress: coin.contractAddress || '',
-                          pairAddress: coin.pairAddress || '',
-                          name: coin.name,
-                        }
-                      });
-                    }}
-                  />
-                ))
+                <View>
+                  <Text style={styles.trendingSubtitle}>
+                    Top 10 performers • Updates daily at 15:00 UTC
+                    {lastTrendingUpdate && ` • Last: ${new Date(lastTrendingUpdate).toLocaleDateString()}`}
+                  </Text>
+                  {topCoins.map((coin: any) => (
+                    <TokenCard
+                      key={coin.id}
+                      symbol={coin.symbol}
+                      name={coin.name}
+                      price={coin.price}
+                      change={coin.change24h || 0}
+                      liquidity={coin.liquidity}
+                      volume={coin.volume24h}
+                      {...(coin.logo ? { logo: coin.logo } : {})}
+                      onPress={() => {
+                        // Navigate with token data
+                        router.push({
+                          pathname: `/coin/${coin.symbol.toLowerCase()}` as any,
+                          params: {
+                            price: coin.price.toString(),
+                            change: (coin.change24h || 0).toString(),
+                            logo: coin.logo || '',
+                            contractAddress: coin.contractAddress || '',
+                            name: coin.name,
+                          }
+                        });
+                      }}
+                    />
+                  ))}
+                </View>
               )}
             </View>
           </ErrorBoundary>
@@ -1901,6 +1922,13 @@ const styles = StyleSheet.create({
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 14,
+  },
+  trendingSubtitle: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginBottom: SPACING.m,
+    textAlign: 'center',
   },
   emptyContainer: {
     flex: 1,

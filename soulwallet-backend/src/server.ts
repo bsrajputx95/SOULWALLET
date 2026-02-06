@@ -10,12 +10,17 @@ import axios from 'axios';
 import bs58 from 'bs58';
 import prisma from './db';
 import { getConnection, executeRpcCall, getRpcStatus } from './services/rpcManager';
+import NodeCache from 'node-cache';
+import { getFeed } from './services/feedService';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Token cache for market data (1 hour TTL)
+const tokenCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Fail fast if JWT_SECRET is missing
@@ -1425,6 +1430,589 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
     } catch (error) {
         console.error('Webhook processing error:', error);
     }
+});
+
+// In-memory storage for trending tokens with daily refresh
+let trendingTokensCache: any[] = [];
+let lastTrendingUpdate: Date | null = null;
+
+// Helper to check if we should refresh (past 15:00 UTC today and not yet updated)
+function shouldRefreshTrending(): boolean {
+    const now = new Date();
+    const nowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes()));
+    
+    // Check if current time is past 15:00 UTC
+    const currentHourUTC = nowUTC.getUTCHours();
+    if (currentHourUTC < 15) {
+        return false; // Not yet 15:00 UTC
+    }
+    
+    // If never updated, refresh
+    if (!lastTrendingUpdate) {
+        return true;
+    }
+    
+    // Check if last update was before today at 15:00 UTC
+    const lastUpdateUTC = new Date(Date.UTC(
+        lastTrendingUpdate.getUTCFullYear(),
+        lastTrendingUpdate.getUTCMonth(),
+        lastTrendingUpdate.getUTCDate(),
+        lastTrendingUpdate.getUTCHours(),
+        lastTrendingUpdate.getUTCMinutes()
+    ));
+    
+    const todayAt15UTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 15, 0));
+    
+    return lastUpdateUTC < todayAt15UTC;
+}
+
+// Fetch trending tokens from BirdEye
+async function fetchTrendingTokens(): Promise<any[]> {
+    try {
+        const birdEyeKey = process.env.BIRDEYE_API_KEY;
+        if (!birdEyeKey) {
+            console.error('BirdEye API key not configured');
+            return trendingTokensCache.length > 0 ? trendingTokensCache : [];
+        }
+
+        // Use BirdEye public API for trending/performing tokens
+        // Sort by price change 24h to get top performers
+        const response = await axios.get('https://public-api.birdeye.so/defi/tokenlist', {
+            headers: { 'X-API-KEY': birdEyeKey },
+            params: {
+                sort_by: 'v24hChangePercent',
+                sort_type: 'desc',
+                offset: 0,
+                limit: 50
+            }
+        });
+
+        const tokens = response.data?.data?.tokens || [];
+        
+        // Filter out tokens with very low liquidity or volume to avoid spam
+        // Take top 10 with good liquidity
+        const filteredTokens = tokens
+            .filter((token: any) => (token.liquidity || 0) > 10000 && (token.v24hUSD || 0) > 5000)
+            .slice(0, 10);
+        
+        // Transform to frontend format
+        const transformedTokens = filteredTokens.map((token: any) => ({
+            address: token.address,
+            symbol: token.symbol,
+            name: token.name,
+            price: token.price || 0,
+            priceChange24h: token.priceChange24h || 0,
+            volume24h: token.v24hUSD || 0,
+            marketCap: token.marketCap || 0,
+            liquidity: token.liquidity || 0,
+            logo: token.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${token.address}/logo.png`,
+            banner: token.extensions?.bannerURI
+        }));
+
+        return transformedTokens;
+    } catch (error) {
+        console.error('Failed to fetch trending tokens:', error);
+        return trendingTokensCache.length > 0 ? trendingTokensCache : [];
+    }
+}
+
+// GET /market/tokens - Get top tokens from BirdEye with caching
+app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
+    try {
+        // Check cache first
+        const cached = tokenCache.get('top_tokens');
+        if (cached) {
+            res.json({ success: true, tokens: cached, cached: true });
+            return;
+        }
+
+        // Fetch from BirdEye API
+        const birdEyeKey = process.env.BIRDEYE_API_KEY;
+        if (!birdEyeKey) {
+            res.status(500).json({ error: 'BirdEye API key not configured' });
+            return;
+        }
+
+        const response = await axios.get('https://public-api.birdeye.so/defi/tokenlist', {
+            headers: { 'X-API-KEY': birdEyeKey },
+            params: {
+                sort_by: 'v24hUSD',
+                sort_type: 'desc',
+                offset: 0,
+                limit: 50
+            }
+        });
+
+        const tokens = response.data?.data?.tokens || [];
+        
+        // Transform to frontend format
+        const transformedTokens = tokens.map((token: any) => ({
+            address: token.address,
+            symbol: token.symbol,
+            name: token.name,
+            price: token.price || 0,
+            priceChange24h: token.priceChange24h || 0,
+            volume24h: token.v24hUSD || 0,
+            marketCap: token.marketCap || 0,
+            liquidity: token.liquidity || 0,
+            logo: token.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${token.address}/logo.png`,
+            banner: token.extensions?.bannerURI
+        }));
+
+        // Cache the results
+        tokenCache.set('top_tokens', transformedTokens);
+
+        res.json({ success: true, tokens: transformedTokens, cached: false });
+    } catch (error) {
+        console.error('Market tokens fetch error:', error);
+        
+        // Return stale cache if available
+        const stale = tokenCache.get('top_tokens');
+        if (stale) {
+            res.json({ success: true, tokens: stale, cached: true, stale: true });
+            return;
+        }
+        
+        res.status(500).json({ error: 'Failed to fetch market tokens' });
+    }
+});
+
+// GET /market/trending - Get top 10 trending tokens (refreshes daily at 15:00 UTC)
+app.get('/market/trending', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
+    try {
+        // Check if we need to refresh (past 15:00 UTC and not updated today)
+        if (shouldRefreshTrending() || trendingTokensCache.length === 0) {
+            const tokens = await fetchTrendingTokens();
+            if (tokens.length > 0) {
+                trendingTokensCache = tokens;
+                lastTrendingUpdate = new Date();
+            }
+        }
+
+        res.json({
+            success: true,
+            tokens: trendingTokensCache,
+            lastUpdated: lastTrendingUpdate?.toISOString() || null
+        });
+    } catch (error) {
+        console.error('Trending tokens error:', error);
+        // Return cached data even if error
+        res.json({
+            success: true,
+            tokens: trendingTokensCache,
+            lastUpdated: lastTrendingUpdate?.toISOString() || null,
+            stale: true
+        });
+    }
+});
+
+// ============================================
+// SOCIAL FEED ENDPOINTS
+// ============================================
+
+// Create Post
+app.post('/posts', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { content, visibility, tokenAddress } = req.body;
+
+    if (!content || content.length > 500) {
+      res.status(400).json({ error: 'Content required, max 500 chars' });
+      return;
+    }
+
+    let tokenData = null;
+    if (tokenAddress) {
+      try {
+        new PublicKey(tokenAddress);
+        // Fetch token info from Jupiter
+        const jupRes = await axios.get(`https://price.jup.ag/v6/price?ids=${tokenAddress}`);
+        const priceData = jupRes.data.data[tokenAddress];
+        if (priceData) {
+          tokenData = {
+            address: tokenAddress,
+            symbol: priceData.mintSymbol || 'Unknown',
+            name: priceData.mintSymbol || 'Unknown Token'
+          };
+        }
+      } catch {
+        tokenData = { address: tokenAddress, symbol: 'Unknown', name: 'Unknown Token' };
+      }
+    }
+
+    const post = await prisma.post.create({
+      data: {
+        userId: req.userId!,
+        content,
+        visibility: visibility || 'public',
+        tokenAddress: tokenData?.address,
+        tokenSymbol: tokenData?.symbol,
+        tokenName: tokenData?.name
+      },
+      include: {
+        user: { select: { username: true, profileImage: true } }
+      }
+    });
+
+    res.status(201).json({ success: true, post });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create post' });
+  }
+});
+
+// Get Feed
+app.get('/feed', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { cursor, limit = '20', mode } = req.query;
+    const { posts, nextCursor } = await getFeed(req.userId!, cursor as string, parseInt(limit as string), mode as string);
+
+    const postIds = posts.map((p: any) => p.id);
+    const userLikes = await prisma.like.findMany({
+      where: { postId: { in: postIds }, userId: req.userId! },
+      select: { postId: true }
+    });
+    const likedIds = new Set(userLikes.map(l => l.postId));
+
+    res.json({
+      success: true,
+      posts: posts.map((p: any) => ({ ...p, isLiked: likedIds.has(p.id) })),
+      nextCursor
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch feed' });
+  }
+});
+
+// Get Single Post
+app.get('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const post = await prisma.post.findUnique({
+      where: { id: req.params.id },
+      include: {
+        user: { select: { id: true, username: true, profileImage: true } },
+        comments: {
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          include: { user: { select: { username: true, profileImage: true } } }
+        },
+        _count: { select: { likes: true, comments: true } }
+      }
+    });
+
+    if (!post) {
+      res.status(404).json({ error: 'Post not found' });
+      return;
+    }
+
+    if (post.visibility === 'followers') {
+      const isFollowing = await prisma.follow.findFirst({
+        where: { followerId: req.userId!, followingId: post.userId }
+      });
+      if (!isFollowing && post.userId !== req.userId) {
+        res.status(403).json({ error: 'Private post' });
+        return;
+      }
+    }
+
+    // VIP posts: allow the post owner to retrieve VIP posts
+    // Block non-owners until VIP membership is implemented
+    if (post.visibility === 'vip') {
+      if (post.userId !== req.userId) {
+        res.status(403).json({ error: 'VIP posts not available yet' });
+        return;
+      }
+      // Owner is allowed to proceed
+    }
+
+    const isLiked = await prisma.like.findFirst({
+      where: { postId: post.id, userId: req.userId! }
+    });
+
+    res.json({
+      success: true,
+      post: {
+        ...post,
+        isLiked: !!isLiked,
+        likesCount: post._count.likes,
+        commentsCount: post._count.comments
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch post' });
+  }
+});
+
+// Delete Post
+app.delete('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const post = await prisma.post.findUnique({ where: { id: req.params.id } });
+    if (!post) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (post.userId !== req.userId) {
+      res.status(403).json({ error: 'Not authorized' });
+      return;
+    }
+
+    await prisma.post.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
+// Like/Unlike
+app.post('/posts/:id/like', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const existing = await prisma.like.findUnique({
+      where: { postId_userId: { postId: req.params.id, userId: req.userId! } }
+    });
+
+    if (existing) {
+      await prisma.like.delete({ where: { id: existing.id } });
+      await prisma.post.update({
+        where: { id: req.params.id },
+        data: { likesCount: { decrement: 1 } }
+      });
+      res.json({ success: true, liked: false });
+    } else {
+      await prisma.like.create({
+        data: { postId: req.params.id, userId: req.userId! }
+      });
+      await prisma.post.update({
+        where: { id: req.params.id },
+        data: { likesCount: { increment: 1 } }
+      });
+      res.json({ success: true, liked: true });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to toggle like' });
+  }
+});
+
+// Add Comment
+app.post('/posts/:id/comment', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { content } = req.body;
+    if (!content || content.length > 300) {
+      res.status(400).json({ error: 'Content required, max 300 chars' });
+      return;
+    }
+
+    // Load the target post first
+    const post = await prisma.post.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, userId: true, visibility: true }
+    });
+
+    // If missing, return 404
+    if (!post) {
+      res.status(404).json({ error: 'Post not found' });
+      return;
+    }
+
+    // Visibility checks
+    if (post.visibility === 'followers') {
+      // Ensure requester is the author or follows the author
+      const isAuthor = post.userId === req.userId;
+      if (!isAuthor) {
+        const isFollowing = await prisma.follow.findFirst({
+          where: { followerId: req.userId!, followingId: post.userId }
+        });
+        if (!isFollowing) {
+          res.status(403).json({ error: 'Cannot comment on this post' });
+          return;
+        }
+      }
+    }
+
+    if (post.visibility === 'vip') {
+      // Reject until VIP is implemented - only author can comment
+      if (post.userId !== req.userId) {
+        res.status(403).json({ error: 'VIP posts not available yet' });
+        return;
+      }
+    }
+
+    // Only then create the comment and increment commentsCount
+    const comment = await prisma.comment.create({
+      data: { postId: req.params.id, userId: req.userId!, content },
+      include: { user: { select: { username: true, profileImage: true } } }
+    });
+
+    await prisma.post.update({
+      where: { id: req.params.id },
+      data: { commentsCount: { increment: 1 } }
+    });
+
+    res.status(201).json({ success: true, comment });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to add comment' });
+  }
+});
+
+// Get User Profile
+app.get('/users/:username', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { username: req.params.username },
+      include: {
+        wallet: { select: { publicKey: true } },
+        _count: { select: { followersRel: true, followingRel: true, posts: true } }
+      }
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const isFollowing = await prisma.follow.findFirst({
+      where: { followerId: req.userId!, followingId: user.id }
+    });
+
+    const isCopying = await prisma.copyTradingConfig.findFirst({
+      where: { userId: req.userId!, traderAddress: user.wallet?.publicKey }
+    });
+
+    const copyTraderCount = await prisma.copyTradingConfig.count({
+      where: { traderAddress: user.wallet?.publicKey, isActive: true }
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        profileImage: user.profileImage,
+        walletAddress: user.wallet?.publicKey,
+        followers: user._count.followersRel,
+        following: user._count.followingRel,
+        postsCount: user._count.posts,
+        copyTraderCount,
+        isFollowing: !!isFollowing,
+        isCopying: !!isCopying,
+        roi30d: user.roi30d || 0,
+        winRate: user.winRate || 0,
+        maxDrawdown: user.maxDrawdown || null,
+        followersEquity: user.followersEquity || null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Get User's Posts
+app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { visibility } = req.query;
+    const user = await prisma.user.findUnique({
+      where: { username: req.params.username },
+      select: { id: true }
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const isOwnProfile = user.id === req.userId;
+
+    const where: any = { userId: user.id };
+    
+    // Filter by visibility if specified and viewing own profile
+    if (visibility && isOwnProfile) {
+      where.visibility = visibility;
+    } else if (isOwnProfile) {
+      // Owner can see all their own posts
+      where.visibility = { in: ['public', 'followers', 'vip'] };
+    } else {
+      // Check if current user follows the target user
+      const isFollowing = await prisma.follow.findFirst({
+        where: { followerId: req.userId!, followingId: user.id }
+      });
+      
+      // If following, show both public and followers-only posts
+      // Otherwise, show only public posts
+      if (isFollowing) {
+        where.visibility = { in: ['public', 'followers'] };
+      } else {
+        where.visibility = 'public';
+      }
+      // TODO: Show VIP posts if subscribed
+    }
+
+    const posts = await prisma.post.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: { select: { likes: true, comments: true } },
+        likes: { where: { userId: req.userId! }, select: { id: true } }
+      }
+    });
+
+    const formattedPosts = posts.map(post => ({
+      id: post.id,
+      userId: post.userId,
+      content: post.content,
+      visibility: post.visibility,
+      tokenAddress: post.tokenAddress,
+      tokenSymbol: post.tokenSymbol,
+      tokenName: post.tokenName,
+      likesCount: post._count.likes,
+      commentsCount: post._count.comments,
+      createdAt: post.createdAt,
+      user: { username: req.params.username, profileImage: null },
+      isLiked: post.likes.length > 0
+    }));
+
+    res.json({ success: true, posts: formattedPosts });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch posts' });
+  }
+});
+
+// Follow/Unfollow
+app.post('/users/:id/follow', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (req.params.id === req.userId) {
+      res.status(400).json({ error: 'Cannot follow yourself' });
+      return;
+    }
+
+    const existing = await prisma.follow.findFirst({
+      where: { followerId: req.userId!, followingId: req.params.id }
+    });
+
+    if (existing) {
+      await prisma.follow.delete({ where: { id: existing.id } });
+      await prisma.user.update({
+        where: { id: req.params.id },
+        data: { followers: { decrement: 1 } }
+      });
+      await prisma.user.update({
+        where: { id: req.userId! },
+        data: { following: { decrement: 1 } }
+      });
+      res.json({ success: true, following: false });
+    } else {
+      await prisma.follow.create({
+        data: { followerId: req.userId!, followingId: req.params.id }
+      });
+      await prisma.user.update({
+        where: { id: req.params.id },
+        data: { followers: { increment: 1 } }
+      });
+      await prisma.user.update({
+        where: { id: req.userId! },
+        data: { following: { increment: 1 } }
+      });
+      res.json({ success: true, following: true });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to toggle follow' });
+  }
 });
 
 // 404 Handler - Catch-all for undefined endpoints

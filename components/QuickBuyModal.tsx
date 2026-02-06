@@ -16,13 +16,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-
-// Static dummy data for pure UI mode
-const DUMMY_BALANCE = 10.5;
+import { getQuote, executeSwap, getTokenList, JupiterToken } from '../services/swap';
+import { showSuccessToast, showErrorToast } from '../utils/toast';
 
 interface QuickBuyModalProps {
     visible: boolean;
     onClose: () => void;
+    onSuccess?: () => void;
 }
 
 interface TokenInfo {
@@ -32,23 +32,31 @@ interface TokenInfo {
     logoURI?: string;
     decimals: number;
     price?: number;
-    // Verification status
-    verified?: boolean; // true if from Jupiter strict list
-    source?: 'jupiter' | 'quote' | 'generic'; // where the metadata came from
-    hasMetadata?: boolean; // whether full metadata is available
+    verified?: boolean;
+    source?: 'jupiter' | 'generic';
 }
 
-export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }) => {
-    // Static dummy data - pure UI mode (no hooks)
-    const balance = DUMMY_BALANCE;
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const SOL_DECIMALS = 9;
 
+export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, onSuccess }) => {
     const [tokenAddress, setTokenAddress] = useState('');
     const [solAmount, setSolAmount] = useState('');
     const [slippage, setSlippage] = useState('1');
     const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
     const [isVerifying, setIsVerifying] = useState(false);
-    const [isBuying, _setIsBuying] = useState(false);
+    const [isBuying, setIsBuying] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [quote, setQuote] = useState<any>(null);
+    const [isFetchingQuote, setIsFetchingQuote] = useState(false);
+    const [showPinInput, setShowPinInput] = useState(false);
+    const [pin, setPin] = useState('');
+    const [jupiterTokens, setJupiterTokens] = useState<JupiterToken[]>([]);
+
+    // Load Jupiter token list on mount
+    useEffect(() => {
+        getTokenList().then(setJupiterTokens).catch(() => {});
+    }, []);
 
     // Reset state when modal opens
     useEffect(() => {
@@ -58,15 +66,50 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
             setSlippage('1');
             setTokenInfo(null);
             setError(null);
+            setQuote(null);
+            setShowPinInput(false);
+            setPin('');
         }
     }, [visible]);
+
+    // Fetch quote when inputs change
+    useEffect(() => {
+        const fetchQuote = async () => {
+            if (!tokenInfo || !solAmount || parseFloat(solAmount) <= 0) {
+                setQuote(null);
+                return;
+            }
+
+            setIsFetchingQuote(true);
+            try {
+                const amountInLamports = Math.floor(parseFloat(solAmount) * Math.pow(10, SOL_DECIMALS));
+                const slippageBps = Math.round(parseFloat(slippage || '1') * 100);
+                
+                const quoteResult = await getQuote(
+                    SOL_MINT,
+                    tokenInfo.address,
+                    amountInLamports,
+                    slippageBps
+                );
+                
+                setQuote(quoteResult);
+            } catch (err: any) {
+                setQuote(null);
+            } finally {
+                setIsFetchingQuote(false);
+            }
+        };
+
+        const timer = setTimeout(fetchQuote, 500);
+        return () => clearTimeout(timer);
+    }, [tokenInfo, solAmount, slippage]);
 
     // Validate Solana address format (32-44 base58 chars)
     const isValidSolanaAddress = (address: string): boolean => {
         return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address.trim());
     };
 
-    // Verify token with mock verification (local-only)
+    // Verify token with Jupiter token list
     const handleVerifyToken = async () => {
         const addr = tokenAddress.trim();
         if (!addr) {
@@ -82,26 +125,34 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         setError(null);
         setTokenInfo(null);
 
-        const address = tokenAddress.trim();
-
         try {
-
-            // Mock token verification - simulate network delay then accept valid addresses
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            setTokenInfo({
-                address,
-                symbol: 'TOKEN',
-                name: 'Unknown Token',
-                decimals: 9,
-                price: 0,
-                verified: false,
-                source: 'generic',
-                hasMetadata: false,
-            });
-            setIsVerifying(false);
+            // Check if token is in Jupiter's verified list
+            const jupiterToken = jupiterTokens.find(t => t.address === addr);
+            
+            if (jupiterToken) {
+                setTokenInfo({
+                    address: jupiterToken.address,
+                    symbol: jupiterToken.symbol,
+                    name: jupiterToken.name,
+                    decimals: jupiterToken.decimals,
+                    logoURI: jupiterToken.logoURI,
+                    verified: true,
+                    source: 'jupiter',
+                });
+            } else {
+                // For unverified tokens, use generic info
+                setTokenInfo({
+                    address: addr,
+                    symbol: 'UNKNOWN',
+                    name: 'Unknown Token',
+                    decimals: 9,
+                    verified: false,
+                    source: 'generic',
+                });
+            }
         } catch {
-            setError('Unable to verify token.');
+            setError('Unable to verify token');
+        } finally {
             setIsVerifying(false);
         }
     };
@@ -117,10 +168,8 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
         return undefined;
     }, [tokenAddress]);
 
-    // Execute buy - using local swap simulation
+    // Execute buy using Jupiter swap
     const handleBuy = async () => {
-        // Demo mode - wallet always available
-
         if (!tokenInfo) {
             setError('Please verify the token first');
             return;
@@ -132,22 +181,73 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
             return;
         }
 
-        if (amount > (balance || 0)) {
-            setError(`Insufficient SOL balance. You have ${balance?.toFixed(4)} SOL`);
+        if (!quote) {
+            setError('No swap quote available');
             return;
         }
 
-        // Show Coming Soon message since swap feature is not available yet
-        Alert.alert(
-            '🚧 Coming Soon',
-            'Quick Buy feature is currently being upgraded. Please use a DEX like Jupiter or Raydium directly for now.',
-            [{ text: 'OK', onPress: onClose }]
-        );
+        setShowPinInput(true);
     };
 
-    const estimatedOutput = tokenInfo?.price && solAmount
-        ? (parseFloat(solAmount) * (tokenInfo.price > 0 ? 1 / tokenInfo.price : 0))
-        : 0;
+    // Confirm swap with PIN
+    const handleConfirmSwap = async () => {
+        if (!pin || pin.length < 4) {
+            setError('Please enter a valid PIN (min 4 digits)');
+            return;
+        }
+
+        if (!quote) {
+            setError('No quote available');
+            return;
+        }
+
+        setIsBuying(true);
+        setError(null);
+
+        try {
+            const result = await executeSwap(quote, pin);
+
+            if (result.success) {
+                showSuccessToast(`Bought ${tokenInfo?.symbol || 'tokens'}`);
+                setPin('');
+                setShowPinInput(false);
+                onClose();
+                onSuccess?.();
+                
+                Alert.alert(
+                    'Swap Successful!',
+                    `You swapped ${solAmount} SOL for ${tokenInfo?.symbol}`,
+                    [
+                        {
+                            text: 'View on Solscan',
+                            onPress: () => {
+                                if (result.explorerUrl) {
+                                    // Open in browser
+                                }
+                            },
+                        },
+                        { text: 'Done', style: 'default' }
+                    ]
+                );
+            } else {
+                setError(result.error || 'Swap failed');
+                showErrorToast(result.error || 'Swap failed');
+            }
+        } catch (err: any) {
+            const msg = err.message || 'Swap failed';
+            setError(msg);
+            showErrorToast(msg);
+        } finally {
+            setIsBuying(false);
+        }
+    };
+
+    // Calculate estimated output
+    const estimatedOutput = quote && tokenInfo
+        ? (Number(quote.outAmount) / Math.pow(10, tokenInfo.decimals)).toFixed(6)
+        : '0';
+
+    const canBuy = tokenInfo && solAmount && parseFloat(solAmount) > 0 && quote && !isFetchingQuote;
 
     return (
         <Modal
@@ -182,11 +282,12 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                     onChangeText={setTokenAddress}
                                     autoCapitalize="none"
                                     autoCorrect={false}
+                                    editable={!isBuying}
                                 />
                                 <Pressable
                                     style={styles.verifyButton}
                                     onPress={handleVerifyToken}
-                                    disabled={isVerifying}
+                                    disabled={isVerifying || isBuying}
                                 >
                                     {isVerifying ? (
                                         <ActivityIndicator size="small" color={COLORS.solana} />
@@ -214,13 +315,6 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                     <View style={styles.tokenDetails}>
                                         <Text style={styles.tokenSymbol}>{tokenInfo.symbol}</Text>
                                         <Text style={styles.tokenName}>{tokenInfo.name}</Text>
-                                        {tokenInfo.price ? (
-                                            <Text style={styles.tokenPrice}>
-                                                ${tokenInfo.price < 0.0001
-                                                    ? tokenInfo.price.toExponential(2)
-                                                    : tokenInfo.price.toFixed(6)}
-                                            </Text>
-                                        ) : null}
                                     </View>
                                     {tokenInfo.verified ? (
                                         <CheckCircle size={20} color={COLORS.success} />
@@ -252,6 +346,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                     value={solAmount}
                                     onChangeText={setSolAmount}
                                     keyboardType="decimal-pad"
+                                    editable={!isBuying}
                                 />
                                 <Text style={styles.solLabel}>SOL</Text>
                             </View>
@@ -261,6 +356,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                         key={preset}
                                         style={[styles.presetButton, solAmount === preset && styles.presetButtonActive]}
                                         onPress={() => setSolAmount(preset)}
+                                        disabled={isBuying}
                                     >
                                         <Text style={[styles.presetText, solAmount === preset && styles.presetTextActive]}>
                                             {preset} SOL
@@ -268,9 +364,6 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                     </Pressable>
                                 ))}
                             </View>
-                            <Text style={styles.balanceText}>
-                                Balance: {balance?.toFixed(4) || '0'} SOL
-                            </Text>
                         </View>
 
                         {/* Slippage Input */}
@@ -284,6 +377,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                     value={slippage}
                                     onChangeText={setSlippage}
                                     keyboardType="decimal-pad"
+                                    editable={!isBuying}
                                 />
                                 <Text style={styles.percentLabel}>%</Text>
                             </View>
@@ -293,6 +387,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                                         key={preset}
                                         style={[styles.presetButton, slippage === preset && styles.presetButtonActive]}
                                         onPress={() => setSlippage(preset)}
+                                        disabled={isBuying}
                                     >
                                         <Text style={[styles.presetText, slippage === preset && styles.presetTextActive]}>
                                             {preset}%
@@ -302,13 +397,63 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                             </View>
                         </View>
 
+                        {/* Quote Loading */}
+                        {isFetchingQuote && (
+                            <View style={styles.quoteLoadingContainer}>
+                                <ActivityIndicator size="small" color={COLORS.solana} />
+                                <Text style={styles.quoteLoadingText}>Fetching quote...</Text>
+                            </View>
+                        )}
+
                         {/* Estimated Output */}
-                        {tokenInfo && solAmount && (
+                        {quote && !isFetchingQuote && (
                             <View style={styles.estimateCard}>
                                 <Text style={styles.estimateLabel}>Estimated Output</Text>
                                 <Text style={styles.estimateValue}>
-                                    ~{estimatedOutput.toFixed(4)} {tokenInfo.symbol}
+                                    ~{estimatedOutput} {tokenInfo?.symbol}
                                 </Text>
+                                <Text style={styles.estimateSubtext}>
+                                    Slippage: {slippage}%
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* PIN Input (shown when confirming) */}
+                        {showPinInput && (
+                            <View style={styles.pinContainer}>
+                                <Text style={styles.label}>Enter Wallet PIN</Text>
+                                <TextInput
+                                    style={[styles.input, styles.pinInput]}
+                                    placeholder="Enter PIN"
+                                    placeholderTextColor={COLORS.textSecondary}
+                                    value={pin}
+                                    onChangeText={setPin}
+                                    keyboardType="numeric"
+                                    secureTextEntry
+                                    maxLength={6}
+                                    autoFocus
+                                    editable={!isBuying}
+                                />
+                                <View style={styles.pinButtons}>
+                                    <Pressable
+                                        style={[styles.pinButton, styles.pinCancelButton]}
+                                        onPress={() => { setShowPinInput(false); setPin(''); }}
+                                        disabled={isBuying}
+                                    >
+                                        <Text style={styles.pinCancelText}>Back</Text>
+                                    </Pressable>
+                                    <Pressable
+                                        style={[styles.pinButton, styles.pinConfirmButton, (!pin || pin.length < 4) && styles.disabledButton]}
+                                        onPress={handleConfirmSwap}
+                                        disabled={!pin || pin.length < 4 || isBuying}
+                                    >
+                                        {isBuying ? (
+                                            <ActivityIndicator size="small" color={COLORS.textPrimary} />
+                                        ) : (
+                                            <Text style={styles.pinConfirmText}>Confirm</Text>
+                                        )}
+                                    </Pressable>
+                                </View>
                             </View>
                         )}
 
@@ -320,31 +465,29 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose }
                             </View>
                         )}
 
-                        {/* Buy Button */}
-                        <Pressable
-                            style={[
-                                styles.buyButton,
-                                (!tokenInfo || !solAmount || isBuying) && styles.buyButtonDisabled
-                            ]}
-                            onPress={handleBuy}
-                            disabled={!tokenInfo || !solAmount || isBuying}
-                        >
-                            <LinearGradient
-                                colors={tokenInfo && solAmount && !isBuying
-                                    ? [COLORS.success, COLORS.success + '80']
-                                    : [COLORS.textSecondary, COLORS.textSecondary + '80']
-                                }
-                                style={styles.buyButtonGradient}
+                        {/* Buy Button (hidden when showing PIN input) */}
+                        {!showPinInput && (
+                            <Pressable
+                                style={[
+                                    styles.buyButton,
+                                    (!canBuy) && styles.buyButtonDisabled
+                                ]}
+                                onPress={handleBuy}
+                                disabled={!canBuy}
                             >
-                                {isBuying ? (
-                                    <ActivityIndicator size="small" color={COLORS.textPrimary} />
-                                ) : (
+                                <LinearGradient
+                                    colors={canBuy
+                                        ? [COLORS.success, COLORS.success + '80']
+                                        : [COLORS.textSecondary, COLORS.textSecondary + '80']
+                                    }
+                                    style={styles.buyButtonGradient}
+                                >
                                     <Text style={styles.buyButtonText}>
-                                        Buy Now
+                                        {isFetchingQuote ? 'Getting Quote...' : 'Buy Now'}
                                     </Text>
-                                )}
-                            </LinearGradient>
-                        </Pressable>
+                                </LinearGradient>
+                            </Pressable>
+                        )}
 
                         <Text style={styles.disclaimer}>
                             ⚠️ Always verify the token address. Do your own research before buying.
@@ -473,12 +616,6 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: 12,
     },
-    tokenPrice: {
-        ...FONTS.monospace,
-        color: COLORS.solana,
-        fontSize: 12,
-        marginTop: 2,
-    },
     amountContainer: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -514,12 +651,6 @@ const styles = StyleSheet.create({
     presetTextActive: {
         color: COLORS.solana,
     },
-    balanceText: {
-        ...FONTS.phantomRegular,
-        color: COLORS.textSecondary,
-        fontSize: 12,
-        marginTop: SPACING.xs,
-    },
     slippageContainer: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -532,6 +663,18 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: 14,
         marginLeft: SPACING.s,
+    },
+    quoteLoadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: SPACING.l,
+        gap: SPACING.s,
+    },
+    quoteLoadingText: {
+        ...FONTS.phantomRegular,
+        color: COLORS.textSecondary,
+        fontSize: 14,
     },
     estimateCard: {
         backgroundColor: COLORS.cardBackground,
@@ -551,6 +694,52 @@ const styles = StyleSheet.create({
         ...FONTS.phantomBold,
         color: COLORS.textPrimary,
         fontSize: 18,
+    },
+    estimateSubtext: {
+        ...FONTS.phantomRegular,
+        color: COLORS.textSecondary,
+        fontSize: 12,
+        marginTop: SPACING.xs,
+    },
+    pinContainer: {
+        marginBottom: SPACING.l,
+    },
+    pinInput: {
+        textAlign: 'center',
+        letterSpacing: 8,
+        fontSize: 20,
+    },
+    pinButtons: {
+        flexDirection: 'row',
+        gap: SPACING.m,
+        marginTop: SPACING.m,
+    },
+    pinButton: {
+        flex: 1,
+        paddingVertical: SPACING.m,
+        borderRadius: BORDER_RADIUS.medium,
+        alignItems: 'center',
+    },
+    pinCancelButton: {
+        backgroundColor: COLORS.cardBackground,
+        borderWidth: 1,
+        borderColor: COLORS.textSecondary + '30',
+    },
+    pinCancelText: {
+        ...FONTS.phantomMedium,
+        color: COLORS.textSecondary,
+        fontSize: 16,
+    },
+    pinConfirmButton: {
+        backgroundColor: COLORS.solana,
+    },
+    pinConfirmText: {
+        ...FONTS.phantomBold,
+        color: COLORS.textPrimary,
+        fontSize: 16,
+    },
+    disabledButton: {
+        opacity: 0.5,
     },
     errorContainer: {
         flexDirection: 'row',
@@ -614,3 +803,4 @@ const styles = StyleSheet.create({
     },
 });
 
+export default QuickBuyModal;

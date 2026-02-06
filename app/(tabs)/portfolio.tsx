@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
@@ -129,6 +129,14 @@ export default function PortfolioScreen() {
     };
     loadData();
   }, [fetchUserProfile, fetchWalletData]);
+
+  // Refresh when tab becomes focused
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh wallet data when portfolio tab is focused
+      fetchWalletData();
+    }, [fetchWalletData])
+  );
 
   const updateCopiedWallet = async (_id: string, _updates: any, _totp: string) => {
     Alert.alert('🚧 Demo Mode', 'Copy trade update is simulated.');

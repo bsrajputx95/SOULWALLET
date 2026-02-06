@@ -19,9 +19,11 @@ interface SocialPostProps {
   mentionedTokenMint?: string;
   walletAddress?: string;
   isVerified?: boolean;
+  isLiked?: boolean;
   onPress?: () => void;
   onBuyPress?: () => void;
   onCopyPress?: () => void;
+  onLike?: () => void;
   onUpdate?: () => void;
 }
 
@@ -37,16 +39,27 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
   mentionedToken,
   walletAddress,
   isVerified: _isVerified = false,
+  isLiked: initialIsLiked = false,
   onPress,
   onBuyPress,
   onCopyPress,
+  onLike,
   onUpdate,
 }) => {
   const router = useRouter();
-  const [isLiked, setIsLiked] = useState(false);
+  const [isLiked, setIsLiked] = useState(initialIsLiked);
   const [currentLikes, setCurrentLikes] = useState(likes);
-  const [_isProcessing, _setIsProcessing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Update local state when props change
+  useEffect(() => {
+    setIsLiked(initialIsLiked);
+  }, [initialIsLiked]);
+
+  useEffect(() => {
+    setCurrentLikes(likes);
+  }, [likes]);
 
   // Calculate post age in minutes for iBuy button coloring
   const postAgeMinutes = useMemo(() => {
@@ -158,14 +171,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     ? content.substring(0, MAX_CONTENT_LENGTH) + '...'
     : content;
 
-  // Mock mutation for like/unlike - handles optimistically using local state
-  const toggleLikeMutation = {
-    mutate: (_params: { postId: string }) => {
-      // Handled optimistically in handleLike - no actual API call
-      if (onUpdate) onUpdate();
-    },
-    isPending: false,
-  };
+
 
 
 
@@ -181,16 +187,28 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     }
   };
 
-  const handleLike = (e: any) => {
+  const handleLike = async (e: any) => {
     e.stopPropagation();
-    if (_isProcessing || toggleLikeMutation.isPending) return;
+    if (isProcessing || !onLike) return;
+
+    setIsProcessing(true);
 
     // Optimistic update
-    setIsLiked(!isLiked);
-    setCurrentLikes(isLiked ? currentLikes - 1 : currentLikes + 1);
+    const newLikedState = !isLiked;
+    setIsLiked(newLikedState);
+    setCurrentLikes(newLikedState ? currentLikes + 1 : currentLikes - 1);
 
-    // Call API
-    toggleLikeMutation.mutate({ postId: id });
+    try {
+      // Call the API via onLike prop
+      await onLike();
+      if (onUpdate) onUpdate();
+    } catch {
+      // Revert on error
+      setIsLiked(!newLikedState);
+      setCurrentLikes(newLikedState ? currentLikes - 1 : currentLikes + 1);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
 
@@ -277,7 +295,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
             <Pressable
               style={styles.action}
               onPress={handleLike}
-              disabled={_isProcessing}
+              disabled={isProcessing}
               accessibilityRole="button"
               accessibilityLabel={`${isLiked ? 'Unlike' : 'Like'}: ${currentLikes} likes`}
               accessibilityHint="Double tap to like this post"
