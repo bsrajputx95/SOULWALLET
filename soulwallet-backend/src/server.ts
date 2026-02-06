@@ -1685,8 +1685,9 @@ app.get('/feed', authMiddleware, async (req: AuthRequest, res: Response): Promis
 // Get Single Post
 app.get('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const postId = req.params.id as string;
     const post = await prisma.post.findUnique({
-      where: { id: req.params.id },
+      where: { id: postId },
       include: {
         user: { select: { id: true, username: true, profileImage: true } },
         comments: {
@@ -1744,7 +1745,8 @@ app.get('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response): P
 // Delete Post
 app.delete('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const post = await prisma.post.findUnique({ where: { id: req.params.id } });
+    const postId = req.params.id as string;
+    const post = await prisma.post.findUnique({ where: { id: postId } });
     if (!post) {
       res.status(404).json({ error: 'Not found' });
       return;
@@ -1754,7 +1756,7 @@ app.delete('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response)
       return;
     }
 
-    await prisma.post.delete({ where: { id: req.params.id } });
+    await prisma.post.delete({ where: { id: postId } });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete' });
@@ -1764,23 +1766,24 @@ app.delete('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response)
 // Like/Unlike
 app.post('/posts/:id/like', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const postId = req.params.id as string;
     const existing = await prisma.like.findUnique({
-      where: { postId_userId: { postId: req.params.id, userId: req.userId! } }
+      where: { postId_userId: { postId: postId, userId: req.userId! } }
     });
 
     if (existing) {
       await prisma.like.delete({ where: { id: existing.id } });
       await prisma.post.update({
-        where: { id: req.params.id },
+        where: { id: postId },
         data: { likesCount: { decrement: 1 } }
       });
       res.json({ success: true, liked: false });
     } else {
       await prisma.like.create({
-        data: { postId: req.params.id, userId: req.userId! }
+        data: { postId: postId, userId: req.userId! }
       });
       await prisma.post.update({
-        where: { id: req.params.id },
+        where: { id: postId },
         data: { likesCount: { increment: 1 } }
       });
       res.json({ success: true, liked: true });
@@ -1793,6 +1796,7 @@ app.post('/posts/:id/like', authMiddleware, async (req: AuthRequest, res: Respon
 // Add Comment
 app.post('/posts/:id/comment', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const postId = req.params.id as string;
     const { content } = req.body;
     if (!content || content.length > 300) {
       res.status(400).json({ error: 'Content required, max 300 chars' });
@@ -1801,7 +1805,7 @@ app.post('/posts/:id/comment', authMiddleware, async (req: AuthRequest, res: Res
 
     // Load the target post first
     const post = await prisma.post.findUnique({
-      where: { id: req.params.id },
+      where: { id: postId },
       select: { id: true, userId: true, visibility: true }
     });
 
@@ -1836,12 +1840,12 @@ app.post('/posts/:id/comment', authMiddleware, async (req: AuthRequest, res: Res
 
     // Only then create the comment and increment commentsCount
     const comment = await prisma.comment.create({
-      data: { postId: req.params.id, userId: req.userId!, content },
+      data: { postId: postId, userId: req.userId!, content },
       include: { user: { select: { username: true, profileImage: true } } }
     });
 
     await prisma.post.update({
-      where: { id: req.params.id },
+      where: { id: postId },
       data: { commentsCount: { increment: 1 } }
     });
 
@@ -1854,13 +1858,14 @@ app.post('/posts/:id/comment', authMiddleware, async (req: AuthRequest, res: Res
 // Get User Profile
 app.get('/users/:username', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const username = req.params.username as string;
     const user = await prisma.user.findUnique({
-      where: { username: req.params.username },
+      where: { username: username },
       include: {
         wallet: { select: { publicKey: true } },
         _count: { select: { followersRel: true, followingRel: true, posts: true } }
       }
-    });
+    }) as any;
 
     if (!user) {
       res.status(404).json({ error: 'User not found' });
@@ -1886,9 +1891,9 @@ app.get('/users/:username', authMiddleware, async (req: AuthRequest, res: Respon
         username: user.username,
         profileImage: user.profileImage,
         walletAddress: user.wallet?.publicKey,
-        followers: user._count.followersRel,
-        following: user._count.followingRel,
-        postsCount: user._count.posts,
+        followers: user._count?.followersRel || 0,
+        following: user._count?.followingRel || 0,
+        postsCount: user._count?.posts || 0,
         copyTraderCount,
         isFollowing: !!isFollowing,
         isCopying: !!isCopying,
@@ -1906,9 +1911,10 @@ app.get('/users/:username', authMiddleware, async (req: AuthRequest, res: Respon
 // Get User's Posts
 app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { visibility } = req.query;
+    const username = req.params.username as string;
+    const visibility = req.query.visibility as string | undefined;
     const user = await prisma.user.findUnique({
-      where: { username: req.params.username },
+      where: { username: username },
       select: { id: true }
     });
 
@@ -1926,7 +1932,11 @@ app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: 
       where.visibility = visibility;
     } else if (isOwnProfile) {
       // Owner can see all their own posts
-      where.visibility = { in: ['public', 'followers', 'vip'] };
+      where.OR = [
+        { visibility: 'public' },
+        { visibility: 'followers' },
+        { visibility: 'vip' }
+      ];
     } else {
       // Check if current user follows the target user
       const isFollowing = await prisma.follow.findFirst({
@@ -1936,7 +1946,10 @@ app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: 
       // If following, show both public and followers-only posts
       // Otherwise, show only public posts
       if (isFollowing) {
-        where.visibility = { in: ['public', 'followers'] };
+        where.OR = [
+          { visibility: 'public' },
+          { visibility: 'followers' }
+        ];
       } else {
         where.visibility = 'public';
       }
@@ -1963,7 +1976,7 @@ app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: 
       likesCount: post._count.likes,
       commentsCount: post._count.comments,
       createdAt: post.createdAt,
-      user: { username: req.params.username, profileImage: null },
+      user: { username: username, profileImage: null },
       isLiked: post.likes.length > 0
     }));
 
@@ -1976,19 +1989,21 @@ app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: 
 // Follow/Unfollow
 app.post('/users/:id/follow', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (req.params.id === req.userId) {
+    const targetUserId = req.params.id as string;
+    
+    if (targetUserId === req.userId) {
       res.status(400).json({ error: 'Cannot follow yourself' });
       return;
     }
 
     const existing = await prisma.follow.findFirst({
-      where: { followerId: req.userId!, followingId: req.params.id }
+      where: { followerId: req.userId!, followingId: targetUserId }
     });
 
     if (existing) {
       await prisma.follow.delete({ where: { id: existing.id } });
       await prisma.user.update({
-        where: { id: req.params.id },
+        where: { id: targetUserId },
         data: { followers: { decrement: 1 } }
       });
       await prisma.user.update({
@@ -1998,10 +2013,10 @@ app.post('/users/:id/follow', authMiddleware, async (req: AuthRequest, res: Resp
       res.json({ success: true, following: false });
     } else {
       await prisma.follow.create({
-        data: { followerId: req.userId!, followingId: req.params.id }
+        data: { followerId: req.userId!, followingId: targetUserId }
       });
       await prisma.user.update({
-        where: { id: req.params.id },
+        where: { id: targetUserId },
         data: { followers: { increment: 1 } }
       });
       await prisma.user.update({
