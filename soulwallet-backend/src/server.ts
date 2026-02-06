@@ -1466,58 +1466,43 @@ function shouldRefreshTrending(): boolean {
     return lastUpdateUTC < todayAt15UTC;
 }
 
-// Fetch trending tokens from BirdEye (FREE public endpoint - no API key needed)
+// Fetch trending tokens from CoinGecko (FREE public API - no API key needed)
 async function fetchTrendingTokens(): Promise<any[]> {
     try {
-        console.log('[Trending] Fetching from BirdEye FREE public API...');
+        console.log('[Trending] Fetching from CoinGecko FREE public API...');
 
-        // BirdEye FREE trending endpoint - no API key required
-        const response = await axios.get('https://public-api.birdeye.so/defi/token_trending', {
-            params: {
-                sort_by: 'v24hChangePercent',
-                sort_type: 'desc',
-                offset: 0,
-                limit: 30
-            },
+        // CoinGecko FREE trending endpoint - no API key required
+        const response = await axios.get('https://api.coingecko.com/api/v3/search/trending', {
             timeout: 10000
         });
 
-        const tokens = response.data?.data?.tokens || [];
-        console.log(`[Trending] Got ${tokens.length} tokens from BirdEye`);
+        const coins = response.data?.coins || [];
+        console.log(`[Trending] Got ${coins.length} trending coins from CoinGecko`);
         
-        if (tokens.length === 0) {
-            console.log('[Trending] No tokens returned, using fallback data');
+        if (coins.length === 0) {
+            console.log('[Trending] No coins returned, using fallback data');
             return trendingTokensCache.length > 0 ? trendingTokensCache : getFallbackTokens();
         }
 
-        // Filter tokens with reasonable liquidity/volume
-        const filteredTokens = tokens
-            .filter((token: any) => {
-                const hasLiquidity = (token.liquidity || 0) > 500;
-                const hasVolume = (token.v24hUSD || 0) > 500;
-                return hasLiquidity && hasVolume;
-            })
-            .slice(0, 10);
-        
-        console.log(`[Trending] After filtering: ${filteredTokens.length} tokens`);
-        
-        if (filteredTokens.length === 0) {
-            return getFallbackTokens();
-        }
+        // Take top 10 trending
+        const topCoins = coins.slice(0, 10);
         
         // Transform to frontend format
-        const transformedTokens = filteredTokens.map((token: any) => ({
-            address: token.address,
-            symbol: token.symbol,
-            name: token.name,
-            price: token.price || 0,
-            priceChange24h: token.priceChange24h || 0,
-            volume24h: token.v24hUSD || 0,
-            marketCap: token.marketCap || 0,
-            liquidity: token.liquidity || 0,
-            logo: token.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${token.address}/logo.png`,
-            banner: token.extensions?.bannerURI
-        }));
+        const transformedTokens = topCoins.map((coin: any) => {
+            const item = coin.item;
+            return {
+                address: item.id, // CoinGecko uses id instead of contract address
+                symbol: item.symbol,
+                name: item.name,
+                price: item.data?.price || 0,
+                priceChange24h: item.data?.price_change_percentage_24h?.usd || 0,
+                volume24h: parseFloat(item.data?.total_volume?.replace(/[^0-9.]/g, '')) * 1000000 || 0, // Approximate from string like "$117M"
+                marketCap: parseFloat(item.data?.market_cap?.replace(/[^0-9.]/g, '')) * 1000000 || 0,
+                liquidity: 0, // Not provided by trending endpoint
+                logo: item.large || item.small || item.thumb,
+                banner: undefined
+            };
+        });
 
         console.log('[Trending] Tokens:', transformedTokens.map((t: any) => t.symbol).join(', '));
         return transformedTokens;
@@ -1544,7 +1529,7 @@ function getFallbackTokens(): any[] {
     ];
 }
 
-// GET /market/tokens - Get top tokens from BirdEye FREE public API with caching
+// GET /market/tokens - Get top tokens from CoinGecko FREE public API with caching
 app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
     try {
         // Check cache first
@@ -1554,31 +1539,32 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
             return;
         }
 
-        // Fetch from BirdEye FREE public API - no API key needed
-        const response = await axios.get('https://public-api.birdeye.so/defi/v3/token/list', {
+        // Fetch from CoinGecko FREE public API - no API key needed
+        const response = await axios.get('https://api.coingecko.com/api/v3/coins/markets', {
             params: {
-                sort_by: 'v24hUSD',
-                sort_type: 'desc',
-                offset: 0,
-                limit: 50
+                vs_currency: 'usd',
+                order: 'market_cap_desc',
+                per_page: 50,
+                page: 1,
+                sparkline: false
             },
             timeout: 10000
         });
 
-        const tokens = response.data?.data?.tokens || [];
+        const tokens = response.data || [];
         
         // Transform to frontend format
         const transformedTokens = tokens.map((token: any) => ({
-            address: token.address,
-            symbol: token.symbol,
+            address: token.id, // CoinGecko uses id
+            symbol: token.symbol.toUpperCase(),
             name: token.name,
-            price: token.price || 0,
-            priceChange24h: token.priceChange24h || 0,
-            volume24h: token.v24hUSD || 0,
-            marketCap: token.marketCap || 0,
-            liquidity: token.liquidity || 0,
-            logo: token.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${token.address}/logo.png`,
-            banner: token.extensions?.bannerURI
+            price: token.current_price || 0,
+            priceChange24h: token.price_change_percentage_24h || 0,
+            volume24h: token.total_volume || 0,
+            marketCap: token.market_cap || 0,
+            liquidity: 0, // Not directly provided
+            logo: token.image,
+            banner: undefined
         }));
 
         // Cache the results
