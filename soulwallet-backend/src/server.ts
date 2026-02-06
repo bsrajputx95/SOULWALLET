@@ -1466,21 +1466,27 @@ function shouldRefreshTrending(): boolean {
     return lastUpdateUTC < todayAt15UTC;
 }
 
-// Fetch trending tokens from BirdEye (FREE public API - no API key needed!)
+// Fetch trending tokens from BirdEye
 async function fetchTrendingTokens(): Promise<any[]> {
     try {
-        console.log('[Trending] Fetching from BirdEye FREE public API...');
+        console.log('[Trending] Fetching from BirdEye API...');
 
-        // BirdEye FREE endpoint - no API key required!
-        // Using their public/defi endpoint which is free
-        const response = await axios.get('https://public-api.birdeye.so/public/defi/tokenlist', {
+        // BirdEye trending endpoint (requires API key for full features, but has limited free access)
+        const birdEyeKey = process.env.BIRDEYE_API_KEY;
+        const headers: any = {};
+        if (birdEyeKey) {
+            headers['X-API-KEY'] = birdEyeKey;
+        }
+        
+        const response = await axios.get('https://public-api.birdeye.so/defi/token_trending', {
+            headers: Object.keys(headers).length > 0 ? headers : undefined,
             params: {
                 sort_by: 'v24hChangePercent',
                 sort_type: 'desc',
                 offset: 0,
                 limit: 30
             },
-            // No headers needed for free endpoint!
+            timeout: 10000
         });
 
         const tokens = response.data?.data?.tokens || [];

@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
+// Jupiter Price API v2 (price.jup.ag is deprecated)
+const JUPITER_PRICE_API = 'https://api.jup.ag/price/v2';
 
 // Cache for prices (10 second TTL)
 const priceCache = new Map<string, { price: number; timestamp: number }>();
@@ -26,8 +27,9 @@ export async function getTokenPrice(mintToken: string): Promise<number> {
             timeout: 5000
         });
 
+        // V2 API response format: { data: { [mint]: { id: string, type: string, price: string } } }
         const priceData = response.data?.data?.[mintToken];
-        const price = priceData?.price || 0;
+        const price = priceData ? parseFloat(priceData.price) : 0;
 
         // Cache the price
         priceCache.set(mintToken, { price, timestamp: now });
@@ -70,10 +72,12 @@ export async function getTokenPrices(mintTokens: string[]): Promise<Record<strin
             timeout: 5000
         });
 
+        // V2 API response format: { data: { [mint]: { id: string, type: string, price: string } } }
         const data = response.data?.data || {};
         
         for (const mint of toFetch) {
-            const price = data[mint]?.price || 0;
+            const priceData = data[mint];
+            const price = priceData ? parseFloat(priceData.price) : 0;
             result[mint] = price;
             priceCache.set(mint, { price, timestamp: now });
         }
