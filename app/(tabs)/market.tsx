@@ -68,14 +68,33 @@ export default function MarketScreen() {
     loadTokens();
   }, [loadTokens]);
 
+  // Poll prices every 5 minutes for market tokens
+  useEffect(() => {
+    if (tokens.length === 0 || activeTab !== 'soulmarket') return;
+    
+    const pollPrices = async () => {
+      try {
+        const response = await fetchMarketTokens();
+        if (response.success) {
+          setTokens(response.tokens);
+        }
+      } catch (err) {
+        // Silent fail - keep showing cached data
+      }
+    };
+    
+    const interval = setInterval(pollPrices, 5 * 60 * 1000); // 5 minutes
+    return () => clearInterval(interval);
+  }, [tokens.length, activeTab]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadTokens();
     setRefreshing(false);
   }, [loadTokens]);
 
-  // Tokens are already filtered in the store, use directly
-  const visibleTokens = tokens;
+  // Limit SoulMarket to 30 tokens (backend returns 50)
+  const visibleTokens = tokens.slice(0, 30);
   const totalCount = tokens.length;
 
   // Check if current tab requires WebView (non-scrollable container)
@@ -117,7 +136,7 @@ export default function MarketScreen() {
         {/* Token Count */}
         {totalCount > 0 && (
           <Text style={styles.tokenCount}>
-            Showing {visibleTokens.length} tokens
+            Showing {visibleTokens.length} of {totalCount} tokens
           </Text>
         )}
 

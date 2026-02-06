@@ -172,28 +172,6 @@ export const toggleFollow = async (
   }
 };
 
-export interface TrendingToken {
-  address: string;
-  symbol: string;
-  name: string;
-  price: number;
-  priceChange24h: number;
-  volume24h: number;
-  marketCap: number;
-  liquidity: number;
-  logo: string;
-  banner?: string;
-}
-
-export const fetchTrendingTokens = async (): Promise<{ success: boolean; tokens?: TrendingToken[]; lastUpdated?: string; error?: string }> => {
-  try {
-    const response = await api.get<{ success: boolean; tokens: TrendingToken[]; lastUpdated: string }>('/market/trending');
-    return response;
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
-};
-
 export const verifyToken = async (
   address: string
 ): Promise<{ valid: boolean; symbol?: string; price?: number }> => {

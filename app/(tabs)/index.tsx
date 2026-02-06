@@ -34,7 +34,8 @@ import {
   QueueStatusBanner,
 } from '@/components';
 import * as SecureStore from 'expo-secure-store';
-import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api, API_URL, fetchTrendingTokens } from '@/services';
+import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api, API_URL } from '@/services';
+import { fetchTrendingTokens } from '@/services/market';
 import { showErrorToast, validateSession } from '@/utils';
 
 // Static fallback wallet data for UI display
@@ -247,6 +248,34 @@ export default function HomeScreen() {
     }
     setTrendingLoading(false);
   };
+
+  // Poll prices every 5 minutes for trending tokens
+  useEffect(() => {
+    if (trendingTokens.length === 0) return;
+    
+    const pollPrices = async () => {
+      const result = await fetchTrendingTokens();
+      if (result.success && result.tokens) {
+        const transformed = result.tokens.map((token: any) => ({
+          id: token.address,
+          symbol: token.symbol,
+          name: token.name,
+          price: token.price || 0,
+          change24h: token.priceChange24h || 0,
+          volume24h: token.volume24h || 0,
+          logo: token.logo || getWellKnownTokenLogo(token.symbol),
+          banner: token.banner,
+          liquidity: token.liquidity || 0,
+          contractAddress: token.address,
+          marketCap: token.marketCap || 0,
+        }));
+        setTrendingTokens(transformed);
+      }
+    };
+    
+    const interval = setInterval(pollPrices, 5 * 60 * 1000); // 5 minutes
+    return () => clearInterval(interval);
+  }, [trendingTokens.length]);
 
   // Transform trending tokens for display
   const topCoins = React.useMemo(() => {
