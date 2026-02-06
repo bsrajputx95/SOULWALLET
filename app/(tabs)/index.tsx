@@ -252,7 +252,7 @@ export default function HomeScreen() {
   // Poll prices every 5 minutes for trending tokens
   useEffect(() => {
     if (trendingTokens.length === 0) return;
-    
+
     const pollPrices = async () => {
       const result = await fetchTrendingTokens();
       if (result.success && result.tokens) {
@@ -272,7 +272,7 @@ export default function HomeScreen() {
         setTrendingTokens(transformed);
       }
     };
-    
+
     const interval = setInterval(pollPrices, 5 * 60 * 1000); // 5 minutes
     return () => clearInterval(interval);
   }, [trendingTokens.length]);
@@ -501,7 +501,7 @@ export default function HomeScreen() {
   const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
   const [copyConfig, setCopyConfig] = React.useState<any>(null);
   const [isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
-  
+
   // Legacy state (to be removed after migration)
   const [selectedTraderWallet, setSelectedTraderWallet] = React.useState<string | null>(null);
   const [copyAmount, setCopyAmount] = React.useState('1000');
@@ -626,10 +626,6 @@ export default function HomeScreen() {
                 </View>
               ) : (
                 <View>
-                  <Text style={styles.trendingSubtitle}>
-                    Top 10 performers • Updates daily at 15:00 UTC
-                    {lastTrendingUpdate && ` • Last: ${new Date(lastTrendingUpdate).toLocaleDateString()}`}
-                  </Text>
                   {topCoins.map((coin: any) => (
                     <TokenCard
                       key={coin.id}
@@ -939,7 +935,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Copy Trade Queue Status Banner */}
-          <QueueStatusBanner 
+          <QueueStatusBanner
             onViewQueue={handleQueueAction}
             pollInterval={30000}
           />

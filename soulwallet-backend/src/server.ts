@@ -1502,7 +1502,10 @@ async function fetchTrendingTokens(): Promise<any[]> {
         const pairsResponse = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${addresses}`, {
             timeout: 15000
         });
-        const pairs = pairsResponse.data || [];
+
+        // API returns array directly, not nested under .pairs
+        const pairs = Array.isArray(pairsResponse.data) ? pairsResponse.data : [];
+        console.log('[Trending] Pairs fetched:', pairs.length, 'for addresses:', addresses.split(',').length);
 
         // Build token -> best pair map (highest liquidity pair per token)
         const tokenPairMap = new Map();
@@ -1512,29 +1515,36 @@ async function fetchTrendingTokens(): Promise<any[]> {
                 tokenPairMap.set(addr, pair);
             }
         }
+        console.log('[Trending] Unique tokens mapped:', tokenPairMap.size);
 
         // Step 4: Transform and sort by 24h price change (biggest gainers first)
         const transformedTokens = solanaBoosts
             .map((boost: any) => {
                 const pair = tokenPairMap.get(boost.tokenAddress);
                 const profile = profileMap.get(boost.tokenAddress);
+
+                // Get image from multiple sources
+                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl || '';
+                const banner = profile?.header || boost.header || pair?.info?.header || '';
+
                 return {
                     address: boost.tokenAddress,
                     symbol: pair?.baseToken?.symbol || boost.tokenAddress.slice(0, 6),
                     name: pair?.baseToken?.name || 'Unknown',
                     price: parseFloat(pair?.priceUsd) || 0,
                     priceChange24h: parseFloat(pair?.priceChange?.h24) || 0,
-                    volume24h: pair?.volume?.h24 || 0,
-                    marketCap: pair?.marketCap || pair?.fdv || 0,
-                    liquidity: pair?.liquidity?.usd || 0,
-                    logo: profile?.icon || boost.icon || pair?.info?.imageUrl || '',
-                    banner: profile?.header || boost.header || pair?.info?.header || ''
+                    volume24h: parseFloat(pair?.volume?.h24) || 0,
+                    marketCap: parseFloat(pair?.marketCap) || parseFloat(pair?.fdv) || 0,
+                    liquidity: parseFloat(pair?.liquidity?.usd) || 0,
+                    logo,
+                    banner
                 };
             })
             .filter((t: any) => t.price > 0) // Only tokens with valid prices
             .sort((a: any, b: any) => Math.abs(b.priceChange24h) - Math.abs(a.priceChange24h)) // Sort by biggest movers
             .slice(0, 10); // Top 10
 
+        console.log('[Trending] Sample token data:', JSON.stringify(transformedTokens[0] || {}, null, 2));
         console.log('[Trending] Tokens:', transformedTokens.map((t: any) => `${t.symbol}(${t.priceChange24h.toFixed(1)}%)`).join(', '));
         return transformedTokens;
     } catch (error: any) {
@@ -1605,7 +1615,10 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
         const pairsResponse = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${addresses}`, {
             timeout: 15000
         });
-        const pairs = pairsResponse.data || [];
+
+        // API returns array directly
+        const pairs = Array.isArray(pairsResponse.data) ? pairsResponse.data : [];
+        console.log('[Market] Pairs fetched:', pairs.length);
 
         // Build token -> best pair map (highest liquidity pair per token)
         const tokenPairMap = new Map();
@@ -1615,12 +1628,17 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
                 tokenPairMap.set(addr, pair);
             }
         }
+        console.log('[Market] Unique tokens mapped:', tokenPairMap.size);
 
         // Step 4: Transform and sort by 1h price change (biggest movers = trending in last hour)
         const transformedTokens = solanaBoosts
             .map((boost: any) => {
                 const pair = tokenPairMap.get(boost.tokenAddress);
                 const profile = profileMap.get(boost.tokenAddress);
+
+                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl || '';
+                const banner = profile?.header || boost.header || pair?.info?.header || '';
+
                 return {
                     address: boost.tokenAddress,
                     symbol: pair?.baseToken?.symbol || boost.tokenAddress.slice(0, 6),
@@ -1628,11 +1646,11 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
                     price: parseFloat(pair?.priceUsd) || 0,
                     priceChange24h: parseFloat(pair?.priceChange?.h24) || 0,
                     priceChange1h: parseFloat(pair?.priceChange?.h1) || 0,
-                    volume24h: pair?.volume?.h24 || 0,
-                    marketCap: pair?.marketCap || pair?.fdv || 0,
-                    liquidity: pair?.liquidity?.usd || 0,
-                    logo: profile?.icon || boost.icon || pair?.info?.imageUrl || '',
-                    banner: profile?.header || boost.header || pair?.info?.header || ''
+                    volume24h: parseFloat(pair?.volume?.h24) || 0,
+                    marketCap: parseFloat(pair?.marketCap) || parseFloat(pair?.fdv) || 0,
+                    liquidity: parseFloat(pair?.liquidity?.usd) || 0,
+                    logo,
+                    banner
                 };
             })
             .filter((t: any) => t.price > 0) // Only tokens with valid prices
@@ -1642,6 +1660,7 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
         // Cache the results
         tokenCache.set('top_tokens', transformedTokens);
 
+        console.log('[Market] Sample:', JSON.stringify(transformedTokens[0] || {}, null, 2));
         console.log('[Market] Top tokens by 1h change:', transformedTokens.slice(0, 5).map((t: any) => `${t.symbol}(${t.priceChange1h?.toFixed(1)}%)`).join(', '));
         res.json({ success: true, tokens: transformedTokens, cached: false });
     } catch (error) {
