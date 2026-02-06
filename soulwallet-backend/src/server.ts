@@ -187,8 +187,8 @@ const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): vo
 // GET /health - Healthcheck for Railway
 app.get('/health', (_req: Request, res: Response) => {
     const rpcStatus = getRpcStatus();
-    res.status(200).json({ 
-        status: 'ok', 
+    res.status(200).json({
+        status: 'ok',
         timestamp: new Date().toISOString(),
         rpc: rpcStatus
     });
@@ -1200,9 +1200,9 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
             if (position.slOrderId || position.tpOrderId) {
                 await prisma.copyPosition.update({
                     where: { id: position.id },
-                    data: { 
+                    data: {
                         cancelTransactions: JSON.stringify(cancelTransactions.filter(c => c.transaction)),
-                        status: 'pending_cancel' 
+                        status: 'pending_cancel'
                     }
                 });
             }
@@ -1235,10 +1235,10 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
         // Return cancel transactions to client - they must be signed and broadcast
         // Orders are NOT canceled until the client signs these transactions
         const validCancels = cancelTransactions.filter(c => c.transaction);
-        res.json({ 
-            success: true, 
-            message: validCancels.length > 0 
-                ? 'Copy trading stopped. Sign and broadcast cancel transactions to complete.' 
+        res.json({
+            success: true,
+            message: validCancels.length > 0
+                ? 'Copy trading stopped. Sign and broadcast cancel transactions to complete.'
                 : 'Copy trading stopped',
             cancelTransactions: validCancels,
             pendingPositions: config.positions.map(p => ({ id: p.id, status: 'pending_cancel' }))
@@ -1440,18 +1440,18 @@ let lastTrendingUpdate: Date | null = null;
 function shouldRefreshTrending(): boolean {
     const now = new Date();
     const nowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes()));
-    
+
     // Check if current time is past 15:00 UTC
     const currentHourUTC = nowUTC.getUTCHours();
     if (currentHourUTC < 15) {
         return false; // Not yet 15:00 UTC
     }
-    
+
     // If never updated, refresh
     if (!lastTrendingUpdate) {
         return true;
     }
-    
+
     // Check if last update was before today at 15:00 UTC
     const lastUpdateUTC = new Date(Date.UTC(
         lastTrendingUpdate.getUTCFullYear(),
@@ -1460,73 +1460,85 @@ function shouldRefreshTrending(): boolean {
         lastTrendingUpdate.getUTCHours(),
         lastTrendingUpdate.getUTCMinutes()
     ));
-    
+
     const todayAt15UTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 15, 0));
-    
+
     return lastUpdateUTC < todayAt15UTC;
 }
 
-// Fetch trending tokens from DexScreener (FREE public API - Solana only, sorted by boosts/trending)
+// Fetch trending tokens from DexScreener - Top 10 by 24h price change (Solana only)
 async function fetchTrendingTokens(): Promise<any[]> {
     try {
-        console.log('[Trending] Fetching from DexScreener token-boosts API...');
+        console.log('[Trending] Fetching top gainers by 24h price change...');
 
-        // DexScreener token-boosts API - returns trending/boosted tokens
-        const response = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
+        // Step 1: Get token profiles for images/banners
+        const profilesResponse = await axios.get('https://api.dexscreener.com/token-profiles/latest/v1', {
             timeout: 10000
         });
+        const profiles = profilesResponse.data || [];
 
-        const tokens = response.data || [];
-        
-        // Filter for Solana chain only, take top 10
-        const solanaTokens = tokens
-            .filter((t: any) => t.chainId === 'solana')
-            .slice(0, 10);
-        
-        if (solanaTokens.length === 0) {
-            console.log('[Trending] No Solana tokens returned, using fallback data');
+        // Create map of token address -> profile (for images)
+        const profileMap = new Map();
+        for (const p of profiles) {
+            if (p.chainId === 'solana' && p.tokenAddress) {
+                profileMap.set(p.tokenAddress, { icon: p.icon, header: p.header });
+            }
+        }
+
+        // Step 2: Get boosted tokens (these are active/trending on DexScreener)
+        const boostsResponse = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
+            timeout: 10000
+        });
+        const boosts = boostsResponse.data || [];
+        const solanaBoosts = boosts.filter((t: any) => t.chainId === 'solana');
+
+        if (solanaBoosts.length === 0) {
+            console.log('[Trending] No Solana tokens, using fallback');
             return trendingTokensCache.length > 0 ? trendingTokensCache : getFallbackTokens();
         }
 
-        // Fetch detailed pair data for each token
-        const tokenAddresses = solanaTokens.map((t: any) => t.tokenAddress).join(',');
-        const pairsResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddresses}`, {
-            timeout: 10000
+        // Step 3: Get pair data for price info (batch up to 30 addresses)
+        const addresses = solanaBoosts.slice(0, 30).map((t: any) => t.tokenAddress).join(',');
+        const pairsResponse = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${addresses}`, {
+            timeout: 15000
         });
-        
-        const pairsData = pairsResponse.data?.pairs || [];
-        
-        // Create a map of token address to best pair data
+        const pairs = pairsResponse.data || [];
+
+        // Build token -> best pair map (highest liquidity pair per token)
         const tokenPairMap = new Map();
-        for (const pair of pairsData) {
+        for (const pair of pairs) {
             const addr = pair.baseToken?.address;
             if (addr && (!tokenPairMap.has(addr) || (pair.liquidity?.usd || 0) > (tokenPairMap.get(addr).liquidity?.usd || 0))) {
                 tokenPairMap.set(addr, pair);
             }
         }
 
-        // Transform to frontend format
-        const transformedTokens = solanaTokens.map((token: any) => {
-            const pair = tokenPairMap.get(token.tokenAddress);
-            return {
-                address: token.tokenAddress,
-                symbol: pair?.baseToken?.symbol || token.tokenAddress.slice(0, 6),
-                name: pair?.baseToken?.name || 'Unknown',
-                price: parseFloat(pair?.priceUsd) || 0,
-                priceChange24h: pair?.priceChange?.h24 || 0,
-                volume24h: pair?.volume?.h24 || 0,
-                marketCap: pair?.marketCap || pair?.fdv || 0,
-                liquidity: pair?.liquidity?.usd || 0,
-                logo: token.icon || pair?.info?.imageUrl,
-                banner: pair?.info?.header
-            };
-        });
+        // Step 4: Transform and sort by 24h price change (biggest gainers first)
+        const transformedTokens = solanaBoosts
+            .map((boost: any) => {
+                const pair = tokenPairMap.get(boost.tokenAddress);
+                const profile = profileMap.get(boost.tokenAddress);
+                return {
+                    address: boost.tokenAddress,
+                    symbol: pair?.baseToken?.symbol || boost.tokenAddress.slice(0, 6),
+                    name: pair?.baseToken?.name || 'Unknown',
+                    price: parseFloat(pair?.priceUsd) || 0,
+                    priceChange24h: parseFloat(pair?.priceChange?.h24) || 0,
+                    volume24h: pair?.volume?.h24 || 0,
+                    marketCap: pair?.marketCap || pair?.fdv || 0,
+                    liquidity: pair?.liquidity?.usd || 0,
+                    logo: profile?.icon || boost.icon || pair?.info?.imageUrl || '',
+                    banner: profile?.header || boost.header || pair?.info?.header || ''
+                };
+            })
+            .filter((t: any) => t.price > 0) // Only tokens with valid prices
+            .sort((a: any, b: any) => Math.abs(b.priceChange24h) - Math.abs(a.priceChange24h)) // Sort by biggest movers
+            .slice(0, 10); // Top 10
 
-        console.log('[Trending] Tokens:', transformedTokens.map((t: any) => t.symbol).join(', '));
+        console.log('[Trending] Tokens:', transformedTokens.map((t: any) => `${t.symbol}(${t.priceChange24h.toFixed(1)}%)`).join(', '));
         return transformedTokens;
     } catch (error: any) {
         console.error('[Trending] API error:', error.message || error);
-        // Return fallback data if API fails
         return trendingTokensCache.length > 0 ? trendingTokensCache : getFallbackTokens();
     }
 }
@@ -1547,7 +1559,7 @@ function getFallbackTokens(): any[] {
     ];
 }
 
-// GET /market/tokens - Get top SOLANA DEX tokens from DexScreener FREE public API with caching
+// GET /market/tokens - Get top 30 SOLANA tokens sorted by 1h price change (trending in last hour)
 app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
     try {
         // Check cache first
@@ -1557,20 +1569,28 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
             return;
         }
 
-        // Fetch from DexScreener token-boosts API - returns trending/boosted tokens
-        const response = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
+        // Step 1: Get token profiles for images/banners
+        const profilesResponse = await axios.get('https://api.dexscreener.com/token-profiles/latest/v1', {
             timeout: 10000
         });
+        const profiles = profilesResponse.data || [];
 
-        const tokens = response.data || [];
-        
-        // Filter for Solana chain only, take top 50
-        const solanaTokens = tokens
-            .filter((t: any) => t.chainId === 'solana')
-            .slice(0, 50);
-        
-        if (solanaTokens.length === 0) {
-            // Return stale cache if available
+        // Create map of token address -> profile (for images)
+        const profileMap = new Map();
+        for (const p of profiles) {
+            if (p.chainId === 'solana' && p.tokenAddress) {
+                profileMap.set(p.tokenAddress, { icon: p.icon, header: p.header });
+            }
+        }
+
+        // Step 2: Get boosted tokens
+        const boostsResponse = await axios.get('https://api.dexscreener.com/token-boosts/top/v1', {
+            timeout: 10000
+        });
+        const boosts = boostsResponse.data || [];
+        const solanaBoosts = boosts.filter((t: any) => t.chainId === 'solana');
+
+        if (solanaBoosts.length === 0) {
             const stale = tokenCache.get('top_tokens');
             if (stale) {
                 res.json({ success: true, tokens: stale, cached: true, stale: true });
@@ -1580,54 +1600,60 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
             return;
         }
 
-        // Fetch detailed pair data for each token (batch request)
-        const tokenAddresses = solanaTokens.map((t: any) => t.tokenAddress).join(',');
-        const pairsResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddresses}`, {
+        // Step 3: Get pair data for price info (batch up to 30 addresses for API limit)
+        const addresses = solanaBoosts.slice(0, 30).map((t: any) => t.tokenAddress).join(',');
+        const pairsResponse = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${addresses}`, {
             timeout: 15000
         });
-        
-        const pairsData = pairsResponse.data?.pairs || [];
-        
-        // Create a map of token address to best pair data (highest liquidity)
+        const pairs = pairsResponse.data || [];
+
+        // Build token -> best pair map (highest liquidity pair per token)
         const tokenPairMap = new Map();
-        for (const pair of pairsData) {
+        for (const pair of pairs) {
             const addr = pair.baseToken?.address;
             if (addr && (!tokenPairMap.has(addr) || (pair.liquidity?.usd || 0) > (tokenPairMap.get(addr).liquidity?.usd || 0))) {
                 tokenPairMap.set(addr, pair);
             }
         }
 
-        // Transform to frontend format
-        const transformedTokens = solanaTokens.map((token: any) => {
-            const pair = tokenPairMap.get(token.tokenAddress);
-            return {
-                address: token.tokenAddress,
-                symbol: pair?.baseToken?.symbol || token.tokenAddress.slice(0, 6),
-                name: pair?.baseToken?.name || 'Unknown',
-                price: parseFloat(pair?.priceUsd) || 0,
-                priceChange24h: pair?.priceChange?.h24 || 0,
-                volume24h: pair?.volume?.h24 || 0,
-                marketCap: pair?.marketCap || pair?.fdv || 0,
-                liquidity: pair?.liquidity?.usd || 0,
-                logo: token.icon || pair?.info?.imageUrl,
-                banner: pair?.info?.header
-            };
-        });
+        // Step 4: Transform and sort by 1h price change (biggest movers = trending in last hour)
+        const transformedTokens = solanaBoosts
+            .map((boost: any) => {
+                const pair = tokenPairMap.get(boost.tokenAddress);
+                const profile = profileMap.get(boost.tokenAddress);
+                return {
+                    address: boost.tokenAddress,
+                    symbol: pair?.baseToken?.symbol || boost.tokenAddress.slice(0, 6),
+                    name: pair?.baseToken?.name || 'Unknown',
+                    price: parseFloat(pair?.priceUsd) || 0,
+                    priceChange24h: parseFloat(pair?.priceChange?.h24) || 0,
+                    priceChange1h: parseFloat(pair?.priceChange?.h1) || 0,
+                    volume24h: pair?.volume?.h24 || 0,
+                    marketCap: pair?.marketCap || pair?.fdv || 0,
+                    liquidity: pair?.liquidity?.usd || 0,
+                    logo: profile?.icon || boost.icon || pair?.info?.imageUrl || '',
+                    banner: profile?.header || boost.header || pair?.info?.header || ''
+                };
+            })
+            .filter((t: any) => t.price > 0) // Only tokens with valid prices
+            .sort((a: any, b: any) => Math.abs(b.priceChange1h) - Math.abs(a.priceChange1h)) // Sort by 1h change
+            .slice(0, 50); // Top 50 (frontend shows 30)
 
         // Cache the results
         tokenCache.set('top_tokens', transformedTokens);
 
+        console.log('[Market] Top tokens by 1h change:', transformedTokens.slice(0, 5).map((t: any) => `${t.symbol}(${t.priceChange1h?.toFixed(1)}%)`).join(', '));
         res.json({ success: true, tokens: transformedTokens, cached: false });
     } catch (error) {
         console.error('Market tokens fetch error:', error);
-        
+
         // Return stale cache if available
         const stale = tokenCache.get('top_tokens');
         if (stale) {
             res.json({ success: true, tokens: stale, cached: true, stale: true });
             return;
         }
-        
+
         res.status(500).json({ error: 'Failed to fetch market tokens' });
     }
 });
@@ -1667,422 +1693,422 @@ app.get('/market/trending', authMiddleware, async (_req: Request, res: Response)
 
 // Create Post
 app.post('/posts', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { content, visibility, tokenAddress } = req.body;
+    try {
+        const { content, visibility, tokenAddress } = req.body;
 
-    if (!content || content.length > 500) {
-      res.status(400).json({ error: 'Content required, max 500 chars' });
-      return;
-    }
-
-    let tokenData = null;
-    if (tokenAddress) {
-      try {
-        new PublicKey(tokenAddress);
-        // Fetch token info from Jupiter
-        const jupRes = await axios.get(`https://price.jup.ag/v6/price?ids=${tokenAddress}`);
-        const priceData = jupRes.data.data[tokenAddress];
-        if (priceData) {
-          tokenData = {
-            address: tokenAddress,
-            symbol: priceData.mintSymbol || 'Unknown',
-            name: priceData.mintSymbol || 'Unknown Token'
-          };
+        if (!content || content.length > 500) {
+            res.status(400).json({ error: 'Content required, max 500 chars' });
+            return;
         }
-      } catch {
-        tokenData = { address: tokenAddress, symbol: 'Unknown', name: 'Unknown Token' };
-      }
+
+        let tokenData = null;
+        if (tokenAddress) {
+            try {
+                new PublicKey(tokenAddress);
+                // Fetch token info from Jupiter
+                const jupRes = await axios.get(`https://price.jup.ag/v6/price?ids=${tokenAddress}`);
+                const priceData = jupRes.data.data[tokenAddress];
+                if (priceData) {
+                    tokenData = {
+                        address: tokenAddress,
+                        symbol: priceData.mintSymbol || 'Unknown',
+                        name: priceData.mintSymbol || 'Unknown Token'
+                    };
+                }
+            } catch {
+                tokenData = { address: tokenAddress, symbol: 'Unknown', name: 'Unknown Token' };
+            }
+        }
+
+        const post = await prisma.post.create({
+            data: {
+                userId: req.userId!,
+                content,
+                visibility: visibility || 'public',
+                tokenAddress: tokenData?.address,
+                tokenSymbol: tokenData?.symbol,
+                tokenName: tokenData?.name
+            },
+            include: {
+                user: { select: { username: true, profileImage: true } }
+            }
+        });
+
+        res.status(201).json({ success: true, post });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to create post' });
     }
-
-    const post = await prisma.post.create({
-      data: {
-        userId: req.userId!,
-        content,
-        visibility: visibility || 'public',
-        tokenAddress: tokenData?.address,
-        tokenSymbol: tokenData?.symbol,
-        tokenName: tokenData?.name
-      },
-      include: {
-        user: { select: { username: true, profileImage: true } }
-      }
-    });
-
-    res.status(201).json({ success: true, post });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to create post' });
-  }
 });
 
 // Get Feed
 app.get('/feed', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { cursor, limit = '20', mode } = req.query;
-    const { posts, nextCursor } = await getFeed(req.userId!, cursor as string, parseInt(limit as string), mode as string);
+    try {
+        const { cursor, limit = '20', mode } = req.query;
+        const { posts, nextCursor } = await getFeed(req.userId!, cursor as string, parseInt(limit as string), mode as string);
 
-    const postIds = posts.map((p: any) => p.id);
-    const userLikes = await prisma.like.findMany({
-      where: { postId: { in: postIds }, userId: req.userId! },
-      select: { postId: true }
-    });
-    const likedIds = new Set(userLikes.map(l => l.postId));
+        const postIds = posts.map((p: any) => p.id);
+        const userLikes = await prisma.like.findMany({
+            where: { postId: { in: postIds }, userId: req.userId! },
+            select: { postId: true }
+        });
+        const likedIds = new Set(userLikes.map(l => l.postId));
 
-    res.json({
-      success: true,
-      posts: posts.map((p: any) => ({ ...p, isLiked: likedIds.has(p.id) })),
-      nextCursor
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch feed' });
-  }
+        res.json({
+            success: true,
+            posts: posts.map((p: any) => ({ ...p, isLiked: likedIds.has(p.id) })),
+            nextCursor
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch feed' });
+    }
 });
 
 // Get Single Post
 app.get('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const postId = req.params.id as string;
-    const post = await prisma.post.findUnique({
-      where: { id: postId },
-      include: {
-        user: { select: { id: true, username: true, profileImage: true } },
-        comments: {
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-          include: { user: { select: { username: true, profileImage: true } } }
-        },
-        _count: { select: { likes: true, comments: true } }
-      }
-    });
+    try {
+        const postId = req.params.id as string;
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: {
+                user: { select: { id: true, username: true, profileImage: true } },
+                comments: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 50,
+                    include: { user: { select: { username: true, profileImage: true } } }
+                },
+                _count: { select: { likes: true, comments: true } }
+            }
+        });
 
-    if (!post) {
-      res.status(404).json({ error: 'Post not found' });
-      return;
+        if (!post) {
+            res.status(404).json({ error: 'Post not found' });
+            return;
+        }
+
+        if (post.visibility === 'followers') {
+            const isFollowing = await prisma.follow.findFirst({
+                where: { followerId: req.userId!, followingId: post.userId }
+            });
+            if (!isFollowing && post.userId !== req.userId) {
+                res.status(403).json({ error: 'Private post' });
+                return;
+            }
+        }
+
+        // VIP posts: allow the post owner to retrieve VIP posts
+        // Block non-owners until VIP membership is implemented
+        if (post.visibility === 'vip') {
+            if (post.userId !== req.userId) {
+                res.status(403).json({ error: 'VIP posts not available yet' });
+                return;
+            }
+            // Owner is allowed to proceed
+        }
+
+        const isLiked = await prisma.like.findFirst({
+            where: { postId: post.id, userId: req.userId! }
+        });
+
+        res.json({
+            success: true,
+            post: {
+                ...post,
+                isLiked: !!isLiked,
+                likesCount: post._count.likes,
+                commentsCount: post._count.comments
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch post' });
     }
-
-    if (post.visibility === 'followers') {
-      const isFollowing = await prisma.follow.findFirst({
-        where: { followerId: req.userId!, followingId: post.userId }
-      });
-      if (!isFollowing && post.userId !== req.userId) {
-        res.status(403).json({ error: 'Private post' });
-        return;
-      }
-    }
-
-    // VIP posts: allow the post owner to retrieve VIP posts
-    // Block non-owners until VIP membership is implemented
-    if (post.visibility === 'vip') {
-      if (post.userId !== req.userId) {
-        res.status(403).json({ error: 'VIP posts not available yet' });
-        return;
-      }
-      // Owner is allowed to proceed
-    }
-
-    const isLiked = await prisma.like.findFirst({
-      where: { postId: post.id, userId: req.userId! }
-    });
-
-    res.json({
-      success: true,
-      post: {
-        ...post,
-        isLiked: !!isLiked,
-        likesCount: post._count.likes,
-        commentsCount: post._count.comments
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch post' });
-  }
 });
 
 // Delete Post
 app.delete('/posts/:id', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const postId = req.params.id as string;
-    const post = await prisma.post.findUnique({ where: { id: postId } });
-    if (!post) {
-      res.status(404).json({ error: 'Not found' });
-      return;
-    }
-    if (post.userId !== req.userId) {
-      res.status(403).json({ error: 'Not authorized' });
-      return;
-    }
+    try {
+        const postId = req.params.id as string;
+        const post = await prisma.post.findUnique({ where: { id: postId } });
+        if (!post) {
+            res.status(404).json({ error: 'Not found' });
+            return;
+        }
+        if (post.userId !== req.userId) {
+            res.status(403).json({ error: 'Not authorized' });
+            return;
+        }
 
-    await prisma.post.delete({ where: { id: postId } });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete' });
-  }
+        await prisma.post.delete({ where: { id: postId } });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete' });
+    }
 });
 
 // Like/Unlike
 app.post('/posts/:id/like', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const postId = req.params.id as string;
-    const existing = await prisma.like.findUnique({
-      where: { postId_userId: { postId: postId, userId: req.userId! } }
-    });
+    try {
+        const postId = req.params.id as string;
+        const existing = await prisma.like.findUnique({
+            where: { postId_userId: { postId: postId, userId: req.userId! } }
+        });
 
-    if (existing) {
-      await prisma.like.delete({ where: { id: existing.id } });
-      await prisma.post.update({
-        where: { id: postId },
-        data: { likesCount: { decrement: 1 } }
-      });
-      res.json({ success: true, liked: false });
-    } else {
-      await prisma.like.create({
-        data: { postId: postId, userId: req.userId! }
-      });
-      await prisma.post.update({
-        where: { id: postId },
-        data: { likesCount: { increment: 1 } }
-      });
-      res.json({ success: true, liked: true });
+        if (existing) {
+            await prisma.like.delete({ where: { id: existing.id } });
+            await prisma.post.update({
+                where: { id: postId },
+                data: { likesCount: { decrement: 1 } }
+            });
+            res.json({ success: true, liked: false });
+        } else {
+            await prisma.like.create({
+                data: { postId: postId, userId: req.userId! }
+            });
+            await prisma.post.update({
+                where: { id: postId },
+                data: { likesCount: { increment: 1 } }
+            });
+            res.json({ success: true, liked: true });
+        }
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to toggle like' });
     }
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to toggle like' });
-  }
 });
 
 // Add Comment
 app.post('/posts/:id/comment', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const postId = req.params.id as string;
-    const { content } = req.body;
-    if (!content || content.length > 300) {
-      res.status(400).json({ error: 'Content required, max 300 chars' });
-      return;
-    }
-
-    // Load the target post first
-    const post = await prisma.post.findUnique({
-      where: { id: postId },
-      select: { id: true, userId: true, visibility: true }
-    });
-
-    // If missing, return 404
-    if (!post) {
-      res.status(404).json({ error: 'Post not found' });
-      return;
-    }
-
-    // Visibility checks
-    if (post.visibility === 'followers') {
-      // Ensure requester is the author or follows the author
-      const isAuthor = post.userId === req.userId;
-      if (!isAuthor) {
-        const isFollowing = await prisma.follow.findFirst({
-          where: { followerId: req.userId!, followingId: post.userId }
-        });
-        if (!isFollowing) {
-          res.status(403).json({ error: 'Cannot comment on this post' });
-          return;
+    try {
+        const postId = req.params.id as string;
+        const { content } = req.body;
+        if (!content || content.length > 300) {
+            res.status(400).json({ error: 'Content required, max 300 chars' });
+            return;
         }
-      }
+
+        // Load the target post first
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            select: { id: true, userId: true, visibility: true }
+        });
+
+        // If missing, return 404
+        if (!post) {
+            res.status(404).json({ error: 'Post not found' });
+            return;
+        }
+
+        // Visibility checks
+        if (post.visibility === 'followers') {
+            // Ensure requester is the author or follows the author
+            const isAuthor = post.userId === req.userId;
+            if (!isAuthor) {
+                const isFollowing = await prisma.follow.findFirst({
+                    where: { followerId: req.userId!, followingId: post.userId }
+                });
+                if (!isFollowing) {
+                    res.status(403).json({ error: 'Cannot comment on this post' });
+                    return;
+                }
+            }
+        }
+
+        if (post.visibility === 'vip') {
+            // Reject until VIP is implemented - only author can comment
+            if (post.userId !== req.userId) {
+                res.status(403).json({ error: 'VIP posts not available yet' });
+                return;
+            }
+        }
+
+        // Only then create the comment and increment commentsCount
+        const comment = await prisma.comment.create({
+            data: { postId: postId, userId: req.userId!, content },
+            include: { user: { select: { username: true, profileImage: true } } }
+        });
+
+        await prisma.post.update({
+            where: { id: postId },
+            data: { commentsCount: { increment: 1 } }
+        });
+
+        res.status(201).json({ success: true, comment });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to add comment' });
     }
-
-    if (post.visibility === 'vip') {
-      // Reject until VIP is implemented - only author can comment
-      if (post.userId !== req.userId) {
-        res.status(403).json({ error: 'VIP posts not available yet' });
-        return;
-      }
-    }
-
-    // Only then create the comment and increment commentsCount
-    const comment = await prisma.comment.create({
-      data: { postId: postId, userId: req.userId!, content },
-      include: { user: { select: { username: true, profileImage: true } } }
-    });
-
-    await prisma.post.update({
-      where: { id: postId },
-      data: { commentsCount: { increment: 1 } }
-    });
-
-    res.status(201).json({ success: true, comment });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to add comment' });
-  }
 });
 
 // Get User Profile
 app.get('/users/:username', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const username = req.params.username as string;
-    const user = await prisma.user.findUnique({
-      where: { username: username },
-      include: {
-        wallet: { select: { publicKey: true } },
-        _count: { select: { followersRel: true, followingRel: true, posts: true } }
-      }
-    }) as any;
+    try {
+        const username = req.params.username as string;
+        const user = await prisma.user.findUnique({
+            where: { username: username },
+            include: {
+                wallet: { select: { publicKey: true } },
+                _count: { select: { followersRel: true, followingRel: true, posts: true } }
+            }
+        }) as any;
 
-    if (!user) {
-      res.status(404).json({ error: 'User not found' });
-      return;
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        const isFollowing = await prisma.follow.findFirst({
+            where: { followerId: req.userId!, followingId: user.id }
+        });
+
+        const isCopying = await prisma.copyTradingConfig.findFirst({
+            where: { userId: req.userId!, traderAddress: user.wallet?.publicKey }
+        });
+
+        const copyTraderCount = await prisma.copyTradingConfig.count({
+            where: { traderAddress: user.wallet?.publicKey, isActive: true }
+        });
+
+        res.json({
+            success: true,
+            user: {
+                id: user.id,
+                username: user.username,
+                profileImage: user.profileImage,
+                walletAddress: user.wallet?.publicKey,
+                followers: user._count?.followersRel || 0,
+                following: user._count?.followingRel || 0,
+                postsCount: user._count?.posts || 0,
+                copyTraderCount,
+                isFollowing: !!isFollowing,
+                isCopying: !!isCopying,
+                roi30d: user.roi30d || 0,
+                winRate: user.winRate || 0,
+                maxDrawdown: user.maxDrawdown || null,
+                followersEquity: user.followersEquity || null
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch profile' });
     }
-
-    const isFollowing = await prisma.follow.findFirst({
-      where: { followerId: req.userId!, followingId: user.id }
-    });
-
-    const isCopying = await prisma.copyTradingConfig.findFirst({
-      where: { userId: req.userId!, traderAddress: user.wallet?.publicKey }
-    });
-
-    const copyTraderCount = await prisma.copyTradingConfig.count({
-      where: { traderAddress: user.wallet?.publicKey, isActive: true }
-    });
-
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        profileImage: user.profileImage,
-        walletAddress: user.wallet?.publicKey,
-        followers: user._count?.followersRel || 0,
-        following: user._count?.followingRel || 0,
-        postsCount: user._count?.posts || 0,
-        copyTraderCount,
-        isFollowing: !!isFollowing,
-        isCopying: !!isCopying,
-        roi30d: user.roi30d || 0,
-        winRate: user.winRate || 0,
-        maxDrawdown: user.maxDrawdown || null,
-        followersEquity: user.followersEquity || null
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch profile' });
-  }
 });
 
 // Get User's Posts
 app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const username = req.params.username as string;
-    const visibility = req.query.visibility as string | undefined;
-    const user = await prisma.user.findUnique({
-      where: { username: username },
-      select: { id: true }
-    });
+    try {
+        const username = req.params.username as string;
+        const visibility = req.query.visibility as string | undefined;
+        const user = await prisma.user.findUnique({
+            where: { username: username },
+            select: { id: true }
+        });
 
-    if (!user) {
-      res.status(404).json({ error: 'User not found' });
-      return;
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        const isOwnProfile = user.id === req.userId;
+
+        const where: any = { userId: user.id };
+
+        // Filter by visibility if specified and viewing own profile
+        if (visibility && isOwnProfile) {
+            where.visibility = visibility;
+        } else if (isOwnProfile) {
+            // Owner can see all their own posts
+            where.OR = [
+                { visibility: 'public' },
+                { visibility: 'followers' },
+                { visibility: 'vip' }
+            ];
+        } else {
+            // Check if current user follows the target user
+            const isFollowing = await prisma.follow.findFirst({
+                where: { followerId: req.userId!, followingId: user.id }
+            });
+
+            // If following, show both public and followers-only posts
+            // Otherwise, show only public posts
+            if (isFollowing) {
+                where.OR = [
+                    { visibility: 'public' },
+                    { visibility: 'followers' }
+                ];
+            } else {
+                where.visibility = 'public';
+            }
+            // TODO: Show VIP posts if subscribed
+        }
+
+        const posts = await prisma.post.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            include: {
+                _count: { select: { likes: true, comments: true } },
+                likes: { where: { userId: req.userId! }, select: { id: true } }
+            }
+        });
+
+        const formattedPosts = posts.map(post => ({
+            id: post.id,
+            userId: post.userId,
+            content: post.content,
+            visibility: post.visibility,
+            tokenAddress: post.tokenAddress,
+            tokenSymbol: post.tokenSymbol,
+            tokenName: post.tokenName,
+            likesCount: post._count.likes,
+            commentsCount: post._count.comments,
+            createdAt: post.createdAt,
+            user: { username: username, profileImage: null },
+            isLiked: post.likes.length > 0
+        }));
+
+        res.json({ success: true, posts: formattedPosts });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch posts' });
     }
-
-    const isOwnProfile = user.id === req.userId;
-
-    const where: any = { userId: user.id };
-    
-    // Filter by visibility if specified and viewing own profile
-    if (visibility && isOwnProfile) {
-      where.visibility = visibility;
-    } else if (isOwnProfile) {
-      // Owner can see all their own posts
-      where.OR = [
-        { visibility: 'public' },
-        { visibility: 'followers' },
-        { visibility: 'vip' }
-      ];
-    } else {
-      // Check if current user follows the target user
-      const isFollowing = await prisma.follow.findFirst({
-        where: { followerId: req.userId!, followingId: user.id }
-      });
-      
-      // If following, show both public and followers-only posts
-      // Otherwise, show only public posts
-      if (isFollowing) {
-        where.OR = [
-          { visibility: 'public' },
-          { visibility: 'followers' }
-        ];
-      } else {
-        where.visibility = 'public';
-      }
-      // TODO: Show VIP posts if subscribed
-    }
-
-    const posts = await prisma.post.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: { select: { likes: true, comments: true } },
-        likes: { where: { userId: req.userId! }, select: { id: true } }
-      }
-    });
-
-    const formattedPosts = posts.map(post => ({
-      id: post.id,
-      userId: post.userId,
-      content: post.content,
-      visibility: post.visibility,
-      tokenAddress: post.tokenAddress,
-      tokenSymbol: post.tokenSymbol,
-      tokenName: post.tokenName,
-      likesCount: post._count.likes,
-      commentsCount: post._count.comments,
-      createdAt: post.createdAt,
-      user: { username: username, profileImage: null },
-      isLiked: post.likes.length > 0
-    }));
-
-    res.json({ success: true, posts: formattedPosts });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch posts' });
-  }
 });
 
 // Follow/Unfollow
 app.post('/users/:id/follow', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const targetUserId = req.params.id as string;
-    
-    if (targetUserId === req.userId) {
-      res.status(400).json({ error: 'Cannot follow yourself' });
-      return;
-    }
+    try {
+        const targetUserId = req.params.id as string;
 
-    const existing = await prisma.follow.findFirst({
-      where: { followerId: req.userId!, followingId: targetUserId }
-    });
+        if (targetUserId === req.userId) {
+            res.status(400).json({ error: 'Cannot follow yourself' });
+            return;
+        }
 
-    if (existing) {
-      await prisma.follow.delete({ where: { id: existing.id } });
-      await prisma.user.update({
-        where: { id: targetUserId },
-        data: { followers: { decrement: 1 } }
-      });
-      await prisma.user.update({
-        where: { id: req.userId! },
-        data: { following: { decrement: 1 } }
-      });
-      res.json({ success: true, following: false });
-    } else {
-      await prisma.follow.create({
-        data: { followerId: req.userId!, followingId: targetUserId }
-      });
-      await prisma.user.update({
-        where: { id: targetUserId },
-        data: { followers: { increment: 1 } }
-      });
-      await prisma.user.update({
-        where: { id: req.userId! },
-        data: { following: { increment: 1 } }
-      });
-      res.json({ success: true, following: true });
+        const existing = await prisma.follow.findFirst({
+            where: { followerId: req.userId!, followingId: targetUserId }
+        });
+
+        if (existing) {
+            await prisma.follow.delete({ where: { id: existing.id } });
+            await prisma.user.update({
+                where: { id: targetUserId },
+                data: { followers: { decrement: 1 } }
+            });
+            await prisma.user.update({
+                where: { id: req.userId! },
+                data: { following: { decrement: 1 } }
+            });
+            res.json({ success: true, following: false });
+        } else {
+            await prisma.follow.create({
+                data: { followerId: req.userId!, followingId: targetUserId }
+            });
+            await prisma.user.update({
+                where: { id: targetUserId },
+                data: { followers: { increment: 1 } }
+            });
+            await prisma.user.update({
+                where: { id: req.userId! },
+                data: { following: { increment: 1 } }
+            });
+            res.json({ success: true, following: true });
+        }
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to toggle follow' });
     }
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to toggle follow' });
-  }
 });
 
 // 404 Handler - Catch-all for undefined endpoints
