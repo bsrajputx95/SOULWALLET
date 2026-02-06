@@ -1471,9 +1471,11 @@ async function fetchTrendingTokens(): Promise<any[]> {
     try {
         const birdEyeKey = process.env.BIRDEYE_API_KEY;
         if (!birdEyeKey) {
-            console.error('BirdEye API key not configured');
+            console.error('[Trending] BIRDEYE_API_KEY not configured!');
             return trendingTokensCache.length > 0 ? trendingTokensCache : [];
         }
+
+        console.log('[Trending] Fetching from BirdEye API...');
 
         // Use BirdEye public API for trending/performing tokens
         // Sort by price change 24h to get top performers
@@ -1488,12 +1490,24 @@ async function fetchTrendingTokens(): Promise<any[]> {
         });
 
         const tokens = response.data?.data?.tokens || [];
+        console.log(`[Trending] Got ${tokens.length} tokens from API`);
         
+        if (tokens.length === 0) {
+            console.log('[Trending] No tokens returned from API');
+            return trendingTokensCache.length > 0 ? trendingTokensCache : [];
+        }
+
         // Filter out tokens with very low liquidity or volume to avoid spam
-        // Take top 10 with good liquidity
+        // Relaxed filter: just need some liquidity and volume
         const filteredTokens = tokens
-            .filter((token: any) => (token.liquidity || 0) > 10000 && (token.v24hUSD || 0) > 5000)
+            .filter((token: any) => {
+                const hasLiquidity = (token.liquidity || 0) > 1000; // Relaxed from 10000
+                const hasVolume = (token.v24hUSD || 0) > 1000; // Relaxed from 5000
+                return hasLiquidity && hasVolume;
+            })
             .slice(0, 10);
+        
+        console.log(`[Trending] After filtering: ${filteredTokens.length} tokens`);
         
         // Transform to frontend format
         const transformedTokens = filteredTokens.map((token: any) => ({
@@ -1509,9 +1523,10 @@ async function fetchTrendingTokens(): Promise<any[]> {
             banner: token.extensions?.bannerURI
         }));
 
+        console.log('[Trending] Returning tokens:', transformedTokens.map((t: any) => t.symbol).join(', '));
         return transformedTokens;
-    } catch (error) {
-        console.error('Failed to fetch trending tokens:', error);
+    } catch (error: any) {
+        console.error('[Trending] Failed to fetch:', error.message || error);
         return trendingTokensCache.length > 0 ? trendingTokensCache : [];
     }
 }
