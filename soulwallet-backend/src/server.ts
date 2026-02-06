@@ -1466,20 +1466,13 @@ function shouldRefreshTrending(): boolean {
     return lastUpdateUTC < todayAt15UTC;
 }
 
-// Fetch trending tokens from BirdEye
+// Fetch trending tokens from BirdEye (FREE public endpoint - no API key needed)
 async function fetchTrendingTokens(): Promise<any[]> {
     try {
-        console.log('[Trending] Fetching from BirdEye API...');
+        console.log('[Trending] Fetching from BirdEye FREE public API...');
 
-        // BirdEye trending endpoint (requires API key for full features, but has limited free access)
-        const birdEyeKey = process.env.BIRDEYE_API_KEY;
-        const headers: any = {};
-        if (birdEyeKey) {
-            headers['X-API-KEY'] = birdEyeKey;
-        }
-        
+        // BirdEye FREE trending endpoint - no API key required
         const response = await axios.get('https://public-api.birdeye.so/defi/token_trending', {
-            headers: Object.keys(headers).length > 0 ? headers : undefined,
             params: {
                 sort_by: 'v24hChangePercent',
                 sort_type: 'desc',
@@ -1551,7 +1544,7 @@ function getFallbackTokens(): any[] {
     ];
 }
 
-// GET /market/tokens - Get top tokens from BirdEye with caching
+// GET /market/tokens - Get top tokens from BirdEye FREE public API with caching
 app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
     try {
         // Check cache first
@@ -1561,21 +1554,15 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
             return;
         }
 
-        // Fetch from BirdEye API
-        const birdEyeKey = process.env.BIRDEYE_API_KEY;
-        if (!birdEyeKey) {
-            res.status(500).json({ error: 'BirdEye API key not configured' });
-            return;
-        }
-
-        const response = await axios.get('https://public-api.birdeye.so/defi/tokenlist', {
-            headers: { 'X-API-KEY': birdEyeKey },
+        // Fetch from BirdEye FREE public API - no API key needed
+        const response = await axios.get('https://public-api.birdeye.so/defi/v3/token/list', {
             params: {
                 sort_by: 'v24hUSD',
                 sort_type: 'desc',
                 offset: 0,
                 limit: 50
-            }
+            },
+            timeout: 10000
         });
 
         const tokens = response.data?.data?.tokens || [];
