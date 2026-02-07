@@ -36,10 +36,16 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [maxSlippage, setMaxSlippage] = useState('0.5');
     const [exitWithTrader, setExitWithTrader] = useState(false);
     const [isPending, setIsPending] = useState(false);
+    // Manual wallet address input (for manual setup when no trader address)
+    const [manualWalletAddress, setManualWalletAddress] = useState('');
+
+    // Use manual address if trader has no address (manual setup)
+    const isManualSetup = !trader?.walletAddress;
+    const effectiveWalletAddress = isManualSetup ? manualWalletAddress : trader?.walletAddress;
 
     const handleStartCopying = async () => {
-        if (!trader?.walletAddress) {
-            Alert.alert('Error', 'Trader wallet address not found.');
+        if (!effectiveWalletAddress || effectiveWalletAddress.trim().length === 0) {
+            Alert.alert('Error', 'Please enter a wallet address to copy.');
             return;
         }
 
@@ -61,7 +67,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
             }
 
             const result = await createCopyConfig({
-                traderAddress: trader.walletAddress,
+                traderAddress: effectiveWalletAddress!,
                 totalInvestment: totalBudget,
                 perTradeAmount: perTrade,
                 stopLossPercent: parseFloat(stopLoss) || 10,
@@ -71,7 +77,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
 
             if (result.success) {
                 showSuccessToast('Copy trading configured!');
-                Alert.alert('Success', `You are now copying ${trader.username}`);
+                Alert.alert('Success', `You are now copying ${trader?.username || 'this trader'}`);
                 onClose();
             } else {
                 showErrorToast(result.error || 'Failed to start copy trading');
@@ -114,8 +120,28 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
 
                     <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
                         <Text style={styles.modalDescription}>
-                            Set up copy trading parameters for @{trader.username}
+                            {isManualSetup
+                                ? 'Enter the wallet address you want to copy trade'
+                                : `Set up copy trading parameters for @${trader.username}`
+                            }
                         </Text>
+
+                        {/* Wallet address input for manual setup */}
+                        {isManualSetup && (
+                            <View style={styles.inputSection}>
+                                <Text style={styles.inputLabel}>Wallet Address to Copy</Text>
+                                <View style={styles.inputContainer}>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Enter Solana wallet address..."
+                                        placeholderTextColor={COLORS.textSecondary}
+                                        value={manualWalletAddress}
+                                        onChangeText={setManualWalletAddress}
+                                        autoCapitalize="none"
+                                    />
+                                </View>
+                            </View>
+                        )}
 
                         <View style={styles.inputSection}>
                             <Text style={styles.inputLabel}>Total Budget (USDC)</Text>
@@ -204,13 +230,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                             </Text>
                         </TouchableOpacity>
 
-                        {/* Fee disclosure */}
-                        <View style={styles.feeDisclosure}>
-                            <Text style={styles.feeDisclosureText}>
-                                5% of your profits will be shared with this trader when positions close in profit.
-                            </Text>
-                        </View>
-
 
 
                         <TouchableOpacity
@@ -236,14 +255,16 @@ const styles = StyleSheet.create({
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        justifyContent: 'flex-end',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: SPACING.l,
     },
     copyModalContainer: {
         backgroundColor: COLORS.cardBackground,
-        borderTopLeftRadius: BORDER_RADIUS.large,
-        borderTopRightRadius: BORDER_RADIUS.large,
-        maxHeight: '85%',
-        paddingBottom: SPACING.xl,
+        borderRadius: BORDER_RADIUS.large,
+        width: '100%',
+        maxHeight: '75%',
+        paddingBottom: SPACING.l,
     },
     modalHeader: {
         flexDirection: 'row',
@@ -362,12 +383,6 @@ const styles = StyleSheet.create({
         marginBottom: SPACING.m,
         borderWidth: 1,
         borderColor: COLORS.solana + '20',
-    },
-    feeDisclosureText: {
-        ...FONTS.phantomRegular,
-        color: COLORS.textSecondary,
-        fontSize: 12,
-        lineHeight: 18,
     },
     startCopyButton: {
         backgroundColor: COLORS.success + '20',
