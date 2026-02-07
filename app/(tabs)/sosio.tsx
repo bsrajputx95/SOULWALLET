@@ -34,20 +34,40 @@ export default function SosioScreen() {
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [followingList, setFollowingList] = useState<string[]>([]);
-  
-  // User state
-  const [user] = useState({ username: 'demo_user', profileImage: null as string | null });
 
-  // Mock profile query - use local user data
-  const profileQuery = { data: { profileImage: null }, isLoading: false };
+  // Real user state - fetched from backend
+  const [user, setUser] = useState<{ username: string; profileImage: string | null } | null>(null);
+
+  // Fetch user profile from backend
+  const fetchUserProfile = useCallback(async () => {
+    try {
+      const SecureStore = await import('expo-secure-store');
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) return;
+
+      const { api } = await import('@/services/api');
+      const data = await api.get<{ user: any }>('/me');
+      const userData = data.user || data;
+      setUser({
+        username: userData.username || userData.email?.split('@')[0] || 'user',
+        profileImage: userData.profileImage || null,
+      });
+    } catch (error) {
+      // Fallback to 'user' if fetch fails
+    }
+  }, []);
+
+  // Profile query uses local user data
+  const profileQuery = { data: { profileImage: user?.profileImage || null }, isLoading: false };
 
   // Remove unused variables
-  void user; void profileQuery;
+  void profileQuery;
 
-  // Load feed from API
+  // Load feed and user profile from API
   useEffect(() => {
     loadFeed();
     loadFollowingList();
+    fetchUserProfile();
   }, []);
 
   // Reload feed when active tab changes
