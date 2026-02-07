@@ -35,6 +35,8 @@ export default function SosioScreen() {
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [followingList, setFollowingList] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<FeedTab>('forYou');
+  const activeTabRef = useRef<FeedTab>('forYou'); // Ref for PanResponder to avoid stale closure
 
   // Real user state - fetched from backend
   const [user, setUser] = useState<{ username: string; profileImage: string | null } | null>(null);
@@ -89,7 +91,7 @@ export default function SosioScreen() {
       if (reset) {
         setPosts(result.posts);
       } else {
-        setPosts(prev => [...prev, ...result.posts]);
+        setPosts(prev => [...prev, ...(result.posts || [])]);
       }
       setNextCursor(result.nextCursor || null);
     }
@@ -152,8 +154,7 @@ export default function SosioScreen() {
   }, [posts, searchQuery]);
 
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<FeedTab>('forYou');
-  const activeTabRef = useRef<FeedTab>('forYou'); // Ref for PanResponder to avoid stale closure
+  // activeTab and activeTabRef are now declared near the top of the component
   const [showNewPostModal, setShowNewPostModal] = useState(false);
   const [showTokenBagModal, setShowTokenBagModal] = useState(false);
   const [postContent, setPostContent] = useState('');
@@ -465,7 +466,6 @@ export default function SosioScreen() {
                 timestamp={formattedTimestamp}
                 mentionedToken={post.tokenSymbol || post.tokenName}
                 mentionedTokenMint={post.tokenAddress}
-                walletAddress={undefined}
                 isVerified={false}
                 onLike={handleLike}
                 onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
