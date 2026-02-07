@@ -459,7 +459,7 @@ export default function CoinDetailsScreen() {
               <View style={styles.tokenDetails}>
                 <View style={styles.tokenNameRow}>
                   <GlowingText
-                    text={coinData.symbol}
+                    text={coinData.symbol.length > 10 ? coinData.symbol.slice(0, 10) + '...' : coinData.symbol}
                     style={styles.tokenSymbol}
                     fontSize={coinData.symbol.length <= 4 ? 24 : coinData.symbol.length <= 6 ? 20 : coinData.symbol.length <= 8 ? 16 : 14}
                   />
@@ -467,7 +467,7 @@ export default function CoinDetailsScreen() {
                     <Shield color={COLORS.success} size={16} style={styles.verifiedIcon} />
                   )}
                 </View>
-                <Text style={styles.tokenName}>{coinData.name}</Text>
+                <Text style={styles.tokenName} numberOfLines={1} ellipsizeMode="tail">{coinData.name}</Text>
               </View>
             </View>
 
@@ -1073,10 +1073,13 @@ const styles = StyleSheet.create({
   tokenNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
+    maxWidth: '60%',
   },
   tokenSymbol: {
     fontSize: 24,
     marginRight: SPACING.s,
+    flexShrink: 1,
   },
   verifiedIcon: {
     marginLeft: SPACING.xs,

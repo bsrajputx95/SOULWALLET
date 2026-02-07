@@ -90,7 +90,9 @@ export const TokenCard: React.FC<TokenCardProps> = ({
                 </View>
               )}
               <View style={styles.tokenInfo}>
-                <Text style={styles.symbol}>{symbol}</Text>
+                <Text style={styles.symbol} numberOfLines={1} ellipsizeMode="tail">
+                  {symbol.length > 12 ? symbol.slice(0, 12) + '...' : symbol}
+                </Text>
                 {/* Removed name/bio display - just show ticker */}
               </View>
             </View>
@@ -199,11 +201,13 @@ const styles = StyleSheet.create({
   },
   tokenInfo: {
     flex: 1,
+    maxWidth: '70%',
   },
   symbol: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 16,
+    flexShrink: 1,
   },
   price: {
     ...FONTS.monospace,
