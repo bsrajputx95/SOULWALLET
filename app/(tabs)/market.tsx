@@ -159,8 +159,12 @@ export default function MarketScreen() {
                       price: token.price.toString(),
                       change: token.priceChange24h.toString(),
                       logo: token.logo || '',
+                      banner: token.banner || '',
                       contractAddress: token.address || '',
                       pairAddress: '',
+                      marketCap: (token.marketCap || 0).toString(),
+                      volume24h: (token.volume24h || 0).toString(),
+                      liquidity: (token.liquidity || 0).toString(),
                     }
                   });
                 }}
