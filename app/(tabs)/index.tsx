@@ -287,6 +287,7 @@ export default function HomeScreen() {
       change24h: token.change24h,
       volume24h: token.volume24h,
       logo: token.logo,
+      banner: token.banner,
       liquidity: token.liquidity,
       marketCap: token.marketCap,
       contractAddress: token.contractAddress,
