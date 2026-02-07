@@ -23,8 +23,8 @@ const isValidLogoUrl = (url?: string): boolean => {
   if (!url || url.trim() === '') return false;
   // Allow https URLs
   if (url.startsWith('https://')) return true;
-  // Allow trusted http sources (arweave, ipfs gateways, etc.)
-  const trustedHttpDomains = ['arweave.net', 'ipfs.io', 'nftstorage.link', 'cloudflare-ipfs.com'];
+  // Allow trusted http sources (arweave, ipfs gateways, dexscreener, etc.)
+  const trustedHttpDomains = ['arweave.net', 'ipfs.io', 'nftstorage.link', 'cloudflare-ipfs.com', 'dd.dexscreener.com'];
   if (url.startsWith('http://')) {
     return trustedHttpDomains.some(domain => url.includes(domain));
   }

@@ -1523,8 +1523,9 @@ async function fetchTrendingTokens(): Promise<any[]> {
                 const pair = tokenPairMap.get(boost.tokenAddress);
                 const profile = profileMap.get(boost.tokenAddress);
 
-                // Get image from multiple sources
-                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl || '';
+                // Get image from multiple sources with DexScreener CDN fallback
+                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl ||
+                    `https://dd.dexscreener.com/ds-data/tokens/solana/${boost.tokenAddress}.png`;
                 const banner = profile?.header || boost.header || pair?.info?.header || '';
 
                 return {
@@ -1636,7 +1637,9 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
                 const pair = tokenPairMap.get(boost.tokenAddress);
                 const profile = profileMap.get(boost.tokenAddress);
 
-                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl || '';
+                // Get image from multiple sources with DexScreener CDN fallback
+                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl ||
+                    `https://dd.dexscreener.com/ds-data/tokens/solana/${boost.tokenAddress}.png`;
                 const banner = profile?.header || boost.header || pair?.info?.header || '';
 
                 return {
