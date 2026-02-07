@@ -80,6 +80,9 @@ export default function CoinDetailsScreen() {
     contractAddress?: string;
     pairAddress?: string;
     name?: string;
+    marketCap?: string;
+    volume24h?: string;
+    liquidity?: string;
   }>();
   const symbol = params.symbol;
 
@@ -91,6 +94,9 @@ export default function CoinDetailsScreen() {
   const passedContractAddress = params.contractAddress || undefined;
   const passedPairAddress = params.pairAddress || undefined;
   const passedName = params.name || undefined;
+  const passedMarketCap = params.marketCap ? parseFloat(params.marketCap) : undefined;
+  const passedVolume24h = params.volume24h ? parseFloat(params.volume24h) : undefined;
+  const passedLiquidity = params.liquidity ? parseFloat(params.liquidity) : undefined;
 
   // Helper to format display name when symbol is missing/unknown
   const getDisplaySymbol = () => {
@@ -149,9 +155,9 @@ export default function CoinDetailsScreen() {
         name: passedName || 'Unknown Token',
         price: passedPrice ?? 0,
         change24h: passedChange ?? 0,
-        marketCap: 0,
-        volume24h: 0,
-        liquidity: 0,
+        marketCap: passedMarketCap ?? 0,
+        volume24h: passedVolume24h ?? 0,
+        liquidity: passedLiquidity ?? 0,
         holders: 0,
         contractAddress: passedContractAddress || passedPairAddress || '',
         verified: false,
@@ -452,7 +458,11 @@ export default function CoinDetailsScreen() {
               )}
               <View style={styles.tokenDetails}>
                 <View style={styles.tokenNameRow}>
-                  <GlowingText text={coinData.symbol} style={styles.tokenSymbol} />
+                  <GlowingText
+                    text={coinData.symbol}
+                    style={styles.tokenSymbol}
+                    fontSize={coinData.symbol.length <= 4 ? 24 : coinData.symbol.length <= 6 ? 20 : coinData.symbol.length <= 8 ? 16 : 14}
+                  />
                   {coinData.verified && (
                     <Shield color={COLORS.success} size={16} style={styles.verifiedIcon} />
                   )}

@@ -648,6 +648,9 @@ export default function HomeScreen() {
                             banner: coin.banner || '',
                             contractAddress: coin.contractAddress || '',
                             name: coin.name,
+                            marketCap: (coin.marketCap || 0).toString(),
+                            volume24h: (coin.volume24h || 0).toString(),
+                            liquidity: (coin.liquidity || 0).toString(),
                           }
                         });
                       }}
