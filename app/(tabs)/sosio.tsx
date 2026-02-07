@@ -1225,7 +1225,7 @@ const styles = StyleSheet.create({
   // Swipe navigation fade indicator - positioned top-right below header
   fadeIndicator: {
     position: 'absolute',
-    top: 70, // Below header row
+    top: 90, // Below header row
     right: SPACING.s,
     zIndex: 100,
   },
