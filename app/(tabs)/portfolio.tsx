@@ -171,7 +171,18 @@ export default function PortfolioScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<PortfolioTab>('tokens');
-  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
+  const [watchlistTokens, setWatchlistTokens] = useState<Array<{
+    symbol: string;
+    name: string;
+    logo?: string;
+    price: number;
+    change24h: number;
+    contractAddress?: string;
+    banner?: string;
+    marketCap?: number;
+    volume24h?: number;
+    liquidity?: number;
+  }>>([]);
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('24h');
   const [chartType, setChartType] = useState<ChartType>('line');
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
@@ -193,9 +204,24 @@ export default function PortfolioScreen() {
       const raw = await AsyncStorage.getItem('watchlist_tokens');
       const list = raw ? JSON.parse(raw) : [];
       if (Array.isArray(list)) {
-        setWatchlistSymbols(list.map((s: string) => s.toUpperCase()));
+        // Handle both old string format and new object format
+        const normalizedList = list.map((item: any) => {
+          if (typeof item === 'string') {
+            // Convert old string format to object
+            return {
+              symbol: item.toUpperCase(),
+              name: item,
+              logo: '',
+              price: 0,
+              change24h: 0,
+              contractAddress: '',
+            };
+          }
+          return item;
+        });
+        setWatchlistTokens(normalizedList);
       } else {
-        setWatchlistSymbols([]);
+        setWatchlistTokens([]);
       }
     } catch (e) {
       if (__DEV__) console.warn('Failed to load watchlist', e);
@@ -473,110 +499,73 @@ export default function PortfolioScreen() {
 
               {activeTab === 'watchlist' && (
                 <View style={styles.tokensContainer}>
-                  {watchlistSymbols.length === 0 ? (
+                  {watchlistTokens.length === 0 ? (
                     <View style={{ padding: SPACING.m }}>
                       <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14 }}>
                         No watchlisted tokens yet. Tap the star on any coin.
                       </Text>
                     </View>
                   ) : (
-                    watchlistSymbols.map((symbol) => {
-                      // First check user's wallet tokens
-                      let token = tokens.find(t => t.symbol.toUpperCase() === symbol);
-
-                      // If not in wallet, check trending market data
-                      let marketToken: { symbol: string; name: string; price: number; change24h: number; logo?: string; volume24h?: number; } | null = null;
-                      if (!token && trendingData?.pairs) {
-                        const pair = trendingData.pairs.find(
-                          (p: any) => p.baseToken?.symbol?.toUpperCase() === symbol
-                        );
-                        if (pair) {
-                          marketToken = {
-                            symbol: pair.baseToken?.symbol || symbol,
-                            name: pair.baseToken?.name || symbol,
-                            price: parseFloat(pair.priceUsd || '0'),
-                            change24h: parseFloat(pair.priceChange?.h24 || '0'),
-                            logo: pair.info?.imageUrl,
-                            volume24h: parseFloat(pair.volume?.h24 || '0'),
-                          };
-                        }
-                      }
-
-                      // If neither wallet nor market data available, show placeholder
-                      if (!token && !marketToken) {
-                        return (
-                          <Pressable
-                            key={symbol}
-                            style={styles.tokenItem}
-                            onPress={() => router.push(`/coin/${symbol.toLowerCase()}`)}
-                          >
-                            <View style={styles.tokenRow}>
-                              <View style={styles.tokenLogoContainer}>
-                                <View style={styles.tokenLogoPlaceholder}>
-                                  <Text style={styles.tokenLogoText}>{symbol.charAt(0)}</Text>
-                                </View>
+                    watchlistTokens.map((watchToken) => (
+                      <Pressable
+                        key={watchToken.symbol}
+                        style={styles.tokenItem}
+                        onPress={() => {
+                          // Navigate with full token data as params
+                          router.push({
+                            pathname: `/coin/${watchToken.symbol.toLowerCase()}`,
+                            params: {
+                              symbol: watchToken.symbol,
+                              name: watchToken.name || watchToken.symbol,
+                              logo: watchToken.logo || '',
+                              price: String(watchToken.price || 0),
+                              change: String(watchToken.change24h || 0),
+                              contractAddress: watchToken.contractAddress || '',
+                              banner: watchToken.banner || '',
+                              marketCap: String(watchToken.marketCap || 0),
+                              volume24h: String(watchToken.volume24h || 0),
+                              liquidity: String(watchToken.liquidity || 0),
+                            }
+                          } as any);
+                        }}
+                      >
+                        <View style={styles.tokenRow}>
+                          <View style={styles.tokenLogoContainer}>
+                            {watchToken.logo ? (
+                              <Image source={{ uri: watchToken.logo }} style={styles.tokenLogo} />
+                            ) : (
+                              <View style={styles.tokenLogoPlaceholder}>
+                                <Text style={styles.tokenLogoText}>{watchToken.symbol.charAt(0)}</Text>
                               </View>
-                              <View style={styles.tokenInfo}>
-                                <Text style={styles.tokenSymbol}>{symbol}</Text>
-                                <Text style={styles.tokenPrice}>Loading...</Text>
-                                <Text style={[styles.tokenChange, { color: COLORS.textSecondary }]}>—</Text>
-                              </View>
-                            </View>
-                            <View style={styles.tokenValue}>
-                              <Text style={styles.tokenValueText}>—</Text>
-                              <Text style={styles.tokenPercentage}>(—)</Text>
-                            </View>
-                          </Pressable>
-                        );
-                      }
-
-                      // Use wallet token or market token data
-                      const displayToken = token || marketToken;
-                      if (!displayToken) return null;
-                      return (
-                        <Pressable
-                          key={displayToken.symbol}
-                          style={styles.tokenItem}
-                          onPress={() => router.push(`/coin/${displayToken.symbol.toLowerCase()}` as any)}
-                        >
-                          <View style={styles.tokenRow}>
-                            <View style={styles.tokenLogoContainer}>
-                              {displayToken.logo ? (
-                                <Image source={{ uri: displayToken.logo }} style={styles.tokenLogo} />
-                              ) : (
-                                <View style={styles.tokenLogoPlaceholder}>
-                                  <Text style={styles.tokenLogoText}>{displayToken.symbol.charAt(0)}</Text>
-                                </View>
-                              )}
-                            </View>
-                            <View style={styles.tokenInfo}>
-                              <Text style={styles.tokenSymbol}>{displayToken.symbol}</Text>
-                              <Text style={styles.tokenPrice}>
-                                ${displayToken.price < 0.01 ? displayToken.price.toFixed(6) : displayToken.price.toFixed(2)}
-                              </Text>
-                              <Text style={[
-                                styles.tokenChange,
-                                { color: displayToken.change24h >= 0 ? COLORS.success : COLORS.error }
-                              ]}>
-                                {displayToken.change24h >= 0 ? '+' : ''}{displayToken.change24h.toFixed(1)}%
-                              </Text>
-                            </View>
+                            )}
                           </View>
-                          <View style={styles.tokenValue}>
-                            <Text style={styles.tokenValueText}>
-                              {token && 'value' in token
-                                ? `$${token.value.toLocaleString()}`
-                                : marketToken?.volume24h
-                                  ? `Vol: $${(marketToken.volume24h >= 1000000 ? (marketToken.volume24h / 1000000).toFixed(1) + 'M' : marketToken.volume24h >= 1000 ? (marketToken.volume24h / 1000).toFixed(1) + 'K' : marketToken.volume24h.toFixed(0))}`
-                                  : '—'}
+                          <View style={styles.tokenInfo}>
+                            <Text style={styles.tokenSymbol}>{watchToken.symbol}</Text>
+                            <Text style={styles.tokenPrice}>
+                              ${watchToken.price < 0.01 ? watchToken.price.toFixed(6) : watchToken.price.toFixed(2)}
                             </Text>
-                            <Text style={styles.tokenPercentage}>
-                              {token && 'value' in token ? `(${getTokenPercentage(token.value).toFixed(0)}%)` : '24h'}
+                            <Text style={[
+                              styles.tokenChange,
+                              { color: watchToken.change24h >= 0 ? COLORS.success : COLORS.error }
+                            ]}>
+                              {watchToken.change24h >= 0 ? '+' : ''}{watchToken.change24h.toFixed(1)}%
                             </Text>
                           </View>
-                        </Pressable>
-                      );
-                    })
+                        </View>
+                        <View style={styles.tokenValue}>
+                          <Text style={styles.tokenValueText}>
+                            {watchToken.volume24h && watchToken.volume24h > 0
+                              ? `Vol: $${watchToken.volume24h >= 1000000
+                                ? (watchToken.volume24h / 1000000).toFixed(1) + 'M'
+                                : watchToken.volume24h >= 1000
+                                  ? (watchToken.volume24h / 1000).toFixed(1) + 'K'
+                                  : watchToken.volume24h.toFixed(0)}`
+                              : '—'}
+                          </Text>
+                          <Text style={styles.tokenPercentage}>24h</Text>
+                        </View>
+                      </Pressable>
+                    ))
                   )}
                 </View>
               )}

@@ -304,15 +304,34 @@ export default function CoinDetailsScreen() {
     try {
       const token = (symbol as string)?.toUpperCase() || '';
       const raw = await AsyncStorage.getItem('watchlist_tokens');
-      const arr: string[] = raw ? JSON.parse(raw) : [];
-      let next: string[];
-      if (arr.includes(token)) {
-        next = arr.filter(s => s !== token);
+      const arr: any[] = raw ? JSON.parse(raw) : [];
+
+      // Check if token exists (by symbol, supporting both old string format and new object format)
+      const existingIndex = arr.findIndex((item: any) =>
+        typeof item === 'string' ? item === token : item.symbol === token
+      );
+
+      if (existingIndex >= 0) {
+        // Remove from watchlist
+        const next = arr.filter((_, i) => i !== existingIndex);
         setWatchlisted(false);
         await AsyncStorage.setItem('watchlist_tokens', JSON.stringify(next));
         Alert.alert('Removed from watchlist');
       } else {
-        next = [...arr, token];
+        // Add full token data to watchlist
+        const tokenData = {
+          symbol: token,
+          name: coinData?.name || passedName || token,
+          logo: coinData?.logo || passedLogo || '',
+          price: coinData?.price || passedPrice || 0,
+          change24h: coinData?.change24h || passedChange || 0,
+          contractAddress: coinData?.contractAddress || passedContractAddress || '',
+          banner: coinData?.banner || passedBanner || '',
+          marketCap: coinData?.marketCap || passedMarketCap || 0,
+          volume24h: coinData?.volume24h || passedVolume24h || 0,
+          liquidity: coinData?.liquidity || passedLiquidity || 0,
+        };
+        const next = [...arr, tokenData];
         setWatchlisted(true);
         await AsyncStorage.setItem('watchlist_tokens', JSON.stringify(next));
         Alert.alert('Added to watchlist');
