@@ -153,6 +153,7 @@ export default function SosioScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<FeedTab>('forYou');
+  const activeTabRef = useRef<FeedTab>('forYou'); // Ref for PanResponder to avoid stale closure
   const [showNewPostModal, setShowNewPostModal] = useState(false);
   const [showTokenBagModal, setShowTokenBagModal] = useState(false);
   const [postContent, setPostContent] = useState('');
@@ -209,12 +210,12 @@ export default function SosioScreen() {
         const SWIPE_THRESHOLD = 50;
         if (gestureState.dx < -SWIPE_THRESHOLD) {
           // Swipe left -> go to Following
-          if (activeTab !== 'following') {
+          if (activeTabRef.current !== 'following') {
             handleTabChange('following');
           }
         } else if (gestureState.dx > SWIPE_THRESHOLD) {
           // Swipe right -> go to For You
-          if (activeTab !== 'forYou') {
+          if (activeTabRef.current !== 'forYou') {
             handleTabChange('forYou');
           }
         }
@@ -272,6 +273,7 @@ export default function SosioScreen() {
 
   const handleTabChange = (tab: FeedTab) => {
     setActiveTab(tab);
+    activeTabRef.current = tab; // Update ref for PanResponder
     // Show fade indicator
     showFadeIndicator(tab === 'forYou' ? 'For You' : 'Following');
     // Feed will be reloaded via useEffect when activeTab changes
@@ -1220,28 +1222,24 @@ const styles = StyleSheet.create({
   skeletonContainer: {
     paddingTop: SPACING.m,
   },
-  // Swipe navigation fade indicator
+  // Swipe navigation fade indicator - positioned top-right below header
   fadeIndicator: {
     position: 'absolute',
-    top: '35%',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+    top: 70, // Below header row
+    right: SPACING.s,
     zIndex: 100,
   },
   fadeIndicatorText: {
     ...FONTS.orbitronBold,
     color: COLORS.solana,
-    fontSize: 24,
-    backgroundColor: COLORS.background + 'E0',
-    paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.m,
-    borderRadius: BORDER_RADIUS.large,
+    fontSize: 14,
+    backgroundColor: COLORS.cardBackground,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.medium,
     overflow: 'hidden',
-    textShadowColor: COLORS.solana,
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '50',
   },
 });
 
