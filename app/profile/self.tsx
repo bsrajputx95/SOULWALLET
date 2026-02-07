@@ -73,7 +73,7 @@ export default function SelfProfileScreen() {
   const loadPosts = async (username?: string) => {
     const targetUsername = username || user?.username;
     if (!targetUsername) return;
-    
+
     try {
       const postsResult = await fetchUserPosts(targetUsername, activeTab);
       if (postsResult.success && postsResult.posts) {
@@ -644,12 +644,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.large,
     padding: SPACING.l,
-    marginBottom: SPACING.l,
+    marginBottom: SPACING.s,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.s,
   },
   statItem: {
     alignItems: 'center',
@@ -671,13 +671,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   tradingSummaryCard: {
-    marginBottom: SPACING.l,
+    marginBottom: SPACING.s,
   },
   sectionTitle: {
     ...FONTS.orbitronBold,
     color: COLORS.textPrimary,
     fontSize: 18,
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.s,
   },
   tradingStats: {
     gap: SPACING.s,
@@ -727,7 +727,7 @@ const styles = StyleSheet.create({
   actionButtonsContainer: {
     flexDirection: 'row',
     gap: SPACING.m,
-    marginBottom: SPACING.l,
+    marginBottom: SPACING.s,
   },
   actionButton: {
     flex: 1,
@@ -915,7 +915,7 @@ const styles = StyleSheet.create({
   },
   tabsHeader: {
     flexDirection: 'row',
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.xs,
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: 4,
@@ -938,7 +938,7 @@ const styles = StyleSheet.create({
     color: COLORS.solana,
   },
   tabContent: {
-    marginBottom: SPACING.l,
+    marginBottom: SPACING.xs,
   },
   emptyContainer: {
     padding: SPACING.l,
