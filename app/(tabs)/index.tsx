@@ -644,6 +644,7 @@ export default function HomeScreen() {
                             price: coin.price.toString(),
                             change: (coin.change24h || 0).toString(),
                             logo: coin.logo || '',
+                            banner: coin.banner || '',
                             contractAddress: coin.contractAddress || '',
                             name: coin.name,
                           }

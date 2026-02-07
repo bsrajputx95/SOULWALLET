@@ -76,6 +76,7 @@ export default function CoinDetailsScreen() {
     price?: string;
     change?: string;
     logo?: string;
+    banner?: string;
     contractAddress?: string;
     pairAddress?: string;
     name?: string;
@@ -86,6 +87,7 @@ export default function CoinDetailsScreen() {
   const passedPrice = params.price ? parseFloat(params.price) : undefined;
   const passedChange = params.change ? parseFloat(params.change) : undefined;
   const passedLogo = params.logo || undefined;
+  const passedBanner = params.banner || undefined;
   const passedContractAddress = params.contractAddress || undefined;
   const passedPairAddress = params.pairAddress || undefined;
   const passedName = params.name || undefined;
@@ -154,6 +156,8 @@ export default function CoinDetailsScreen() {
         contractAddress: passedContractAddress || passedPairAddress || '',
         verified: false,
         age: 'Unknown',
+        logo: passedLogo || null,
+        banner: passedBanner || null,
       };
     }
 
