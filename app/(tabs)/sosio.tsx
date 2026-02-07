@@ -175,6 +175,32 @@ export default function SosioScreen() {
   const [showIndicator, setShowIndicator] = useState(false);
   const indicatorText = useRef('For You');
 
+  // Show swipe hint on first entry to Sosio tab
+  useEffect(() => {
+    // Show hint after a short delay
+    const timer = setTimeout(() => {
+      indicatorText.current = '← swipe →';
+      setShowIndicator(true);
+      indicatorOpacity.setValue(0);
+
+      Animated.timing(indicatorOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        setTimeout(() => {
+          Animated.timing(indicatorOpacity, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true,
+          }).start(() => setShowIndicator(false));
+        }, 2000);
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   // Show fade indicator when tab changes
   const showFadeIndicator = (text: string) => {
     indicatorText.current = text;
