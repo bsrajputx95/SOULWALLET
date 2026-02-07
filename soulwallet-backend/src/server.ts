@@ -1466,6 +1466,21 @@ function shouldRefreshTrending(): boolean {
     return lastUpdateUTC < todayAt15UTC;
 }
 
+// Helper to convert DexScreener icon hash/URL to full CDN URL
+// API returns either a full URL or just a hash like "0368cacef34590445c7557761ddcec24127477b49bd2af8dc9cd7027d6e9e74c"
+function toDexScreenerImageUrl(value: string | undefined | null, tokenAddress: string): string {
+    if (!value || value.trim() === '') {
+        // Fallback: Use DexScreener's direct token image CDN
+        return `https://dd.dexscreener.com/ds-data/tokens/solana/${tokenAddress}.png`;
+    }
+    // Already a full URL
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+        return value;
+    }
+    // It's a hash - construct CDN URL
+    return `https://cdn.dexscreener.com/cms/images/${value}?width=64&height=64&fit=crop&quality=95&format=auto`;
+}
+
 // Fetch trending tokens from DexScreener - Top 10 by 24h price change (Solana only)
 async function fetchTrendingTokens(): Promise<any[]> {
     try {
@@ -1523,10 +1538,15 @@ async function fetchTrendingTokens(): Promise<any[]> {
                 const pair = tokenPairMap.get(boost.tokenAddress);
                 const profile = profileMap.get(boost.tokenAddress);
 
-                // Get image from multiple sources with DexScreener CDN fallback
-                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl ||
-                    `https://dd.dexscreener.com/ds-data/tokens/solana/${boost.tokenAddress}.png`;
-                const banner = profile?.header || boost.header || pair?.info?.header || '';
+                // Get image from multiple sources, converting hashes to full URLs
+                const rawIcon = profile?.icon || boost.icon || pair?.info?.imageUrl || '';
+                const logo = toDexScreenerImageUrl(rawIcon, boost.tokenAddress);
+
+                // Banner: convert hash to URL if needed
+                const rawBanner = profile?.header || boost.header || pair?.info?.header || '';
+                const banner = rawBanner && !rawBanner.startsWith('http')
+                    ? `https://cdn.dexscreener.com/cms/images/${rawBanner}?width=900&height=300&fit=crop&quality=95&format=auto`
+                    : rawBanner;
 
                 return {
                     address: boost.tokenAddress,
@@ -1637,10 +1657,15 @@ app.get('/market/tokens', authMiddleware, async (_req: Request, res: Response): 
                 const pair = tokenPairMap.get(boost.tokenAddress);
                 const profile = profileMap.get(boost.tokenAddress);
 
-                // Get image from multiple sources with DexScreener CDN fallback
-                const logo = profile?.icon || boost.icon || pair?.info?.imageUrl ||
-                    `https://dd.dexscreener.com/ds-data/tokens/solana/${boost.tokenAddress}.png`;
-                const banner = profile?.header || boost.header || pair?.info?.header || '';
+                // Get image from multiple sources, converting hashes to full URLs
+                const rawIcon = profile?.icon || boost.icon || pair?.info?.imageUrl || '';
+                const logo = toDexScreenerImageUrl(rawIcon, boost.tokenAddress);
+
+                // Banner: convert hash to URL if needed
+                const rawBanner = profile?.header || boost.header || pair?.info?.header || '';
+                const banner = rawBanner && !rawBanner.startsWith('http')
+                    ? `https://cdn.dexscreener.com/cms/images/${rawBanner}?width=900&height=300&fit=crop&quality=95&format=auto`
+                    : rawBanner;
 
                 return {
                     address: boost.tokenAddress,
