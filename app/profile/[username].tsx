@@ -61,7 +61,7 @@ type PostVisibility = 'public' | 'followers' | 'vip';
 export default function UserProfileScreen() {
   useRouter(); // Keep router available for future navigation
   const { username } = useLocalSearchParams<{ username: string }>();
-  
+
   // Real profile data from API
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -173,6 +173,10 @@ export default function UserProfileScreen() {
 
   // Posts fetched from API based on active tab
   const visiblePosts = posts;
+
+  // Derived state
+  const isFollowingUser = profile?.isFollowing || false;
+  const isFollowLoading = loading; // Use loading state for follow button
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -360,7 +364,7 @@ export default function UserProfileScreen() {
               isFollowingUser && styles.followButtonActive,
             ]}
             onPress={handleFollowPress}
-            disabled={toggleFollowMutation.isPending}
+            disabled={isFollowLoading}
           >
             {isFollowingUser ? (
               <UserMinus size={20} color={COLORS.textPrimary} />
@@ -371,7 +375,7 @@ export default function UserProfileScreen() {
               styles.followButtonText,
               isFollowingUser && styles.followButtonTextActive,
             ]}>
-              {toggleFollowMutation.isPending ? 'Loading...' : (isFollowingUser ? 'Unfollow' : 'Follow')}
+              {isFollowLoading ? 'Loading...' : (isFollowingUser ? 'Unfollow' : 'Follow')}
             </Text>
           </TouchableOpacity>
 
@@ -439,10 +443,10 @@ export default function UserProfileScreen() {
               <TouchableOpacity
                 style={[styles.followButton, styles.gatedActionButton]}
                 onPress={handleFollowPress}
-                disabled={toggleFollowMutation.isPending}
+                disabled={isFollowLoading}
               >
                 <UserPlus size={20} color={COLORS.textPrimary} />
-                <Text style={styles.followButtonText}>{toggleFollowMutation.isPending ? 'Loading...' : 'Follow'}</Text>
+                <Text style={styles.followButtonText}>{isFollowLoading ? 'Loading...' : 'Follow'}</Text>
               </TouchableOpacity>
             </View>
           ) : activePostsTab === 'vip' && !isVipMember ? (
