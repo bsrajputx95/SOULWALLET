@@ -14,6 +14,7 @@ import {
   Alert,
   Image,
   ScrollView,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Settings, Search, X, Plus, Link, ShoppingBag } from 'lucide-react-native';
@@ -168,12 +169,62 @@ export default function SosioScreen() {
     profileImage?: string;
   } | null>(null);
 
-  // Tabs smooth hide/show on scroll
-  const TABS_HEIGHT = 44;
-  const tabsHeight = useRef(new Animated.Value(TABS_HEIGHT)).current;
+  // Fade indicator for swipe navigation
+  const indicatorOpacity = useRef(new Animated.Value(0)).current;
+  const [showIndicator, setShowIndicator] = useState(false);
+  const indicatorText = useRef('For You');
+
+  // Show fade indicator when tab changes
+  const showFadeIndicator = (text: string) => {
+    indicatorText.current = text;
+    setShowIndicator(true);
+    indicatorOpacity.setValue(0);
+
+    // Fade in
+    Animated.timing(indicatorOpacity, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      // Wait then fade out
+      setTimeout(() => {
+        Animated.timing(indicatorOpacity, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        }).start(() => setShowIndicator(false));
+      }, 1200);
+    });
+  };
+
+  // Swipe gesture handling for tab switching
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only respond to horizontal swipes (not vertical scrolling)
+        return Math.abs(gestureState.dx) > 20 && Math.abs(gestureState.dy) < 50;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const SWIPE_THRESHOLD = 50;
+        if (gestureState.dx < -SWIPE_THRESHOLD) {
+          // Swipe left -> go to Following
+          if (activeTab !== 'following') {
+            handleTabChange('following');
+          }
+        } else if (gestureState.dx > SWIPE_THRESHOLD) {
+          // Swipe right -> go to For You
+          if (activeTab !== 'forYou') {
+            handleTabChange('forYou');
+          }
+        }
+      },
+    })
+  ).current;
+
+  // Legacy tab animation refs (kept for compatibility)
   const scrollEventValue = useRef(new Animated.Value(0)).current;
   const lastScrollY = useRef(0);
-  const tabsHidden = useRef(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -181,33 +232,13 @@ export default function SosioScreen() {
     setRefreshing(false);
   }, []);
 
-  // Removed auto-hide header behavior on scroll; only tabs hide/show smoothly
-  const handleTabsScroll = Animated.event(
+  // Simple scroll tracking (tabs removed - using swipe gestures now)
+  const handleFeedScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollEventValue } } }],
     {
       useNativeDriver: false,
       listener: (event: any) => {
-        const currentScrollY = event.nativeEvent.contentOffset.y;
-        const diff = currentScrollY - lastScrollY.current;
-        const direction = diff > 0 ? 'down' : 'up';
-
-        if (direction === 'down' && currentScrollY > 20 && !tabsHidden.current) {
-          Animated.timing(tabsHeight, {
-            toValue: 0,
-            duration: 220,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: false,
-          }).start(() => { tabsHidden.current = true; });
-        } else if (direction === 'up' && diff < -15 && tabsHidden.current) {
-          Animated.timing(tabsHeight, {
-            toValue: TABS_HEIGHT,
-            duration: 220,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: false,
-          }).start(() => { tabsHidden.current = false; });
-        }
-
-        lastScrollY.current = currentScrollY;
+        lastScrollY.current = event.nativeEvent.contentOffset.y;
       },
     }
   );
@@ -241,6 +272,8 @@ export default function SosioScreen() {
 
   const handleTabChange = (tab: FeedTab) => {
     setActiveTab(tab);
+    // Show fade indicator
+    showFadeIndicator(tab === 'forYou' ? 'For You' : 'Following');
     // Feed will be reloaded via useEffect when activeTab changes
   };
 
@@ -305,187 +338,158 @@ export default function SosioScreen() {
         </View>
       )}
 
-      <Animated.View style={[styles.tabsContainer, { height: tabsHeight, overflow: 'hidden' }]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={[styles.tabsScroll, { paddingHorizontal: responsivePadding }]}
-        >
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'forYou' && styles.activeTab,
-            ]}
-            onPress={() => handleTabChange('forYou')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'forYou' && styles.activeTabText,
-            ]}>
-              For You
-            </Text>
-          </Pressable>
+      {/* Fade indicator for swipe navigation */}
+      {showIndicator && (
+        <Animated.View style={[styles.fadeIndicator, { opacity: indicatorOpacity }]}>
+          <Text style={styles.fadeIndicatorText}>{indicatorText.current}</Text>
+        </Animated.View>
+      )}
 
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === 'following' && styles.activeTab,
-            ]}
-            onPress={() => handleTabChange('following')}
-          >
-            <Text style={[
-              styles.tabText,
-              activeTab === 'following' && styles.activeTabText,
-            ]}>
-              Following
-            </Text>
-          </Pressable>
-        </ScrollView>
-      </Animated.View>
-
-      {/* Main Content - FlatList for infinite scroll */}
-      <FlatList
-        style={styles.content}
-        contentContainerStyle={[
-          styles.contentContainer,
-          {
-            paddingHorizontal: responsivePadding,
-            paddingBottom: bottomPadding
-          }
-        ]}
-        data={filteredPosts}
-        keyExtractor={(item: any) => item.id}
-        ListHeaderComponent={
-          // User Search Results - shown when searching
-          searchQuery.length >= 2 && userSearchQuery.data && userSearchQuery.data.length > 0 ? (
-            <View style={styles.userSearchResults}>
-              <Text style={styles.searchResultsTitle}>Users</Text>
-              {userSearchQuery.data.map((searchUser: any) => (
-                <Pressable
-                  key={searchUser.id}
-                  style={styles.userResultItem}
-                  onPress={() => router.push(`/profile/${searchUser.username}`)}
-                >
-                  <View style={styles.userResultAvatar}>
-                    <Text style={styles.userResultAvatarText}>
-                      {searchUser.username?.charAt(0).toUpperCase() || 'U'}
-                    </Text>
-                  </View>
-                  <View style={styles.userResultInfo}>
-                    <View style={styles.userResultNameRow}>
-                      <Text style={styles.userResultUsername}>@{searchUser.username}</Text>
+      {/* Main Content - FlatList with swipe gesture for tab switching */}
+      <View style={styles.content} {...panResponder.panHandlers}>
+        <FlatList
+          style={styles.content}
+          contentContainerStyle={[
+            styles.contentContainer,
+            {
+              paddingHorizontal: responsivePadding,
+              paddingBottom: bottomPadding
+            }
+          ]}
+          data={filteredPosts}
+          keyExtractor={(item: any) => item.id}
+          ListHeaderComponent={
+            // User Search Results - shown when searching
+            searchQuery.length >= 2 && userSearchQuery.data && userSearchQuery.data.length > 0 ? (
+              <View style={styles.userSearchResults}>
+                <Text style={styles.searchResultsTitle}>Users</Text>
+                {userSearchQuery.data.map((searchUser: any) => (
+                  <Pressable
+                    key={searchUser.id}
+                    style={styles.userResultItem}
+                    onPress={() => router.push(`/profile/${searchUser.username}`)}
+                  >
+                    <View style={styles.userResultAvatar}>
+                      <Text style={styles.userResultAvatarText}>
+                        {searchUser.username?.charAt(0).toUpperCase() || 'U'}
+                      </Text>
                     </View>
-                    <Text style={styles.userResultFollowers}>
-                      {searchUser.followersCount} followers
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          ) : null
-        }
-        renderItem={({ item: post }: { item: any }) => {
-          // Format timestamp - handle Date objects, strings, or ISO strings
-          let formattedTimestamp = '';
-          try {
-            const timestampValue = post.timestamp || post.createdAt;
-            if (timestampValue) {
-              const date = timestampValue instanceof Date
-                ? timestampValue
-                : new Date(timestampValue);
-              if (!isNaN(date.getTime())) {
-                // Format as relative time
-                const now = new Date();
-                const diffMs = now.getTime() - date.getTime();
-                const diffMins = Math.floor(diffMs / 60000);
-                const diffHours = Math.floor(diffMs / 3600000);
-                const diffDays = Math.floor(diffMs / 86400000);
+                    <View style={styles.userResultInfo}>
+                      <View style={styles.userResultNameRow}>
+                        <Text style={styles.userResultUsername}>@{searchUser.username}</Text>
+                      </View>
+                      <Text style={styles.userResultFollowers}>
+                        {searchUser.followersCount} followers
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null
+          }
+          renderItem={({ item: post }: { item: any }) => {
+            // Format timestamp - handle Date objects, strings, or ISO strings
+            let formattedTimestamp = '';
+            try {
+              const timestampValue = post.timestamp || post.createdAt;
+              if (timestampValue) {
+                const date = timestampValue instanceof Date
+                  ? timestampValue
+                  : new Date(timestampValue);
+                if (!isNaN(date.getTime())) {
+                  // Format as relative time
+                  const now = new Date();
+                  const diffMs = now.getTime() - date.getTime();
+                  const diffMins = Math.floor(diffMs / 60000);
+                  const diffHours = Math.floor(diffMs / 3600000);
+                  const diffDays = Math.floor(diffMs / 86400000);
 
-                if (diffMins < 1) formattedTimestamp = 'Just now';
-                else if (diffMins < 60) formattedTimestamp = `${diffMins}m ago`;
-                else if (diffHours < 24) formattedTimestamp = `${diffHours}h ago`;
-                else if (diffDays < 7) formattedTimestamp = `${diffDays}d ago`;
-                else formattedTimestamp = date.toLocaleDateString();
+                  if (diffMins < 1) formattedTimestamp = 'Just now';
+                  else if (diffMins < 60) formattedTimestamp = `${diffMins}m ago`;
+                  else if (diffHours < 24) formattedTimestamp = `${diffHours}h ago`;
+                  else if (diffDays < 7) formattedTimestamp = `${diffDays}d ago`;
+                  else formattedTimestamp = date.toLocaleDateString();
+                }
               }
+            } catch (e) {
+              formattedTimestamp = '';
             }
-          } catch (e) {
-            formattedTimestamp = '';
-          }
 
-          const handleLike = async () => {
-            const result = await toggleLike(post.id);
-            if (result.success) {
-              // Refresh the feed to get updated like status
-              loadFeed();
+            const handleLike = async () => {
+              const result = await toggleLike(post.id);
+              if (result.success) {
+                // Refresh the feed to get updated like status
+                loadFeed();
+              }
+            };
+
+            return (
+              <SocialPost
+                key={post.id}
+                id={post.id}
+                username={post.user?.username}
+                profileImage={post.user?.profileImage}
+                content={post.content}
+                images={[]}
+                comments={post.commentsCount || 0}
+                likes={post.likesCount || 0}
+                isLiked={post.isLiked}
+                timestamp={formattedTimestamp}
+                mentionedToken={post.tokenSymbol || post.tokenName}
+                mentionedTokenMint={post.tokenAddress}
+                walletAddress={undefined}
+                isVerified={false}
+                onLike={handleLike}
+                onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
+                onCopyPress={() => {
+                  router.push(`/profile/${post.user?.username}`);
+                }}
+                onBuyPress={async () => {
+                  const tokenMint = post.tokenAddress;
+                  if (!tokenMint) return;
+                  Alert.alert('Coming Soon', 'iBuy feature will be available soon.');
+                }}
+              />
+            );
+          }}
+          ListEmptyComponent={
+            loading ? (
+              <View style={styles.skeletonContainer}>
+                <SocialPostSkeleton />
+                <SocialPostSkeleton />
+                <SocialPostSkeleton />
+              </View>
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>
+                  {searchQuery
+                    ? 'No posts found matching your search.'
+                    : activeTab === 'following'
+                      ? 'Follow some traders to see their posts here.'
+                      : 'No posts yet. Be the first to post!'}
+                </Text>
+              </View>
+            )
+          }
+          onEndReached={() => {
+            // Infinite scroll - fetch more when reaching end
+            if (nextCursor && !loading) {
+              if (__DEV__) console.log('[Sosio] Load more posts - nextCursor:', nextCursor);
+              loadMorePosts();
             }
-          };
-
-          return (
-            <SocialPost
-              key={post.id}
-              id={post.id}
-              username={post.user?.username}
-              profileImage={post.user?.profileImage}
-              content={post.content}
-              images={[]}
-              comments={post.commentsCount || 0}
-              likes={post.likesCount || 0}
-              isLiked={post.isLiked}
-              timestamp={formattedTimestamp}
-              mentionedToken={post.tokenSymbol || post.tokenName}
-              mentionedTokenMint={post.tokenAddress}
-              walletAddress={undefined}
-              isVerified={false}
-              onLike={handleLike}
-              onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
-              onCopyPress={() => {
-                router.push(`/profile/${post.user?.username}`);
-              }}
-              onBuyPress={async () => {
-                const tokenMint = post.tokenAddress;
-                if (!tokenMint) return;
-                Alert.alert('Coming Soon', 'iBuy feature will be available soon.');
-              }}
-            />
-          );
-        }}
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.skeletonContainer}>
-              <SocialPostSkeleton />
-              <SocialPostSkeleton />
-              <SocialPostSkeleton />
-            </View>
-          ) : (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                {searchQuery
-                  ? 'No posts found matching your search.'
-                  : activeTab === 'following'
-                    ? 'Follow some traders to see their posts here.'
-                    : 'No posts yet. Be the first to post!'}
-              </Text>
-            </View>
-          )
-        }
-        onEndReached={() => {
-          // Infinite scroll - fetch more when reaching end
-          if (nextCursor && !loading) {
-            if (__DEV__) console.log('[Sosio] Load more posts - nextCursor:', nextCursor);
-            loadMorePosts();
+          }}
+          onEndReachedThreshold={0.5}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-        }}
-        onEndReachedThreshold={0.5}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        onScroll={handleTabsScroll}
-        scrollEventThrottle={16}
-        showsVerticalScrollIndicator={false}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={10}
-        windowSize={10}
-      />
+          onScroll={handleFeedScroll}
+          scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+        />
+      </View>
 
       {/* Token Bag Button */}
       <Pressable
@@ -1215,6 +1219,29 @@ const styles = StyleSheet.create({
   },
   skeletonContainer: {
     paddingTop: SPACING.m,
+  },
+  // Swipe navigation fade indicator
+  fadeIndicator: {
+    position: 'absolute',
+    top: '35%',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+  },
+  fadeIndicatorText: {
+    ...FONTS.orbitronBold,
+    color: COLORS.solana,
+    fontSize: 24,
+    backgroundColor: COLORS.background + 'E0',
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.m,
+    borderRadius: BORDER_RADIUS.large,
+    overflow: 'hidden',
+    textShadowColor: COLORS.solana,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
 });
 
