@@ -303,6 +303,17 @@ export default function PortfolioScreen() {
     }
   }, []);
 
+  // Remove token from watchlist
+  const removeFromWatchlist = useCallback(async (symbolToRemove: string) => {
+    try {
+      const updatedList = watchlistTokens.filter(t => t.symbol !== symbolToRemove);
+      setWatchlistTokens(updatedList);
+      await AsyncStorage.setItem('watchlist_tokens', JSON.stringify(updatedList));
+    } catch (e) {
+      if (__DEV__) console.warn('Failed to remove from watchlist', e);
+    }
+  }, [watchlistTokens]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -643,6 +654,17 @@ export default function PortfolioScreen() {
                           </Text>
                           <Text style={styles.tokenPercentage}>24h</Text>
                         </View>
+                        {/* Remove from watchlist button */}
+                        <Pressable
+                          style={styles.removeWatchlistButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            removeFromWatchlist(watchToken.symbol);
+                          }}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <X size={18} color={COLORS.error} />
+                        </Pressable>
                       </Pressable>
                     ))
                   )}
@@ -1251,6 +1273,15 @@ const styles = StyleSheet.create({
     ...FONTS.sfProRegular,
     color: COLORS.textSecondary,
     fontSize: 12
+  },
+  removeWatchlistButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.error + '15',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: SPACING.s
   },
   walletsContainer: {
     marginBottom: SPACING.xs
