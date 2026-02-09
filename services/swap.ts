@@ -1,13 +1,7 @@
 import 'react-native-get-random-values';
-import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
+import { Keypair, VersionedTransaction } from '@solana/web3.js';
 import { getKeypairForSigning, getLocalPublicKey } from './wallet';
 import { api } from './api';
-
-// Use public Solana RPC as fallback if Helius fails
-const SOLANA_RPC = process.env.EXPO_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-const HELIUS_RPC = process.env.EXPO_PUBLIC_HELIUS_API_KEY 
-    ? `https://mainnet.helius-rpc.com/?api-key=${process.env.EXPO_PUBLIC_HELIUS_API_KEY}`
-    : SOLANA_RPC;
 
 // Comprehensive fallback token list
 const FALLBACK_TOKENS: JupiterToken[] = [
@@ -42,12 +36,22 @@ export interface SwapQuote {
     inAmount: string;
     outAmount: string;
     priceImpactPct: string;
+    priceImpact?: number;
+    slippageBps?: number;
     routePlan: Array<{
         swapInfo: {
             label: string;
         };
     }>;
     otherAmountThreshold: string;
+    requestId?: string;
+    swapType?: string;
+    platformFee?: any;
+    feeMint?: string;
+    feeBps?: number;
+    inUsdValue?: number;
+    outUsdValue?: number;
+    swapUsdValue?: number;
 }
 
 let tokenListCache: JupiterToken[] | null = null;
@@ -150,17 +154,21 @@ export const executeSwap = async (
 
         console.log('[Swap] Getting swap transaction from backend...');
         
-        const swapData = await api.request<{ swapTransaction: string }>('/swap/transaction', {
+        // Use Ultra API flow - get transaction with taker
+        const swapData = await api.request<{ swapTransaction: string; requestId: string }>('/swap/transaction', {
             method: 'POST',
             body: JSON.stringify({
-                quoteResponse: quote,
+                inputMint: quote.inputMint,
+                outputMint: quote.outputMint,
+                amount: quote.inAmount,
                 userPublicKey: publicKey,
+                slippageBps: quote.slippageBps,
             }),
         });
         
         console.log(`[Swap] Got transaction from backend`);
 
-        const { swapTransaction } = swapData;
+        const { swapTransaction, requestId } = swapData;
 
         if (!swapTransaction) {
             return { success: false, error: 'No transaction returned from Jupiter' };
@@ -178,6 +186,8 @@ export const executeSwap = async (
 
         console.log('[Swap] Signing transaction...');
         transaction.sign([keypair]);
+        
+        const signedTx = Buffer.from(transaction.serialize()).toString('base64');
 
         // Clear keypair from memory
         const secretKeyRef = keypair.secretKey;
@@ -186,34 +196,29 @@ export const executeSwap = async (
         }
         keypair = null;
 
-        console.log('[Swap] Sending transaction...');
-        const connection = new Connection(HELIUS_RPC, 'confirmed');
-
-        const signature = await connection.sendRawTransaction(transaction.serialize(), {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-            maxRetries: 3,
+        console.log('[Swap] Executing swap via backend...');
+        
+        // Execute via Ultra API
+        const result = await api.request<{ status: string; signature: string; error?: string }>('/swap/execute', {
+            method: 'POST',
+            body: JSON.stringify({
+                signedTransaction: signedTx,
+                requestId,
+            }),
         });
 
-        console.log('[Swap] Transaction sent:', signature);
+        if (result.status === 'Success') {
+            console.log('[Swap] Transaction successful:', result.signature);
+            return {
+                success: true,
+                signature: result.signature,
+                explorerUrl: `https://solscan.io/tx/${result.signature}`,
+            };
+        } else {
+            console.error('[Swap] Transaction failed:', result.error);
+            return { success: false, error: result.error || 'Swap execution failed' };
+        }
 
-        console.log('[Swap] Confirming transaction...');
-        const latestBlockhash = await connection.getLatestBlockhash();
-        await connection.confirmTransaction(
-            {
-                signature,
-                blockhash: latestBlockhash.blockhash,
-                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-            },
-            'confirmed'
-        );
-
-        console.log('[Swap] Transaction confirmed!');
-        return {
-            success: true,
-            signature,
-            explorerUrl: `https://solscan.io/tx/${signature}`,
-        };
     } catch (error: any) {
         console.error('[Swap] Error:', error);
         const msg = error?.message || '';
