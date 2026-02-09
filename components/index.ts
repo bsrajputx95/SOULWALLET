@@ -46,4 +46,4 @@ export { NotificationBadge } from './NotificationBadge';
 export { SimpleCandlestickChart } from './SimpleCandlestickChart';
 
 // Feature Components
-export { TokenDetails } from './TokenDetails';
+export { default as TokenDetails } from './TokenDetails';

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { X, TrendingUp, TrendingDown, Copy } from 'lucide-react-native';
 
@@ -20,6 +20,7 @@ interface TokenDetailsProps {
     volume24h?: number;
     supply?: number;
     address?: string;
+    logoURI?: string;
   };
   visible: boolean;
   onClose: () => void;
@@ -38,14 +39,31 @@ export default function TokenDetails({
 }: TokenDetailsProps) {
   if (!visible || !token) return null;
 
-  const isPositive = token.changePercent24h >= 0;
-
   const formatNumber = (num: number, decimals = 2) => {
     if (num >= 1e9) return `${(num / 1e9).toFixed(decimals)}B`;
     if (num >= 1e6) return `${(num / 1e6).toFixed(decimals)}M`;
     if (num >= 1e3) return `${(num / 1e3).toFixed(decimals)}K`;
     return num.toFixed(decimals);
   };
+
+  // Defensive defaults for missing data
+  const safeToken = {
+    symbol: token.symbol || 'Unknown',
+    name: token.name || 'Unknown Token',
+    price: token.price || 0,
+    change24h: token.change24h || 0,
+    changePercent24h: token.changePercent24h || 0,
+    balance: token.balance || 0,
+    value: token.value || 0,
+    marketCap: token.marketCap,
+    volume24h: token.volume24h,
+    supply: token.supply,
+    address: token.address,
+    logoURI: token.logoURI,
+  };
+
+  const isPositive = safeToken.changePercent24h >= 0;
+  const hasPriceData = safeToken.price > 0;
 
   return (
     <View style={styles.overlay}>
@@ -57,82 +75,114 @@ export default function TokenDetails({
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.tokenInfo}>
-              <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-              <Text style={styles.tokenName}>{token.name}</Text>
+              {safeToken.logoURI ? (
+                <Image source={{ uri: safeToken.logoURI }} style={styles.tokenLogo} />
+              ) : (
+                <View style={styles.tokenLogoPlaceholder}>
+                  <Text style={styles.tokenLogoText}>{safeToken.symbol[0]}</Text>
+                </View>
+              )}
+              <View style={styles.tokenTextInfo}>
+                <Text style={styles.tokenSymbol}>{safeToken.symbol}</Text>
+                <Text style={styles.tokenName}>{safeToken.name}</Text>
+              </View>
             </View>
             <Pressable onPress={onClose} style={styles.closeButton}>
-              <X size={24} color={COLORS.text} />
+              <X size={24} color={COLORS.textPrimary} />
             </Pressable>
           </View>
 
           <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
             {/* Price Section */}
-            <View style={styles.priceSection}>
-              <Text style={styles.price}>
-                ${token.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
-              </Text>
-              <View style={styles.changeContainer}>
-                {isPositive ? (
-                  <TrendingUp size={16} color={COLORS.success} />
-                ) : (
-                  <TrendingDown size={16} color={COLORS.error} />
-                )}
-                <Text style={[styles.changeText, { color: isPositive ? COLORS.success : COLORS.error }]}>
-                  ${Math.abs(token.change24h).toFixed(2)} ({Math.abs(token.changePercent24h).toFixed(2)}%)
+            {hasPriceData ? (
+              <View style={styles.priceSection}>
+                <Text style={styles.price}>
+                  ${safeToken.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
                 </Text>
+                <View style={styles.changeContainer}>
+                  {isPositive ? (
+                    <TrendingUp size={16} color={COLORS.success} />
+                  ) : (
+                    <TrendingDown size={16} color={COLORS.error} />
+                  )}
+                  <Text style={[styles.changeText, { color: isPositive ? COLORS.success : COLORS.error }]}>
+                    ${Math.abs(safeToken.change24h).toFixed(2)} ({Math.abs(safeToken.changePercent24h).toFixed(2)}%)
+                  </Text>
+                </View>
               </View>
-            </View>
+            ) : (
+              <View style={styles.priceSection}>
+                <Text style={styles.noDataText}>Price data unavailable</Text>
+              </View>
+            )}
 
             {/* Holdings Section */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Your Holdings</Text>
-              <View style={styles.holdingRow}>
-                <Text style={styles.holdingLabel}>Balance</Text>
-                <Text style={styles.holdingValue}>
-                  {token.balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {token.symbol}
-                </Text>
+            {safeToken.balance > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Your Holdings</Text>
+                <View style={styles.holdingRow}>
+                  <Text style={styles.holdingLabel}>Balance</Text>
+                  <Text style={styles.holdingValue}>
+                    {safeToken.balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {safeToken.symbol}
+                  </Text>
+                </View>
+                <View style={styles.holdingRow}>
+                  <Text style={styles.holdingLabel}>Value</Text>
+                  <Text style={styles.holdingValue}>
+                    ${safeToken.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.holdingRow}>
-                <Text style={styles.holdingLabel}>Value</Text>
-                <Text style={styles.holdingValue}>
-                  ${token.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </Text>
-              </View>
-            </View>
+            )}
 
             {/* Market Stats */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Market Statistics</Text>
-              {token.marketCap && (
+              {safeToken.marketCap ? (
                 <View style={styles.statRow}>
                   <Text style={styles.statLabel}>Market Cap</Text>
-                  <Text style={styles.statValue}>${formatNumber(token.marketCap)}</Text>
+                  <Text style={styles.statValue}>${formatNumber(safeToken.marketCap)}</Text>
+                </View>
+              ) : (
+                <View style={styles.statRow}>
+                  <Text style={styles.statLabel}>Market Cap</Text>
+                  <Text style={styles.statValue}>-</Text>
                 </View>
               )}
-              {token.volume24h && (
+              {safeToken.volume24h ? (
                 <View style={styles.statRow}>
                   <Text style={styles.statLabel}>24h Volume</Text>
-                  <Text style={styles.statValue}>${formatNumber(token.volume24h)}</Text>
+                  <Text style={styles.statValue}>${formatNumber(safeToken.volume24h)}</Text>
+                </View>
+              ) : (
+                <View style={styles.statRow}>
+                  <Text style={styles.statLabel}>24h Volume</Text>
+                  <Text style={styles.statValue}>-</Text>
                 </View>
               )}
-              {token.supply && (
+              {safeToken.supply ? (
                 <View style={styles.statRow}>
                   <Text style={styles.statLabel}>Circulating Supply</Text>
-                  <Text style={styles.statValue}>{formatNumber(token.supply, 0)} {token.symbol}</Text>
+                  <Text style={styles.statValue}>{formatNumber(safeToken.supply, 0)} {safeToken.symbol}</Text>
+                </View>
+              ) : (
+                <View style={styles.statRow}>
+                  <Text style={styles.statLabel}>Circulating Supply</Text>
+                  <Text style={styles.statValue}>-</Text>
                 </View>
               )}
             </View>
 
             {/* Contract Address */}
-            {token.address && (
+            {safeToken.address && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Contract Address</Text>
                 <View style={styles.addressContainer}>
                   <Text style={styles.addressText} numberOfLines={1}>
-                    {token.address}
+                    {safeToken.address}
                   </Text>
                   <Pressable style={styles.copyButton}>
-                    <Copy size={16} color={COLORS.primary} />
+                    <Copy size={16} color={COLORS.solana} />
                   </Pressable>
                 </View>
               </View>
@@ -204,17 +254,40 @@ const styles = StyleSheet.create({
   },
   tokenInfo: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.m,
+  },
+  tokenLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  tokenLogoPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.solana + '30',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tokenLogoText: {
+    fontSize: 20,
+    fontFamily: FONTS.bold,
+    color: COLORS.solana,
+  },
+  tokenTextInfo: {
+    flex: 1,
   },
   tokenSymbol: {
     fontSize: 24,
     fontFamily: FONTS.bold,
-    color: COLORS.text,
+    color: COLORS.textPrimary,
   },
   tokenName: {
     fontSize: 16,
     fontFamily: FONTS.regular,
-    color: COLORS.text,
-    opacity: 0.7,
+    color: COLORS.textSecondary,
   },
   closeButton: {
     padding: SPACING.xs,
@@ -230,8 +303,14 @@ const styles = StyleSheet.create({
   price: {
     fontSize: 32,
     fontFamily: FONTS.bold,
-    color: COLORS.text,
+    color: COLORS.textPrimary,
     marginBottom: SPACING.xs,
+  },
+  noDataText: {
+    fontSize: 16,
+    fontFamily: FONTS.regular,
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
   },
   changeContainer: {
     flexDirection: 'row',
@@ -248,7 +327,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontFamily: FONTS.semiBold,
-    color: COLORS.text,
+    color: COLORS.textPrimary,
     marginBottom: SPACING.s,
   },
   holdingRow: {
@@ -260,13 +339,12 @@ const styles = StyleSheet.create({
   holdingLabel: {
     fontSize: 16,
     fontFamily: FONTS.regular,
-    color: COLORS.text,
-    opacity: 0.7,
+    color: COLORS.textSecondary,
   },
   holdingValue: {
     fontSize: 16,
     fontFamily: FONTS.medium,
-    color: COLORS.text,
+    color: COLORS.textPrimary,
   },
   statRow: {
     flexDirection: 'row',
@@ -277,13 +355,12 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 14,
     fontFamily: FONTS.regular,
-    color: COLORS.text,
-    opacity: 0.7,
+    color: COLORS.textSecondary,
   },
   statValue: {
     fontSize: 14,
     fontFamily: FONTS.medium,
-    color: COLORS.text,
+    color: COLORS.textPrimary,
   },
   addressContainer: {
     flexDirection: 'row',
@@ -296,8 +373,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontFamily: FONTS.regular,
-    color: COLORS.text,
-    opacity: 0.8,
+    color: COLORS.textSecondary,
   },
   copyButton: {
     padding: SPACING.xs,
