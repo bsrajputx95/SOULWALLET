@@ -11,12 +11,13 @@ import {
     ScrollView,
     Image,
 } from 'react-native';
-import { X, Search, AlertCircle, CheckCircle, ShoppingCart } from 'lucide-react-native';
+import { X, Search, AlertCircle, ShoppingCart, Shield } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { getQuote, executeSwap, getTokenList, JupiterToken } from '../services/swap';
+import { API_URL } from '../services/api';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
 
 interface QuickBuyModalProps {
@@ -29,7 +30,7 @@ interface TokenInfo {
     address: string;
     symbol: string;
     name: string;
-    logoURI?: string;
+    logoURI?: string | undefined;
     decimals: number;
     price?: number;
     verified?: boolean;
@@ -109,7 +110,35 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
         return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address.trim());
     };
 
-    // Verify token with Jupiter token list
+    // Fetch token info from Jupiter API
+    const fetchTokenFromJupiter = async (addr: string): Promise<TokenInfo | null> => {
+        try {
+            // Try Jupiter Tokens V2 API
+            const response = await fetch(`${API_URL}/tokens/search?query=${addr}`);
+            if (!response.ok) return null;
+            
+            const data = await response.json();
+            if (!data.tokens || data.tokens.length === 0) return null;
+            
+            // Find exact match
+            const token = data.tokens.find((t: any) => t.address === addr);
+            if (!token) return null;
+            
+            return {
+                address: token.address,
+                symbol: token.symbol,
+                name: token.name,
+                decimals: token.decimals || 9,
+                logoURI: token.logoURI,
+                verified: token.verified || false,
+                source: 'jupiter',
+            };
+        } catch {
+            return null;
+        }
+    };
+
+    // Verify token - check local list first, then Jupiter API
     const handleVerifyToken = async () => {
         const addr = tokenAddress.trim();
         if (!addr) {
@@ -126,30 +155,39 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
         setTokenInfo(null);
 
         try {
-            // Check if token is in Jupiter's verified list
-            const jupiterToken = jupiterTokens.find(t => t.address === addr);
-            
-            if (jupiterToken) {
+            // Tier 1: Check local hardcoded list
+            const localToken = jupiterTokens.find(t => t.address === addr);
+            if (localToken) {
                 setTokenInfo({
-                    address: jupiterToken.address,
-                    symbol: jupiterToken.symbol,
-                    name: jupiterToken.name,
-                    decimals: jupiterToken.decimals,
-                    logoURI: jupiterToken.logoURI,
+                    address: localToken.address,
+                    symbol: localToken.symbol,
+                    name: localToken.name,
+                    decimals: localToken.decimals,
+                    logoURI: localToken.logoURI,
                     verified: true,
                     source: 'jupiter',
                 });
-            } else {
-                // For unverified tokens, use generic info
-                setTokenInfo({
-                    address: addr,
-                    symbol: 'UNKNOWN',
-                    name: 'Unknown Token',
-                    decimals: 9,
-                    verified: false,
-                    source: 'generic',
-                });
+                setIsVerifying(false);
+                return;
             }
+            
+            // Tier 2: Fetch from Jupiter API
+            const jupiterToken = await fetchTokenFromJupiter(addr);
+            if (jupiterToken) {
+                setTokenInfo(jupiterToken);
+                setIsVerifying(false);
+                return;
+            }
+            
+            // Tier 3: Unknown token - still allow but with warning
+            setTokenInfo({
+                address: addr,
+                symbol: 'Unknown',
+                name: 'Unverified Token',
+                decimals: 9,
+                verified: false,
+                source: 'generic',
+            });
         } catch {
             setError('Unable to verify token');
         } finally {
@@ -317,9 +355,15 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                                         <Text style={styles.tokenName}>{tokenInfo.name}</Text>
                                     </View>
                                     {tokenInfo.verified ? (
-                                        <CheckCircle size={20} color={COLORS.success} />
+                                        <View style={styles.verifiedBadge}>
+                                            <Shield size={16} color={COLORS.success} />
+                                            <Text style={styles.verifiedText}>Verified</Text>
+                                        </View>
                                     ) : (
-                                        <AlertCircle size={20} color={COLORS.warning || '#FFB800'} />
+                                        <View style={styles.unverifiedBadge}>
+                                            <AlertCircle size={16} color={COLORS.warning || '#FFB800'} />
+                                            <Text style={styles.unverifiedText}>Unknown</Text>
+                                        </View>
                                     )}
                                 </View>
                             </View>
@@ -330,7 +374,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                             <View style={styles.warningContainer}>
                                 <AlertCircle size={16} color={COLORS.warning || '#FFB800'} />
                                 <Text style={styles.warningText}>
-                                    ⚠️ Unverified token. Verify the contract address on Solscan before trading.
+                                    This token is not verified. Only trade if you trust this contract address.
                                 </Text>
                             </View>
                         )}
@@ -783,6 +827,34 @@ const styles = StyleSheet.create({
     },
     tokenCardUnverified: {
         borderColor: (COLORS.warning || '#FFB800') + '50',
+    },
+    verifiedBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.success + '20',
+        paddingHorizontal: SPACING.s,
+        paddingVertical: SPACING.xs,
+        borderRadius: BORDER_RADIUS.small,
+        gap: 4,
+    },
+    verifiedText: {
+        ...FONTS.phantomMedium,
+        color: COLORS.success,
+        fontSize: 11,
+    },
+    unverifiedBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: (COLORS.warning || '#FFB800') + '20',
+        paddingHorizontal: SPACING.s,
+        paddingVertical: SPACING.xs,
+        borderRadius: BORDER_RADIUS.small,
+        gap: 4,
+    },
+    unverifiedText: {
+        ...FONTS.phantomMedium,
+        color: COLORS.warning || '#FFB800',
+        fontSize: 11,
     },
     warningContainer: {
         flexDirection: 'row',

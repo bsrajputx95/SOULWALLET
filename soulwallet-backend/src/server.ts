@@ -933,16 +933,83 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
     }
 });
 
-// GET /tokens/search - Search tokens for dropdowns
-app.get('/tokens/search', authMiddleware, async (_req: Request, res: Response): Promise<void> => {
-    // For beta, return top Solana tokens
-    const topTokens = [
-        { symbol: 'SOL', name: 'Solana', address: 'So11111111111111111111111111111111111111112', decimals: 9 },
-        { symbol: 'USDC', name: 'USD Coin', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1', decimals: 6 },
-        { symbol: 'BONK', name: 'Bonk', address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5 },
-        { symbol: 'JUP', name: 'Jupiter', address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', decimals: 6 }
-    ];
-    res.json({ success: true, tokens: topTokens });
+// Jupiter Tokens API V2 base URL
+const JUPITER_TOKENS_API = 'https://lite-api.jup.ag/tokens/v2';
+
+// GET /tokens/search - Search tokens using Jupiter API
+app.get('/tokens/search', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { query } = req.query;
+        
+        if (!query || typeof query !== 'string') {
+            res.status(400).json({ error: 'Query parameter required' });
+            return;
+        }
+        
+        console.log(`[Tokens] Searching for: ${query}`);
+        
+        // Check if it's a mint address (32-44 base58 chars) or a symbol search
+        const isMintAddress = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(query);
+        
+        let tokens = [];
+        
+        try {
+            // Use Jupiter Tokens V2 API
+            const url = `${JUPITER_TOKENS_API}/search?query=${encodeURIComponent(query)}`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 10000);
+            
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeout);
+            
+            if (response.ok) {
+                const data = await response.json();
+                tokens = data || [];
+                console.log(`[Tokens] Found ${tokens.length} tokens from Jupiter`);
+            }
+        } catch (apiErr: any) {
+            console.warn('[Tokens] Jupiter API failed:', apiErr.message);
+        }
+        
+        // Fallback to hardcoded list if Jupiter fails and it's a known token
+        if (tokens.length === 0 && isMintAddress) {
+            const knownTokens: Record<string, any> = {
+                'So11111111111111111111111111111111111111112': {
+                    address: 'So11111111111111111111111111111111111111112',
+                    symbol: 'SOL',
+                    name: 'Solana',
+                    decimals: 9,
+                    logoURI: 'https://cryptologos.cc/logos/solana-sol-logo.png',
+                    verified: true,
+                },
+                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': {
+                    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                    symbol: 'USDC',
+                    name: 'USD Coin',
+                    decimals: 6,
+                    logoURI: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
+                    verified: true,
+                },
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': {
+                    address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+                    symbol: 'USDT',
+                    name: 'Tether',
+                    decimals: 6,
+                    logoURI: 'https://cryptologos.cc/logos/tether-usdt-logo.png',
+                    verified: true,
+                },
+            };
+            
+            if (knownTokens[query]) {
+                tokens = [knownTokens[query]];
+            }
+        }
+        
+        res.json({ success: true, tokens });
+    } catch (error: any) {
+        console.error('[Tokens] Search error:', error.message);
+        res.status(500).json({ error: 'Token search failed' });
+    }
 });
 
 // GET /swap/quote - Proxy swap quote requests to Jupiter Ultra API
