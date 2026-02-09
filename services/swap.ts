@@ -1,4 +1,5 @@
 import 'react-native-get-random-values';
+import { Buffer } from 'buffer';
 import { Keypair, VersionedTransaction } from '@solana/web3.js';
 import { getKeypairForSigning, getLocalPublicKey } from './wallet';
 import { api } from './api';
