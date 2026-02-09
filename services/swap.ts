@@ -1,10 +1,8 @@
 import 'react-native-get-random-values';
 import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 import { getKeypairForSigning, getLocalPublicKey } from './wallet';
+import { api } from './api';
 
-const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
-// Use Jupiter's strict token list (verified tokens only)
-const JUPITER_TOKEN_API = 'https://token.jup.ag/strict';
 // Use public Solana RPC as fallback if Helius fails
 const SOLANA_RPC = process.env.EXPO_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const HELIUS_RPC = process.env.EXPO_PUBLIC_HELIUS_API_KEY 
@@ -114,38 +112,29 @@ export const getQuote = async (
     slippageBps: number,
     signal?: AbortSignal
 ): Promise<SwapQuote | null> => {
-    console.log(`[Swap] Getting quote: ${inputMint} -> ${outputMint}, amount: ${amount}`);
-    let lastError;
-    for (let i = 0; i < 3; i++) {
-        try {
-            const params = new URLSearchParams({
-                inputMint,
-                outputMint,
-                amount: amount.toString(),
-                slippageBps: slippageBps.toString(),
-                onlyDirectRoutes: 'false',
-            });
-
-            const url = `${JUPITER_QUOTE_API}/quote?${params}`;
-            console.log(`[Swap] Quote URL: ${url.substring(0, 80)}...`);
-            
-            const response = await fetch(url, { signal });
-            console.log(`[Swap] Quote response status: ${response.status}`);
-            
-            if (response.ok) {
-                const data = await response.json();
-                console.log(`[Swap] Quote received: ${data.outAmount} out`);
-                return data;
-            }
-            lastError = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-            console.warn(`[Swap] Quote attempt ${i+1} failed:`, lastError);
-        } catch (e: any) { 
-            lastError = e;
-            console.warn(`[Swap] Quote attempt ${i+1} error:`, e.message || e);
+    console.log(`[Swap] Getting quote via backend: ${inputMint} -> ${outputMint}, amount: ${amount}`);
+    
+    try {
+        const params = new URLSearchParams({
+            inputMint,
+            outputMint,
+            amount: amount.toString(),
+            slippageBps: slippageBps.toString(),
+        });
+        
+        const options: RequestInit = {};
+        if (signal) {
+            options.signal = signal;
         }
-        if (i < 2) await new Promise(r => setTimeout(r, 1000));
+        
+        const data = await api.request<SwapQuote>(`/swap/quote?${params}`, options);
+        
+        console.log(`[Swap] Quote success: ${data.outAmount} out`);
+        return data;
+    } catch (e: any) { 
+        console.error(`[Swap] Quote failed:`, e.message || e);
+        throw new Error(e.message || 'Quote failed. Please try again.');
     }
-    throw new Error(lastError?.error || lastError?.message || 'Quote failed after retries');
 };
 
 export const executeSwap = async (
@@ -159,26 +148,18 @@ export const executeSwap = async (
             return { success: false, error: 'No wallet found. Please create a wallet first.' };
         }
 
-        console.log('[Swap] Getting swap transaction from Jupiter...');
-        const swapResponse = await fetch(`${JUPITER_QUOTE_API}/swap`, {
+        console.log('[Swap] Getting swap transaction from backend...');
+        
+        const swapData = await api.request<{ swapTransaction: string }>('/swap/transaction', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 quoteResponse: quote,
                 userPublicKey: publicKey,
-                wrapAndUnwrapSol: true,
-                dynamicComputeUnitLimit: true,
-                prioritizationFeeLamports: 'auto',
             }),
         });
+        
+        console.log(`[Swap] Got transaction from backend`);
 
-        if (!swapResponse.ok) {
-            const errorData = await swapResponse.json().catch(() => ({}));
-            console.error('[Swap] Jupiter swap error:', errorData);
-            throw new Error(errorData.error || `Failed to build swap transaction: ${swapResponse.status}`);
-        }
-
-        const swapData = await swapResponse.json();
         const { swapTransaction } = swapData;
 
         if (!swapTransaction) {

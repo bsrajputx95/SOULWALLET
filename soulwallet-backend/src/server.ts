@@ -75,6 +75,9 @@ const handleRpcError = (error: any): { statusCode: number; message: string } => 
 // Jupiter Price API (FREE - no API key needed)
 const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
 
+// Jupiter Quote API (FREE - for swap quotes)
+const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
+
 // DexScreener API for price fallback
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/tokens/v1/solana';
 
@@ -936,6 +939,80 @@ app.get('/tokens/search', authMiddleware, async (_req: Request, res: Response): 
         { symbol: 'JUP', name: 'Jupiter', address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', decimals: 6 }
     ];
     res.json({ success: true, tokens: topTokens });
+});
+
+// GET /swap/quote - Proxy swap quote requests to Jupiter (avoids DNS issues in React Native)
+app.get('/swap/quote', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { inputMint, outputMint, amount, slippageBps } = req.query;
+        
+        if (!inputMint || !outputMint || !amount || !slippageBps) {
+            res.status(400).json({ error: 'Missing required parameters: inputMint, outputMint, amount, slippageBps' });
+            return;
+        }
+        
+        console.log(`[SwapQuote] Proxying quote: ${inputMint} -> ${outputMint}, amount: ${amount}`);
+        
+        const params = new URLSearchParams({
+            inputMint: inputMint as string,
+            outputMint: outputMint as string,
+            amount: amount as string,
+            slippageBps: slippageBps as string,
+        });
+        
+        const url = `${JUPITER_QUOTE_API}/quote?${params}`;
+        console.log(`[SwapQuote] Fetching from: ${url}`);
+        
+        const response = await axios.get(url, { timeout: 15000 });
+        
+        console.log(`[SwapQuote] Success: ${response.data.outAmount} out`);
+        res.json(response.data);
+    } catch (error: any) {
+        console.error('[SwapQuote] Error:', error.message);
+        if (error.response) {
+            res.status(error.response.status).json({ 
+                error: 'Jupiter API error', 
+                details: error.response.data 
+            });
+        } else {
+            res.status(500).json({ error: 'Failed to fetch swap quote' });
+        }
+    }
+});
+
+// POST /swap/transaction - Proxy swap transaction requests to Jupiter
+app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { quoteResponse, userPublicKey } = req.body;
+        
+        if (!quoteResponse || !userPublicKey) {
+            res.status(400).json({ error: 'Missing required parameters: quoteResponse, userPublicKey' });
+            return;
+        }
+        
+        console.log(`[SwapTx] Proxying swap transaction for: ${userPublicKey}`);
+        
+        const response = await axios.post(`${JUPITER_QUOTE_API}/swap`, {
+            quoteResponse,
+            userPublicKey,
+            wrapAndUnwrapSol: true,
+            dynamicComputeUnitLimit: true,
+            prioritizationFeeLamports: 'auto',
+        }, { timeout: 15000 });
+        
+        console.log(`[SwapTx] Success`);
+        res.json(response.data);
+    } catch (error: any) {
+        console.error('[SwapTx] Error:', error.message);
+        if (error.response) {
+            res.status(error.response.status).json({ 
+                error: 'Jupiter API error', 
+                details: error.response.data 
+            });
+        } else {
+            res.status(500).json({ error: 'Failed to build swap transaction' });
+        }
+    }
 });
 
 // ====== Transaction Endpoints ======
