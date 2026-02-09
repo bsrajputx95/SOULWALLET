@@ -170,6 +170,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                 volume24h: tokenMetadata.volume24h || 0,
                 supply: tokenMetadata.circSupply || tokenMetadata.totalSupply || 0,
                 address: tokenInfo.address,
+                logoURI: tokenMetadata.icon || tokenMetadata.logoURI || tokenInfo.logoURI,
             };
         }
         
@@ -183,6 +184,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
             balance: 0,
             value: 0,
             address: tokenInfo.address,
+            logoURI: tokenInfo.logoURI,
         };
     };
 
@@ -604,19 +606,18 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                 </View>
             </View>
 
-            {/* Token Details Modal */}
-            {showTokenDetails && (
-                <TokenDetails
-                    token={getTokenDetailsData()!}
-                    visible={showTokenDetails}
-                    onClose={() => setShowTokenDetails(false)}
-                    onBuy={() => {
-                        setShowTokenDetails(false);
-                        // Already in buy flow
-                    }}
-                />
-            )}
         </Modal>
+
+        {/* Token Details - Rendered outside QuickBuyModal */}
+        <TokenDetails
+            token={getTokenDetailsData()}
+            visible={showTokenDetails}
+            onClose={() => setShowTokenDetails(false)}
+            onBuy={() => {
+                setShowTokenDetails(false);
+                // Already in buy flow
+            }}
+        />
     );
 };
 
