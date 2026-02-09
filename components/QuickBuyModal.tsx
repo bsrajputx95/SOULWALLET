@@ -117,30 +117,49 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
     // Fetch token info from Jupiter API
     const fetchTokenFromJupiter = async (addr: string): Promise<TokenInfo | null> => {
         try {
+            console.log(`[QuickBuy] Fetching token info for: ${addr}`);
+            
             // Try Jupiter Tokens V2 API
             const response = await fetch(`${API_URL}/tokens/search?query=${addr}`);
-            if (!response.ok) return null;
+            console.log(`[QuickBuy] API response status: ${response.status}`);
+            
+            if (!response.ok) {
+                console.log('[QuickBuy] API response not OK');
+                return null;
+            }
             
             const data = await response.json();
-            if (!data.tokens || data.tokens.length === 0) return null;
+            console.log(`[QuickBuy] API data:`, JSON.stringify(data).substring(0, 500));
             
-            // Find exact match
-            const token = data.tokens.find((t: any) => t.address === addr);
+            if (!data.tokens || data.tokens.length === 0) {
+                console.log('[QuickBuy] No tokens found');
+                return null;
+            }
+            
+            // Find exact match - Jupiter uses 'id' for address
+            const token = data.tokens.find((t: any) => t.id === addr || t.address === addr);
+            console.log(`[QuickBuy] Found token:`, token ? JSON.stringify(token).substring(0, 300) : 'null');
+            
             if (!token) return null;
             
             // Store full metadata for TokenDetails
             setTokenMetadata(token);
             
-            return {
-                address: token.address,
+            // Jupiter API uses 'id' for address and 'icon' for logo
+            const tokenInfo = {
+                address: token.id || token.address,
                 symbol: token.symbol,
                 name: token.name,
                 decimals: token.decimals || 9,
-                logoURI: token.logoURI || token.icon,
+                logoURI: token.icon || token.logoURI,
                 verified: token.verified || false,
-                source: 'jupiter',
+                source: 'jupiter' as const,
             };
-        } catch {
+            
+            console.log(`[QuickBuy] Returning token info:`, tokenInfo);
+            return tokenInfo;
+        } catch (err: any) {
+            console.error('[QuickBuy] Error fetching token:', err.message);
             return null;
         }
     };
@@ -166,11 +185,11 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                 changePercent24h: tokenMetadata.priceChange24h || 0,
                 balance: 0,
                 value: 0,
-                marketCap: tokenMetadata.marketCap || tokenMetadata.mcap || 0,
+                marketCap: tokenMetadata.marketCap || tokenMetadata.mcap || tokenMetadata.fdv || 0,
                 volume24h: tokenMetadata.volume24h || 0,
                 supply: tokenMetadata.circSupply || tokenMetadata.totalSupply || 0,
                 address: tokenInfo.address,
-                logoURI: tokenMetadata.icon || tokenMetadata.logoURI || tokenInfo.logoURI,
+                logoURI: tokenMetadata.icon || tokenInfo.logoURI,
             };
         }
         

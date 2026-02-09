@@ -964,7 +964,17 @@ app.get('/tokens/search', authMiddleware, async (req: Request, res: Response): P
             
             if (response.ok) {
                 const data = await response.json();
-                tokens = data || [];
+                // Map Jupiter fields to our format
+                tokens = (data || []).map((t: any) => ({
+                    address: t.id || t.address,
+                    symbol: t.symbol,
+                    name: t.name,
+                    decimals: t.decimals,
+                    logoURI: t.icon,
+                    verified: t.verified,
+                    // Include all original data for TokenDetails
+                    ...t
+                }));
                 console.log(`[Tokens] Found ${tokens.length} tokens from Jupiter`);
             }
         } catch (apiErr: any) {
