@@ -73,10 +73,10 @@ const handleRpcError = (error: any): { statusCode: number; message: string } => 
 };
 
 // Jupiter Price API (FREE - no API key needed)
-const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
+const JUPITER_PRICE_API = 'https://api.jup.ag/v6/price';
 
 // Jupiter Quote API (FREE - for swap quotes)
-const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
+const JUPITER_QUOTE_API = 'https://api.jup.ag/v6';
 
 // DexScreener API for price fallback
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/tokens/v1/solana';
@@ -755,6 +755,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
             }
         } catch (priceErr: any) {
             console.warn('[Balances] Jupiter price fetch failed:', priceErr.message || priceErr);
+            // Don't fail - we'll use DexScreener fallback
         }
 
         // 4. Fallback: Fetch prices from DexScreener if Jupiter failed or returned 0
@@ -960,13 +961,27 @@ app.get('/swap/quote', authMiddleware, async (req: Request, res: Response): Prom
             slippageBps: slippageBps as string,
         });
         
-        const url = `${JUPITER_QUOTE_API}/quote?${params}`;
-        console.log(`[SwapQuote] Fetching from: ${url}`);
+        // Try primary Jupiter API
+        const urls = [
+            `${JUPITER_QUOTE_API}/quote?${params}`,
+            `https://quote-api.jup.ag/v6/quote?${params}`, // Fallback
+        ];
         
-        const response = await axios.get(url, { timeout: 15000 });
+        let lastError;
+        for (const url of urls) {
+            try {
+                console.log(`[SwapQuote] Trying: ${url.split('?')[0]}`);
+                const response = await axios.get(url, { timeout: 15000 });
+                console.log(`[SwapQuote] Success: ${response.data.outAmount} out`);
+                res.json(response.data);
+                return;
+            } catch (e: any) {
+                console.warn(`[SwapQuote] Failed for ${url.split('?')[0]}:`, e.message);
+                lastError = e;
+            }
+        }
         
-        console.log(`[SwapQuote] Success: ${response.data.outAmount} out`);
-        res.json(response.data);
+        throw lastError;
     } catch (error: any) {
         console.error('[SwapQuote] Error:', error.message);
         if (error.response) {
@@ -975,7 +990,7 @@ app.get('/swap/quote', authMiddleware, async (req: Request, res: Response): Prom
                 details: error.response.data 
             });
         } else {
-            res.status(500).json({ error: 'Failed to fetch swap quote' });
+            res.status(500).json({ error: 'Failed to fetch swap quote - Jupiter API unavailable' });
         }
     }
 });
@@ -992,16 +1007,35 @@ app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response
         
         console.log(`[SwapTx] Proxying swap transaction for: ${userPublicKey}`);
         
-        const response = await axios.post(`${JUPITER_QUOTE_API}/swap`, {
+        const swapBody = {
             quoteResponse,
             userPublicKey,
             wrapAndUnwrapSol: true,
             dynamicComputeUnitLimit: true,
             prioritizationFeeLamports: 'auto',
-        }, { timeout: 15000 });
+        };
         
-        console.log(`[SwapTx] Success`);
-        res.json(response.data);
+        // Try primary Jupiter API
+        const urls = [
+            `${JUPITER_QUOTE_API}/swap`,
+            `https://quote-api.jup.ag/v6/swap`, // Fallback
+        ];
+        
+        let lastError;
+        for (const url of urls) {
+            try {
+                console.log(`[SwapTx] Trying: ${url}`);
+                const response = await axios.post(url, swapBody, { timeout: 15000 });
+                console.log(`[SwapTx] Success`);
+                res.json(response.data);
+                return;
+            } catch (e: any) {
+                console.warn(`[SwapTx] Failed for ${url}:`, e.message);
+                lastError = e;
+            }
+        }
+        
+        throw lastError;
     } catch (error: any) {
         console.error('[SwapTx] Error:', error.message);
         if (error.response) {
@@ -1010,7 +1044,7 @@ app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response
                 details: error.response.data 
             });
         } else {
-            res.status(500).json({ error: 'Failed to build swap transaction' });
+            res.status(500).json({ error: 'Failed to build swap transaction - Jupiter API unavailable' });
         }
     }
 });
