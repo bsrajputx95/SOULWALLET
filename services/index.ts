@@ -4,4 +4,5 @@ export * from './copyTrading';
 export * from './backgroundTasks';
 export * from './market';
 export * from './social';
+export * from './ibuy';
 export * from './api';

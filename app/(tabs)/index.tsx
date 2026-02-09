@@ -43,18 +43,18 @@ const DUMMY_WALLET = {
   publicKey: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
   balance: 1234.56,
   tokens: [
-    { symbol: 'SOL', name: 'Solana', balance: 10.5, usdValue: 1050, mint: 'So11111111111111111111111111111111111111112', decimals: 9, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' },
-    { symbol: 'USDC', name: 'USD Coin', balance: 500, usdValue: 500, mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png' },
+    { symbol: 'SOL', name: 'Solana', balance: 10.5, usdValue: 1050, mint: 'So11111111111111111111111111111111111111112', decimals: 9, logo: 'https://cryptologos.cc/logos/solana-sol-logo.png' },
+    { symbol: 'USDC', name: 'USD Coin', balance: 500, usdValue: 500, mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logo: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' },
   ],
 };
 
 // Well-known token logos for popular Solana tokens (fallback when API doesn't have them)
 const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
-  'SOL': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
-  'RAY': 'https://raw.githubusercontent.com/raydium-io/media-assets/master/logo/logo_200x200.png',
-  'JUP': 'https://static.jup.ag/jup/icon.png',
-  'USDC': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
-  'USDT': 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+  'SOL': 'https://cryptologos.cc/logos/solana-sol-logo.png',
+  'RAY': 'https://cryptologos.cc/logos/raydium-ray-logo.png',
+  'JUP': 'https://cryptologos.cc/logos/jupiter-ag-jup-logo.png',
+  'USDC': 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
+  'USDT': 'https://cryptologos.cc/logos/tether-usdt-logo.png',
   'BONK': 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
   'WIF': 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link',
   'POPCAT': 'https://bafkreidvnhdzuq3pvhnzq26hjydmhrr2xw2flkxkflg7swmrxnx7c7xvey.ipfs.nftstorage.link',
@@ -137,22 +137,32 @@ export default function HomeScreen() {
       if (hasLocal) {
         const pubkey = await getLocalPublicKey();
         setWalletAddress(pubkey);
+        if (__DEV__) console.log('[Home] Local wallet:', pubkey);
+      }
 
-        // Fetch balances from backend
-        const portfolio = await fetchBalances(token);
-        if (portfolio) {
-          setTotalBalance(portfolio.totalUsdValue);
-          setHoldings(portfolio.holdings);
-        } else {
-          showErrorToast('Failed to load balances');
+      // Fetch balances from backend (works if wallet is linked to user)
+      if (__DEV__) console.log('[Home] Fetching balances...');
+      const portfolio = await fetchBalances(token);
+      if (portfolio) {
+        if (__DEV__) console.log('[Home] Portfolio:', portfolio);
+        setTotalBalance(portfolio.totalUsdValue);
+        setHoldings(portfolio.holdings);
+        // Update wallet address from backend if not set locally
+        if (!walletAddress && portfolio.publicKey) {
+          setWalletAddress(portfolio.publicKey);
+          setHasWallet(true);
         }
+      } else {
+        if (__DEV__) console.log('[Home] No portfolio data');
+        showErrorToast('Failed to load balances');
       }
     } catch (error) {
+      if (__DEV__) console.error('[Home] Error loading wallet:', error);
       showErrorToast('Failed to load wallet data');
     } finally {
       setIsLoadingWallet(false);
     }
-  }, []);
+  }, [walletAddress]);
 
   useEffect(() => {
     loadWalletData();
@@ -364,6 +374,14 @@ export default function HomeScreen() {
     }
   };
 
+  // Copy Trading State (must be declared before loadCopyTradingData)
+  const [copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
+  const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
+  const [copyConfig, setCopyConfig] = React.useState<any>(null);
+  const [isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
+  const [showExecutionModal, setShowExecutionModal] = React.useState(false);
+  const [selectedQueueItem, setSelectedQueueItem] = React.useState<CopyTradeQueueItem | null>(null);
+
   // Load copy trading data (positions, queue, config)
   const loadCopyTradingData = useCallback(async () => {
     try {
@@ -400,7 +418,7 @@ export default function HomeScreen() {
   // Handle queue banner action - open execution modal
   const handleQueueAction = useCallback(() => {
     if (copyQueue.length > 0) {
-      setSelectedQueueItem(copyQueue[0]);
+      setSelectedQueueItem(copyQueue[0] ?? null);
       setShowExecutionModal(true);
     }
   }, [copyQueue]);
@@ -514,15 +532,9 @@ export default function HomeScreen() {
   const searchedTradersData: any = { data: [] };
   const searchedTradersLoading = false;
 
-  // New Copy Trading State
+  // New Copy Trading State (state declarations moved to before loadCopyTradingData)
   const [showCopyModal, setShowCopyModal] = React.useState(false);
   const [selectedTrader, setSelectedTrader] = React.useState<{ username: string; walletAddress: string } | null>(null);
-  const [showExecutionModal, setShowExecutionModal] = React.useState(false);
-  const [selectedQueueItem, setSelectedQueueItem] = React.useState<CopyTradeQueueItem | null>(null);
-  const [copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
-  const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
-  const [copyConfig, setCopyConfig] = React.useState<any>(null);
-  const [isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
 
   // Legacy state (to be removed after migration)
   const [selectedTraderWallet, setSelectedTraderWallet] = React.useState<string | null>(null);

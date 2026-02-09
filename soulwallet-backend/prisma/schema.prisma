@@ -51,6 +51,13 @@ model User {
   followingRel  Follow[] @relation("following")
   followersRel  Follow[] @relation("followers")
 
+  // IBUY Relations
+  settings          UserSettings?
+  ibuyPositions     IBuyPosition[] @relation("buyer")
+  creatorPositions  IBuyPosition[] @relation("creator")
+  creatorRevenues   CreatorRevenue[]
+  votes             Vote[]
+
   @@index([username])
   @@index([email])
 }
@@ -205,24 +212,31 @@ model TraderWebhook {
 }
 
 model Post {
-  id            String   @id @default(cuid())
-  userId        String
-  content       String   @db.Text
-  visibility    String   @default("public") // public | followers | vip
-  tokenAddress  String?
-  tokenSymbol   String?
-  tokenName     String?
-  likesCount    Int      @default(0)
-  commentsCount Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(cuid())
+  userId          String
+  content         String   @db.Text
+  visibility      String   @default("public") // public | followers | vip
+  tokenAddress    String?
+  tokenSymbol     String?
+  tokenName       String?
+  tokenVerified   Boolean  @default(false)
+  tokenPriceAtPost Float?
+  ibuyCount       Int      @default(0)
+  ibuyVolume      Float    @default(0)
+  likesCount      Int      @default(0)
+  commentsCount   Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  likes         Like[]
-  comments      Comment[]
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes           Like[]
+  comments        Comment[]
+  ibuys           IBuyPosition[]
+  votes           Vote[]
 
   @@index([userId, createdAt])
   @@index([visibility, createdAt])
+  @@index([tokenAddress])
   @@map("posts")
 }
 
@@ -267,4 +281,79 @@ model Follow {
   @@index([followerId])
   @@index([followingId])
   @@map("follows")
+}
+
+// Vote/Agree-Disagree Model
+model Vote {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  type      String   // "agree" or "disagree"
+  createdAt DateTime @default(now())
+
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId]) // One vote per user per post
+  @@index([postId])
+  @@index([userId])
+  @@map("votes")
+}
+
+// IBUY Models
+model UserSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  ibuySlippage    Int      @default(50)  // 0.5% in bps
+  ibuyDefaultSol  Float    @default(0.1)
+  autoApprove     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_settings")
+}
+
+model IBuyPosition {
+  id                String   @id @default(cuid())
+  userId            String
+  postId            String
+  creatorId         String
+  tokenAddress      String
+  tokenSymbol       String
+  entryPrice        Float
+  solAmount         Float
+  tokenAmount       Float
+  creatorFee        Float    @default(0)
+  remainingAmount   Float
+  realizedPnl       Float    @default(0)
+  creatorSharePaid  Float    @default(0)
+  status            String   @default("open") // "open", "closed"
+  createdAt         DateTime @default(now())
+  closedAt          DateTime?
+
+  user              User     @relation("buyer", fields: [userId], references: [id], onDelete: Cascade)
+  creator           User     @relation("creator", fields: [creatorId], references: [id], onDelete: Cascade)
+  post              Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([creatorId])
+  @@index([postId])
+  @@map("ibuy_positions")
+}
+
+model CreatorRevenue {
+  id          String   @id @default(cuid())
+  creatorId   String
+  positionId  String
+  amount      Float
+  type        String   // "ibuy_fee" | "profit_share"
+  createdAt   DateTime @default(now())
+
+  creator     User     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId, createdAt])
+  @@map("creator_revenues")
 }

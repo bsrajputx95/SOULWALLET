@@ -16,7 +16,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { MessageSquare, Repeat, Heart, Send, X, Share2 } from 'lucide-react-native';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard } from '@/components';
-import { fetchPost, toggleLike, addComment } from '@/services/social';
+import { fetchPost, toggleLike, addComment, voteOnPost, getPostVotes } from '@/services/social';
 
 // Post data interface
 interface PostData {
@@ -97,8 +97,54 @@ export default function PostDetailScreen() {
     setIsSubmitting(false);
   };
 
-  const handleVote = (_choice: 'agree' | 'disagree') => {
-    Alert.alert('Coming Soon', 'Voting functionality will be available soon.');
+  // Vote state
+  const [voteData, setVoteData] = useState({
+    agreeCount: 0,
+    disagreeCount: 0,
+    totalVotes: 0,
+    agreePercent: 0,
+    disagreePercent: 0,
+    userVote: null as string | null,
+  });
+  const [isVoting, setIsVoting] = useState(false);
+
+  // Load votes when post loads
+  useEffect(() => {
+    if (id) {
+      loadVotes();
+    }
+  }, [id]);
+
+  const loadVotes = async () => {
+    const result = await getPostVotes(id);
+    if (result.success) {
+      setVoteData({
+        agreeCount: result.agreeCount || 0,
+        disagreeCount: result.disagreeCount || 0,
+        totalVotes: result.totalVotes || 0,
+        agreePercent: result.agreePercent || 0,
+        disagreePercent: result.disagreePercent || 0,
+        userVote: result.userVote || null,
+      });
+    }
+  };
+
+  const handleVote = async (choice: 'agree' | 'disagree') => {
+    if (isVoting || voteData.userVote) return; // Already voted or voting in progress
+    
+    setIsVoting(true);
+    const result = await voteOnPost(id, choice);
+    if (result.success) {
+      // Refresh vote data
+      await loadVotes();
+    } else if (result.error?.includes('already voted')) {
+      Alert.alert('Already Voted', 'You can only vote once on this post.');
+      // Refresh to get the actual vote
+      await loadVotes();
+    } else {
+      Alert.alert('Error', result.error || 'Failed to vote');
+    }
+    setIsVoting(false);
   };
 
   // Format timestamp helper
@@ -189,13 +235,9 @@ export default function PostDetailScreen() {
     );
   }
 
-  // Voting state (not yet implemented)
-  const agreeCount = 0;
-  const disagreeCount = 0;
-  const userVote = null;
-  const totalVotes = Math.max(agreeCount + disagreeCount, 0.0001);
-  const agreePercent = Math.round((agreeCount / totalVotes) * 100);
-  const disagreePercent = 100 - agreePercent;
+  // Use vote data from state
+  const { agreeCount, disagreeCount, agreePercent, disagreePercent } = voteData;
+  const hasVotes = voteData.agreeCount + voteData.disagreeCount > 0;
 
 
 
@@ -278,33 +320,74 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           </View>
         </NeonCard>
-        {/* Index: Agree / Disagree (moved above comment input) */}
+        {/* Index: Agree / Disagree */}
         <NeonCard style={styles.indexCard}>
           <View style={styles.indexHeaderRow}>
-            <Text style={styles.indexTitle}>Index</Text>
+            <Text style={styles.indexTitle}>Community Sentiment</Text>
+            {voteData.totalVotes > 0 && (
+              <Text style={styles.indexSubtitle}>{voteData.totalVotes} votes</Text>
+            )}
           </View>
           <View style={styles.voteRow}>
             <TouchableOpacity
-              style={[styles.voteChip, userVote === 'agree' && styles.voteChipSelected]}
+              style={[
+                styles.voteChip, 
+                voteData.userVote === 'agree' && styles.voteChipSelectedAgree,
+                voteData.userVote && voteData.userVote !== 'agree' && styles.voteChipDisabled
+              ]}
               onPress={() => handleVote('agree')}
+              disabled={isVoting || !!voteData.userVote}
             >
-              <Text style={[styles.voteText, userVote === 'agree' && styles.voteTextSelected]}>Agree</Text>
+              <Text style={[
+                styles.voteText, 
+                voteData.userVote === 'agree' && styles.voteTextSelected,
+                voteData.userVote && voteData.userVote !== 'agree' && styles.voteTextDisabled
+              ]}>
+                {voteData.userVote === 'agree' ? '✓ Agree' : 'Agree'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.voteChip, userVote === 'disagree' && styles.voteChipSelected]}
+              style={[
+                styles.voteChip, 
+                voteData.userVote === 'disagree' && styles.voteChipSelectedDisagree,
+                voteData.userVote && voteData.userVote !== 'disagree' && styles.voteChipDisabled
+              ]}
               onPress={() => handleVote('disagree')}
+              disabled={isVoting || !!voteData.userVote}
             >
-              <Text style={[styles.voteText, userVote === 'disagree' && styles.voteTextSelected]}>Disagree</Text>
+              <Text style={[
+                styles.voteText, 
+                voteData.userVote === 'disagree' && styles.voteTextSelected,
+                voteData.userVote && voteData.userVote !== 'disagree' && styles.voteTextDisabled
+              ]}>
+                {voteData.userVote === 'disagree' ? '✓ Disagree' : 'Disagree'}
+              </Text>
             </TouchableOpacity>
           </View>
-          <View style={styles.indexBarContainer}>
-            <View style={[styles.indexBarAgree, { flex: Math.max(agreeCount, 0) }]} />
-            <View style={[styles.indexBarDisagree, { flex: Math.max(disagreeCount, 0) }]} />
-          </View>
-          <View style={styles.indexBarLabels}>
-            <Text style={styles.indexBarLabel}>Agree {agreePercent}%</Text>
-            <Text style={styles.indexBarLabel}>Disagree {disagreePercent}%</Text>
-          </View>
+          {hasVotes ? (
+            <>
+              <View style={styles.indexBarContainer}>
+                <View 
+                  style={[
+                    styles.indexBarAgree, 
+                    { flex: agreePercent || 1 }
+                  ]} 
+                />
+                <View 
+                  style={[
+                    styles.indexBarDisagree, 
+                    { flex: disagreePercent || 1 }
+                  ]} 
+                />
+              </View>
+              <View style={styles.indexBarLabels}>
+                <Text style={styles.indexBarLabelAgree}>Agree {agreePercent}%</Text>
+                <Text style={styles.indexBarLabelDisagree}>Disagree {disagreePercent}%</Text>
+              </View>
+            </>
+          ) : (
+            <Text style={styles.noVotesText}>Be the first to vote!</Text>
+          )}
         </NeonCard>
 
         {/* Add Comment */}
@@ -566,27 +649,45 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 16,
   },
+  indexSubtitle: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
   voteRow: {
     flexDirection: 'row',
     marginBottom: SPACING.s,
   },
   voteChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: BORDER_RADIUS.small,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: BORDER_RADIUS.medium,
     backgroundColor: COLORS.cardBackground,
     marginRight: SPACING.s,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-  voteChipSelected: {
-    backgroundColor: COLORS.solana + '30',
+  voteChipSelectedAgree: {
+    backgroundColor: COLORS.success + '30',
+    borderColor: COLORS.success,
+  },
+  voteChipSelectedDisagree: {
+    backgroundColor: COLORS.error + '30',
+    borderColor: COLORS.error,
+  },
+  voteChipDisabled: {
+    opacity: 0.5,
   },
   voteText: {
     ...FONTS.phantomSemiBold,
     color: COLORS.textSecondary,
-    fontSize: 12,
+    fontSize: 14,
   },
   voteTextSelected: {
     color: COLORS.textPrimary,
+  },
+  voteTextDisabled: {
+    color: COLORS.textSecondary + '80',
   },
   indexBarContainer: {
     flexDirection: 'row',
@@ -596,20 +697,37 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
   },
   indexBarAgree: {
-    backgroundColor: COLORS.success + '70',
+    backgroundColor: COLORS.success,
   },
   indexBarDisagree: {
-    backgroundColor: COLORS.error + '70',
+    backgroundColor: COLORS.error,
   },
   indexBarLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: SPACING.xs,
   },
+  indexBarLabelAgree: {
+    ...FONTS.phantomMedium,
+    color: COLORS.success,
+    fontSize: 12,
+  },
+  indexBarLabelDisagree: {
+    ...FONTS.phantomMedium,
+    color: COLORS.error,
+    fontSize: 12,
+  },
   indexBarLabel: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
     fontSize: 12,
+  },
+  noVotesText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: SPACING.s,
   },
   commentInputRow: {
     flexDirection: 'row',

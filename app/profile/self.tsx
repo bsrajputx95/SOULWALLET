@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, SocialPost } from '@/components';
 import { fetchUserProfile, fetchMe, fetchUserPosts, deletePost, Post } from '@/services/social';
+import { getCreatorEarnings } from '@/services/ibuy';
 import * as SecureStore from 'expo-secure-store';
 
 export default function SelfProfileScreen() {
@@ -61,6 +62,15 @@ export default function SelfProfileScreen() {
           setUser(result.user);
           // Initial posts load
           await loadPosts(username);
+          // Load creator earnings
+          const earningsResult = await getCreatorEarnings();
+          if (earningsResult.success) {
+            setCreatorEarnings({
+              totalEarnings: earningsResult.totalEarnings || 0,
+              positionCount: earningsResult.positionCount || 0,
+              avgProfit: earningsResult.avgProfit || 0,
+            });
+          }
         }
       }
     } catch {
@@ -110,6 +120,13 @@ export default function SelfProfileScreen() {
     maxDrawdown: user?.maxDrawdown || 0,
     followerEquity: user?.followersEquity || 0,
   };
+
+  // Creator earnings state
+  const [creatorEarnings, setCreatorEarnings] = useState({
+    totalEarnings: 0,
+    positionCount: 0,
+    avgProfit: 0,
+  });
 
   const handleDeletePost = async (postId: string) => {
     Alert.alert(
@@ -293,6 +310,29 @@ export default function SelfProfileScreen() {
               <Text style={styles.tradingStatLabel}>Follower Equity:</Text>
               <Text style={styles.tradingStatValue}>
                 ${tradingSummary.followerEquity.toLocaleString()}
+              </Text>
+            </View>
+          </View>
+        </NeonCard>
+
+        {/* Creator Earnings */}
+        <NeonCard style={styles.creatorEarningsCard}>
+          <Text style={styles.sectionTitle}>Creator Earnings</Text>
+          <View style={styles.tradingStats}>
+            <View style={styles.tradingStatRow}>
+              <Text style={styles.tradingStatLabel}>Total Earnings:</Text>
+              <Text style={[styles.tradingStatValue, { color: COLORS.success }]}>
+                {creatorEarnings.totalEarnings.toFixed(4)} SOL
+              </Text>
+            </View>
+            <View style={styles.tradingStatRow}>
+              <Text style={styles.tradingStatLabel}>Positions Created:</Text>
+              <Text style={styles.tradingStatValue}>{creatorEarnings.positionCount}</Text>
+            </View>
+            <View style={styles.tradingStatRow}>
+              <Text style={styles.tradingStatLabel}>Avg per Position:</Text>
+              <Text style={styles.tradingStatValue}>
+                {creatorEarnings.avgProfit.toFixed(4)} SOL
               </Text>
             </View>
           </View>
@@ -671,6 +711,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   tradingSummaryCard: {
+    marginBottom: SPACING.s,
+  },
+  creatorEarningsCard: {
     marginBottom: SPACING.s,
   },
   sectionTitle: {

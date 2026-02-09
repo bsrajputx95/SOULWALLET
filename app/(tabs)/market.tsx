@@ -102,7 +102,7 @@ export default function MarketScreen() {
     return (
       <View style={styles.tabContent}>
         {/* Queue Status Banner for transaction monitoring */}
-        <QueueStatusBanner onRetry={() => loadTokens()} />
+        <QueueStatusBanner />
 
         {/* Loading State */}
         {isLoading && tokens.length === 0 && (

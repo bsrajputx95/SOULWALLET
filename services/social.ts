@@ -47,17 +47,34 @@ export interface UserProfile {
   followersEquity?: number;
 }
 
+export interface TokenMetadata {
+  tokenAddress: string;
+  tokenSymbol?: string;
+  tokenName?: string;
+  tokenVerified?: boolean;
+  tokenPrice?: number;
+}
+
 export const createPost = async (
   content: string,
   visibility: string = 'public',
-  tokenAddress?: string
+  tokenMetadata?: TokenMetadata
 ): Promise<{ success: boolean; post?: Post; error?: string }> => {
   try {
-    const response = await api.post<{ success: boolean; post: Post }>('/posts', {
+    const payload: any = {
       content,
       visibility,
-      tokenAddress
-    });
+    };
+    
+    if (tokenMetadata) {
+      payload.tokenAddress = tokenMetadata.tokenAddress;
+      payload.tokenSymbol = tokenMetadata.tokenSymbol;
+      payload.tokenName = tokenMetadata.tokenName;
+      payload.tokenVerified = tokenMetadata.tokenVerified;
+      payload.tokenPriceAtPost = tokenMetadata.tokenPrice;
+    }
+    
+    const response = await api.post<{ success: boolean; post: Post }>('/posts', payload);
     return response;
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -190,5 +207,47 @@ export const verifyToken = async (
     return { valid: false };
   } catch {
     return { valid: false };
+  }
+};
+
+// Vote on post (agree/disagree)
+export const voteOnPost = async (
+  postId: string,
+  type: 'agree' | 'disagree'
+): Promise<{ success: boolean; vote?: any; error?: string }> => {
+  try {
+    const response = await api.post<{ success: boolean; vote: any }>(`/posts/${postId}/vote`, { type });
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+// Get vote counts for a post
+export const getPostVotes = async (
+  postId: string
+): Promise<{
+  success: boolean;
+  agreeCount?: number;
+  disagreeCount?: number;
+  totalVotes?: number;
+  agreePercent?: number;
+  disagreePercent?: number;
+  userVote?: string | null;
+  error?: string;
+}> => {
+  try {
+    const response = await api.get<{
+      success: boolean;
+      agreeCount: number;
+      disagreeCount: number;
+      totalVotes: number;
+      agreePercent: number;
+      disagreePercent: number;
+      userVote: string | null;
+    }>(`/posts/${postId}/votes`);
+    return response;
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
 };

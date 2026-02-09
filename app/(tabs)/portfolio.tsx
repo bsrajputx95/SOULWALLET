@@ -56,6 +56,27 @@ type PortfolioTab = 'tokens' | 'copied' | 'watchlist';
 type ChartPeriod = '24h' | '7d' | '30d' | 'all';
 type ChartType = 'line' | 'candle';
 
+// Token Logo component with fallback
+const TokenLogo: React.FC<{ token: Token }> = ({ token }) => {
+  const [failed, setFailed] = useState(false);
+  
+  if (!token.logo || failed) {
+    return (
+      <View style={styles.tokenLogoPlaceholder}>
+        <Text style={styles.tokenLogoText}>{token.symbol.charAt(0)}</Text>
+      </View>
+    );
+  }
+  
+  return (
+    <Image 
+      source={{ uri: token.logo }} 
+      style={styles.tokenLogo}
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
 export default function PortfolioScreen() {
   const router = useRouter();
 
@@ -65,8 +86,18 @@ export default function PortfolioScreen() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [copiedWallets] = useState<CopiedWallet[]>([]);
   const [totalBalance, setTotalBalance] = useState<number>(0);
-  const [dailyPnl] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Calculate daily PnL based on 24h price changes
+  const dailyPnl = React.useMemo(() => {
+    return tokens.reduce((total, token) => {
+      if (token.change24h && token.usdValue) {
+        // PnL = USD Value * (change24h / 100)
+        return total + (token.usdValue * (token.change24h / 100));
+      }
+      return total;
+    }, 0);
+  }, [tokens]);
 
   // Fetch user profile from backend
   const fetchUserProfile = useCallback(async () => {
@@ -81,42 +112,86 @@ export default function PortfolioScreen() {
   }, []);
 
   // Fetch wallet data from backend
-  const fetchWalletData = useCallback(async () => {
+  const fetchWalletData = useCallback(async (isRefresh = false) => {
     try {
       const token = await SecureStore.getItemAsync('token');
-      if (!token) return;
+      if (!token) {
+        if (__DEV__) console.log('No auth token found');
+        return;
+      }
 
       // Check if wallet exists locally
       const hasLocal = await hasLocalWallet();
+      let localPubkey: string | null = null;
       if (hasLocal) {
-        const pubkey = await getLocalPublicKey();
-        setSolanaPublicKey(pubkey);
+        localPubkey = await getLocalPublicKey();
+        setSolanaPublicKey(localPubkey);
+        if (__DEV__) console.log('Local wallet found:', localPubkey);
+      } else {
+        if (__DEV__) console.log('No local wallet found');
+      }
 
-        // Fetch balances from backend
-        const portfolio = await fetchBalances(token);
-        if (portfolio) {
-          setTotalBalance(portfolio.totalUsdValue);
-          // Transform holdings to Token type
-          setTokens(portfolio.holdings.map((h: Holding, i: number) => ({
-            id: String(i + 1),
-            symbol: h.symbol,
-            name: h.name,
-            balance: h.balance,
-            usdValue: h.usdValue,
-            price: h.balance > 0 ? h.usdValue / h.balance : 0,
-            change24h: 0,
-            value: h.usdValue,
-            ...(h.logo ? { logo: h.logo } : {}),
-          })));
+      // Fetch balances from backend (works even if no local wallet)
+      if (__DEV__) console.log('Fetching portfolio from backend...');
+      const portfolio = await fetchBalances(token);
+      if (portfolio) {
+        if (__DEV__) console.log('Portfolio received:', portfolio);
+        setTotalBalance(portfolio.totalUsdValue);
+        // Use public key from backend if not available locally
+        if (localPubkey) {
+          setSolanaPublicKey(localPubkey);
+        } else if (portfolio.publicKey) {
+          setSolanaPublicKey(portfolio.publicKey);
+        }
+        if (__DEV__) console.log('Holdings count:', portfolio.holdings.length);
+        if (__DEV__) console.log('Holdings:', portfolio.holdings.map((h: Holding) => ({ symbol: h.symbol, balance: h.balance, usdValue: h.usdValue, price: h.price })));
+        
+        // Transform holdings to Token type with real price data
+        setTokens(portfolio.holdings.map((h: Holding, i: number) => ({
+          id: String(i + 1),
+          symbol: h.symbol,
+          name: h.name,
+          balance: h.balance,
+          usdValue: h.usdValue,
+          price: h.price || (h.balance > 0 ? h.usdValue / h.balance : 0),
+          change24h: h.change24h || 0,
+          value: h.usdValue,
+          ...(h.logo ? { logo: h.logo } : {}),
+        })));
+      } else {
+        if (__DEV__) console.log('No portfolio data received');
+      }
+    } catch (err: any) {
+      if (__DEV__) console.warn('Failed to fetch wallet data:', err);
+      // If wallet not linked error, try to link it
+      if (err.message?.includes('No wallet linked') || err.message?.includes('404')) {
+        if (__DEV__) console.log('Wallet not linked, attempting to link...');
+        const hasLocal = await hasLocalWallet();
+        if (hasLocal) {
+          const pubkey = await getLocalPublicKey();
+          if (pubkey) {
+            try {
+              await api.post('/wallet/link', { publicKey: pubkey });
+              if (__DEV__) console.log('Wallet linked, retrying fetch...');
+              // Retry fetch
+              fetchWalletData(isRefresh);
+              return;
+            } catch (linkErr) {
+              if (__DEV__) console.warn('Failed to link wallet:', linkErr);
+            }
+          }
         }
       }
-    } catch {
+      // Show error toast on refresh
+      if (isRefresh) {
+        Alert.alert('Error', 'Failed to fetch wallet data. Please try again.');
+      }
     }
   }, []);
 
   // Refetch function for pull-to-refresh
   const refetch = useCallback(async () => {
-    await Promise.all([fetchUserProfile(), fetchWalletData()]);
+    await Promise.all([fetchUserProfile(), fetchWalletData(true)]);
   }, [fetchUserProfile, fetchWalletData]);
 
   // Load data on mount
@@ -299,7 +374,7 @@ export default function PortfolioScreen() {
           }
         >
           {/* Settings now open in a dedicated screen; inline panel removed */}
-          <QueueStatusBanner testID="queue-banner-portfolio" onRetry={() => refetch()} />
+          <QueueStatusBanner testID="queue-banner-portfolio" />
 
           {isInitialLoad && tokens.length === 0 ? <PortfolioSkeleton /> : (
             <>
@@ -400,6 +475,16 @@ export default function PortfolioScreen() {
 
               {activeTab === 'tokens' && (
                 <View style={styles.tokensContainer}>
+                  {tokens.length === 0 && (
+                    <View style={{ padding: SPACING.m, alignItems: 'center' }}>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14, textAlign: 'center' }}>
+                        No tokens in your wallet yet.
+                      </Text>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 12, marginTop: SPACING.s }}>
+                        Buy tokens from the Market tab to see them here.
+                      </Text>
+                    </View>
+                  )}
                   {tokens.map(token => (
                     <Pressable
                       key={token.id}
@@ -413,13 +498,7 @@ export default function PortfolioScreen() {
                     >
                       <View style={styles.tokenRow}>
                         <View style={styles.tokenLogoContainer}>
-                          {token.logo ? (
-                            <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
-                          ) : (
-                            <View style={styles.tokenLogoPlaceholder}>
-                              <Text style={styles.tokenLogoText}>{token.symbol.charAt(0)}</Text>
-                            </View>
-                          )}
+                          <TokenLogo token={token} />
                         </View>
                         <View style={styles.tokenInfo}>
                           <Text style={styles.tokenSymbol}>{token.symbol}</Text>

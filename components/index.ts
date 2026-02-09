@@ -23,6 +23,7 @@ export { QueueStatusBanner } from './QueueStatusBanner';
 export { SocialPost } from './SocialPost';
 export { SocialButton } from './SocialButton';
 export { TokenBagModal } from './TokenBagModal';
+export { IBuyBagModal } from './IBuyBagModal';
 export { QuickBuyModal } from './QuickBuyModal';
 
 // Utility Components

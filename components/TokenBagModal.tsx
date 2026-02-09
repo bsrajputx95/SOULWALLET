@@ -22,9 +22,8 @@ import { NeonButton } from './NeonButton';
 // Static dummy data for pure UI mode
 const DUMMY_PUBLIC_KEY = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 
-// Mint addresses on Solana
+// Mint address for SOL
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
-const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 interface Token {
   symbol: string;
@@ -51,7 +50,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [buyAmount, setBuyAmount] = useState<string>('');
   const [slippage, setSlippage] = useState<number>(0.5);
-  const [inputCurrency, setInputCurrency] = useState<'SOL' | 'USDC'>('SOL');
   const [isSelling, setIsSelling] = useState(false);
   const [buyingToken, setBuyingToken] = useState<string | null>(null);
   const [tokenPrices, setTokenPrices] = useState<Map<string, number>>(new Map());
@@ -66,7 +64,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
   // Mock settings query - coming soon
   const settingsQuery = {
-    data: { buyAmount: 100, slippage: 'medium' as const, inputCurrency: 'SOL' as const },
+    data: { buyAmount: 100, slippage: 'medium' as const },
     isLoading: false,
     refetch: async () => ({}),
   };
@@ -121,7 +119,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       // Convert slippage preset to number
       const slippageMap: Record<string, number> = { low: 0.1, medium: 0.5, high: 1.0 };
       setSlippage(slippageMap[settingsQuery.data.slippage] ?? 0.5);
-      setInputCurrency(settingsQuery.data.inputCurrency || 'SOL');
     }
   }, [settingsQuery.data]);
 
@@ -153,7 +150,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
   // Mock token prices - no network call needed
   const MOCK_PRICES: Record<string, number> = {
     'So11111111111111111111111111111111111111112': 150, // SOL
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 1, // USDC
     'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 1, // USDT
     'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 0.00002, // BONK
     'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm': 2.5, // WIF
@@ -228,7 +224,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       await updateSettingsMutation.mutateAsync({
         buyAmount: parseFloat(buyAmount) || 10,
         slippage: slippage,
-        inputCurrency: inputCurrency,
       });
       setShowSettings(false);
     } catch (error) {
@@ -294,7 +289,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
       // Execute single swap for the total sell amount
       const result = await executeSwap({
         inputMint: token.address,
-        outputMint: USDC_MINT,
+        outputMint: SOL_MINT,
         amount: sellPlan.reduce((sum, p) => sum + p.sellRaw, 0),
         slippageBps: Math.round(slippage * 100),
       });
@@ -370,22 +365,17 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
 
     setBuyingToken(token.address);
     try {
-
-
-      // Use the selected input currency
-      const inputMint = inputCurrency === 'USDC' ? USDC_MINT : SOL_MINT;
-
       const result = await ibuyMutation.mutateAsync({
         postId: existingPurchase.postId,
         tokenMint: token.address,
-        inputMint: inputMint,
+        inputMint: SOL_MINT,
       });
 
       if (result.success) {
         await purchasesQuery.refetch();
         Alert.alert(
           'Success!',
-          `Bought ${token.symbol} for $${result.amountUsd || buyAmount} ${inputCurrency}`
+          `Bought ${token.symbol} for ${result.amountUsd || buyAmount} SOL`
         );
       }
     } catch (error: any) {
@@ -451,7 +441,7 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                     <Text style={styles.settingsTitle}>Buy Settings</Text>
 
                     <View style={styles.settingsRow}>
-                      <Text style={styles.inputLabel}>Buy Amount (USDC)</Text>
+                      <Text style={styles.inputLabel}>Buy Amount (SOL)</Text>
                       <View style={styles.inputWrapper}>
                         <TextInput
                           style={styles.textInput}
@@ -490,27 +480,6 @@ export const TokenBagModal: React.FC<TokenBagModalProps> = ({
                               setSlippage(0.5);
                             }
                           }}
-                        />
-                      </View>
-                    </View>
-
-                    {/* SOL/USDC Input Currency Toggle */}
-                    <View style={styles.settingsRow}>
-                      <Text style={styles.inputLabel}>Input Currency</Text>
-                      <View style={styles.presetsRow}>
-                        <NeonButton
-                          title="SOL"
-                          variant={inputCurrency === 'SOL' ? 'primary' : 'outline'}
-                          size="small"
-                          style={styles.presetButton}
-                          onPress={() => setInputCurrency('SOL')}
-                        />
-                        <NeonButton
-                          title="USDC"
-                          variant={inputCurrency === 'USDC' ? 'primary' : 'outline'}
-                          size="small"
-                          style={styles.presetButton}
-                          onPress={() => setInputCurrency('USDC')}
                         />
                       </View>
                     </View>

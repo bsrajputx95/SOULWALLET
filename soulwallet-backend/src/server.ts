@@ -12,6 +12,7 @@ import prisma from './db';
 import { getConnection, executeRpcCall, getRpcStatus } from './services/rpcManager';
 import NodeCache from 'node-cache';
 import { getFeed } from './services/feedService';
+import { verifyToken } from './services/tokenVerifier';
 
 // Load environment variables
 dotenv.config();
@@ -73,6 +74,9 @@ const handleRpcError = (error: any): { statusCode: number; message: string } => 
 
 // Jupiter Price API (FREE - no API key needed)
 const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
+
+// DexScreener API for price fallback
+const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/tokens/v1/solana';
 
 // ====== Middleware Stack ======
 
@@ -505,18 +509,36 @@ app.post('/wallet/link', authMiddleware, async (req: AuthRequest, res: Response)
             return;
         }
 
-        // Check if address already linked to another user
-        const existing = await prisma.wallet.findUnique({ where: { publicKey } });
-        if (existing && existing.userId !== req.userId) {
-            res.status(409).json({ error: 'Address already linked to another account' });
+        // Check if this address is already linked to ANY user
+        const existing = await prisma.wallet.findFirst({ where: { publicKey } });
+        if (existing) {
+            if (existing.userId !== req.userId) {
+                // Address belongs to another user - reject
+                res.status(409).json({ error: 'Address already linked to another account' });
+                return;
+            }
+            // Address already linked to this user - just return success
+            res.json({ success: true, wallet: existing });
             return;
         }
 
-        // Create or update wallet
-        const wallet = await prisma.wallet.upsert({
-            where: { userId: req.userId! },
-            update: { publicKey },
-            create: { userId: req.userId!, publicKey, network: 'mainnet-beta' }
+        // Check if this user already has a different wallet linked
+        const userExistingWallet = await prisma.wallet.findUnique({ where: { userId: req.userId! } });
+        if (userExistingWallet) {
+            // Update to new wallet
+            console.log(`[Wallet] Updating wallet for user ${req.userId}: ${userExistingWallet.publicKey} -> ${publicKey}`);
+            const updated = await prisma.wallet.update({
+                where: { userId: req.userId! },
+                data: { publicKey, network: 'mainnet-beta' }
+            });
+            res.json({ success: true, wallet: updated });
+            return;
+        }
+
+        // Create new wallet link
+        console.log(`[Wallet] Linking new wallet for user ${req.userId}: ${publicKey}`);
+        const wallet = await prisma.wallet.create({
+            data: { userId: req.userId!, publicKey, network: 'mainnet-beta' }
         });
 
         res.json({ success: true, wallet });
@@ -530,17 +552,147 @@ app.post('/wallet/link', authMiddleware, async (req: AuthRequest, res: Response)
     }
 });
 
-// GET /wallet/balances - Get SOL + Token balances with USD prices
+// Token metadata for common Solana ecosystem tokens
+const TOKEN_METADATA: Record<string, { symbol: string; name: string; logo: string }> = {
+    'So11111111111111111111111111111111111111112': {
+        symbol: 'SOL',
+        name: 'Solana',
+        logo: 'https://cryptologos.cc/logos/solana-sol-logo.png'
+    },
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': {
+        symbol: 'USDC',
+        name: 'USD Coin',
+        logo: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png'
+    },
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': {
+        symbol: 'USDT',
+        name: 'Tether USD',
+        logo: 'https://cryptologos.cc/logos/tether-usdt-logo.png'
+    },
+    'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': {
+        symbol: 'BONK',
+        name: 'Bonk',
+        logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I'
+    },
+    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': {
+        symbol: 'JUP',
+        name: 'Jupiter',
+        logo: 'https://static.jup.ag/jup/icon.png'
+    },
+    'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm': {
+        symbol: 'WIF',
+        name: 'dogwifhat',
+        logo: 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link'
+    },
+    '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr': {
+        symbol: 'POPCAT',
+        name: 'Popcat',
+        logo: 'https://bafkreidvnhdzuq3pvhnzq26hjydmhrr2xw2flkxkflg7swmrxnx7c7xvey.ipfs.nftstorage.link'
+    },
+    '6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN': {
+        symbol: 'TRUMP',
+        name: 'Official Trump',
+        logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN.png'
+    },
+    'J3NKxxXZcnNiMjKw9hYb2K4LUxmgB8mGaSWt8BYTtC9d': {
+        symbol: 'ZEREBRO',
+        name: 'Zerebro',
+        logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/J3NKxxXZcnNiMjKw9hYb2K4LUxmgB8mGaSWt8BYTtC9d.png'
+    },
+    'GJtJuWD9qYXG9QDwVcYiXR4eBrwyUPleTwJm9fF21M1u': {
+        symbol: 'FWOG',
+        name: 'Fwog',
+        logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/GJtJuWD9qYXG9QDwVcYiXR4eBrwyUPleTwJm9fF21M1u.png'
+    },
+    '3psH1Mj1f7yUfaD5gh6Zj7epE8hhrMkMETgv5TshQA4o': {
+        symbol: 'MOODENG',
+        name: 'Moo Deng',
+        logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/3psH1Mj1f7yUfaD5gh6Zj7epE8hhrMkMETgv5TshQA4o.png'
+    },
+    'orcar6uhH2a9vqgN5NwsA1kpxDi6XN9g9N4GHEFJdZo': {
+        symbol: 'ORCA',
+        name: 'Orca',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE/logo.png'
+    },
+    'RAYdMVKGEAB6seK3RbsKmVweLM9V8rWAz2dEL4M8eMQ': {
+        symbol: 'RAY',
+        name: 'Raydium',
+        logo: 'https://raw.githubusercontent.com/raydium-io/media-assets/master/logo/logo_200x200.png'
+    },
+    '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU': {
+        symbol: 'SAMO',
+        name: 'Samoyedcoin',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU/logo.png'
+    },
+    'AFbX8oGjGpmVFywbVouvhQSRmiW2aR1mohfahi4Y2AdB': {
+        symbol: 'GST',
+        name: 'Green Satoshi Token',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/AFbX8oGjGpmVFywbVouvhQSRmiW2aR1mohfahi4Y2AdB/logo.png'
+    },
+    'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx': {
+        symbol: 'ATLAS',
+        name: 'Star Atlas',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx/logo.png'
+    },
+    'POLISXb3iTD4bWTMJZS2kfF5eSxiiUbv5VQrDzA17Xa': {
+        symbol: 'POLIS',
+        name: 'Star Atlas DAO',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/POLISXb3iTD4bWTMJZS2kfF5eSxiiUbv5VQrDzA17Xa/logo.png'
+    },
+    'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTQoSYbFSz7zz': {
+        symbol: 'MNDE',
+        name: 'Marinade',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTQoSYbFSz7zz/logo.png'
+    },
+    'SLNDpmoWTVADgEdndyvWzroNL7zSi1dF9PC3xUKu8ks': {
+        symbol: 'SLND',
+        name: 'Solend',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/SLNDpmoWTVADgEdndyvWzroNL7zSi1dF9PC3xUKu8ks/logo.png'
+    },
+    'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3': {
+        symbol: 'PYTH',
+        name: 'Pyth Network',
+        logo: 'https://pyth.network/token.svg'
+    },
+    'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL': {
+        symbol: 'JTO',
+        name: 'Jito',
+        logo: 'https://metadata.jito.network/token/jto/icon.png'
+    },
+    'bSo13r4TkiE4xumJKi5GV6UgmsRz8UrMxSMdqywknGn': {
+        symbol: 'bSOL',
+        name: 'Blaze Staked SOL',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/bSo13r4TkiE4xumJKi5GV6UgmsRz8UrMxSMdqywknGn/logo.png'
+    },
+    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': {
+        symbol: 'mSOL',
+        name: 'Marinade staked SOL',
+        logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So/logo.png'
+    },
+    'jucy5XJ76pHVvtPZb5TKRcGQExMkVFgTXy8mWbQkWfP': {
+        symbol: 'JUICE',
+        name: 'JUICE',
+        logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/jucy5XJ76pHVvtPZb5TKRcGQExMkVFgTXy8mWbQkWfP.png'
+    }
+};
+
+// GET /wallet/balances - Get SOL + Token balances with USD prices and 24h changes
 app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
+        console.log(`[Balances] Fetching for user: ${req.userId}`);
+        
         // Get user's wallet
         const wallet = await prisma.wallet.findUnique({ where: { userId: req.userId! } });
         if (!wallet) {
+            console.log(`[Balances] No wallet linked for user: ${req.userId}`);
             res.status(404).json({ error: 'No wallet linked' });
             return;
         }
+        
+        console.log(`[Balances] Found wallet: ${wallet.publicKey}`);
 
         const pubKey = new PublicKey(wallet.publicKey);
+        console.log(`[Balances] Fetching balance for pubkey: ${pubKey.toBase58()}`);
 
         // 1. Get SOL Balance (with RPC fallback)
         let solBalance: number;
@@ -549,12 +701,15 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
                 conn => conn.getBalance(pubKey),
                 'getBalance'
             );
+            console.log(`[Balances] Raw SOL balance (lamports): ${solBalance}`);
         } catch (rpcErr) {
+            console.error(`[Balances] RPC Error getting balance:`, rpcErr);
             const { statusCode, message } = handleRpcError(rpcErr);
             res.status(statusCode).json({ error: message });
             return;
         }
         const solAmount = solBalance / LAMPORTS_PER_SOL;
+        console.log(`[Balances] SOL amount: ${solAmount}`);
 
         // 2. Get Token Accounts (SPL tokens like USDC) (with RPC fallback)
         let tokenAccounts: any;
@@ -581,20 +736,111 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
         // 3. Fetch Prices from Jupiter (FREE API)
         let prices: Record<string, number> = {};
         try {
+            console.log(`[Balances] Fetching prices from Jupiter for ${tokenAddresses.length} tokens...`);
             // Jupiter accepts comma-separated mint addresses
             const priceResponse = await axios.get(JUPITER_PRICE_API, {
-                params: { ids: tokenAddresses.join(',') }
+                params: { ids: tokenAddresses.join(',') },
+                timeout: 10000
             });
             // Jupiter returns { data: { mint: { id, mintSymbol, vsToken, vsTokenSymbol, price } } }
             const jupData = priceResponse.data?.data || {};
+            console.log(`[Balances] Jupiter response:`, JSON.stringify(jupData).substring(0, 500));
             for (const [mint, info] of Object.entries(jupData)) {
-                prices[mint] = (info as any)?.price || 0;
+                const price = (info as any)?.price || 0;
+                prices[mint] = price;
+                console.log(`[Balances] Jupiter price for ${mint}: $${price}`);
             }
-        } catch (priceErr) {
-            console.warn('Jupiter price fetch failed:', priceErr);
+        } catch (priceErr: any) {
+            console.warn('[Balances] Jupiter price fetch failed:', priceErr.message || priceErr);
         }
 
-        // 4. Format Response
+        // 4. Fallback: Fetch prices from DexScreener if Jupiter failed or returned 0
+        // Check if any prices are missing or 0
+        const needsPriceFallback = tokenAddresses.some(addr => !prices[addr] || prices[addr] === 0);
+        if (needsPriceFallback) {
+            console.log('[Balances] Fetching fallback prices from DexScreener...');
+            try {
+                const dsPriceResponse = await axios.get(`${DEXSCREENER_TOKEN_API}/${tokenAddresses.join(',')}`, {
+                    timeout: 10000
+                });
+                const pairs = Array.isArray(dsPriceResponse.data) ? dsPriceResponse.data : [];
+                
+                // Build token -> best price map (highest liquidity pair)
+                const tokenPriceMap = new Map();
+                for (const pair of pairs) {
+                    const addr = pair.baseToken?.address;
+                    if (addr && (!tokenPriceMap.has(addr) || (pair.liquidity?.usd || 0) > (tokenPriceMap.get(addr).liquidity?.usd || 0))) {
+                        tokenPriceMap.set(addr, pair);
+                    }
+                }
+                
+                // Use DexScreener prices for tokens that have 0 or missing price from Jupiter
+                for (const [addr, pair] of tokenPriceMap.entries()) {
+                    const dsPrice = parseFloat(pair.priceUsd) || 0;
+                    if (dsPrice > 0 && (!prices[addr] || prices[addr] === 0)) {
+                        prices[addr] = dsPrice;
+                        console.log(`[Balances] DexScreener fallback price for ${addr}: $${dsPrice}`);
+                    }
+                }
+            } catch (dsErr: any) {
+                console.warn('[Balances] DexScreener price fallback failed:', dsErr.message || dsErr);
+            }
+        }
+
+        // 5. Fetch 24h Price Changes from DexScreener
+        let priceChanges: Record<string, number> = {};
+        try {
+            // Fetch all tokens in batches of 30 (DexScreener limit)
+            const batchSize = 30;
+            for (let i = 0; i < tokenAddresses.length; i += batchSize) {
+                const batch = tokenAddresses.slice(i, i + batchSize);
+                const addresses = batch.join(',');
+                
+                try {
+                    const dsResponse = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${addresses}`, {
+                        timeout: 10000
+                    });
+                    
+                    // API returns array of pairs
+                    const pairs = Array.isArray(dsResponse.data) ? dsResponse.data : [];
+                    
+                    // Build token -> best pair map (highest liquidity)
+                    const tokenPairMap = new Map();
+                    for (const pair of pairs) {
+                        const addr = pair.baseToken?.address;
+                        if (addr && (!tokenPairMap.has(addr) || (pair.liquidity?.usd || 0) > (tokenPairMap.get(addr).liquidity?.usd || 0))) {
+                            tokenPairMap.set(addr, pair);
+                        }
+                    }
+                    
+                    // Extract 24h change for each token
+                    for (const [addr, pair] of tokenPairMap.entries()) {
+                        priceChanges[addr] = parseFloat(pair.priceChange?.h24) || 0;
+                    }
+                } catch (err) {
+                    console.warn(`DexScreener batch fetch failed for addresses: ${addresses.substring(0, 50)}...`, err);
+                }
+            }
+        } catch (dsErr) {
+            console.warn('DexScreener price change fetch failed:', dsErr);
+        }
+
+        // Hardcoded fallback prices for major tokens (last resort)
+        const FALLBACK_PRICES: Record<string, number> = {
+            'So11111111111111111111111111111111111111112': 85, // SOL ~$85
+            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 1, // USDC = $1
+            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 1, // USDT = $1
+        };
+
+        // Apply fallback prices if still 0
+        for (const [mint, fallbackPrice] of Object.entries(FALLBACK_PRICES)) {
+            if (!prices[mint] || prices[mint] === 0) {
+                prices[mint] = fallbackPrice;
+                console.log(`[Balances] Using fallback price for ${mint}: $${fallbackPrice}`);
+            }
+        }
+
+        // 6. Format Response
         const holdings = [];
         let totalUsd = 0;
 
@@ -602,41 +848,53 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
         const solPrice = prices['So11111111111111111111111111111111111111112'] || 0;
         const solUsd = solAmount * solPrice;
         totalUsd += solUsd;
+        const solMetadata = TOKEN_METADATA['So11111111111111111111111111111111111111112'];
 
         holdings.push({
-            symbol: 'SOL',
-            name: 'Solana',
+            symbol: solMetadata?.symbol || 'SOL',
+            name: solMetadata?.name || 'Solana',
             mint: 'So11111111111111111111111111111111111111112',
             balance: solAmount,
             price: solPrice,
             usdValue: solUsd,
-            decimals: 9
+            decimals: 9,
+            change24h: priceChanges['So11111111111111111111111111111111111111112'] || 0,
+            logo: solMetadata?.logo || ''
         });
 
+        // Log token accounts for debugging
+        console.log(`[Balances] Found ${tokenAccounts.value.length} token accounts for ${wallet.publicKey}`);
+        
         // Add SPL Tokens
         for (const token of tokenAccounts.value) {
             const info = token.account.data.parsed.info;
             const mint = info.mint;
             const amount = Number(info.tokenAmount.amount) / Math.pow(10, info.tokenAmount.decimals);
 
+            console.log(`[Balances] Token ${mint}: amount=${amount}`);
+            
             if (amount <= 0) continue;
 
             const price = prices[mint] || 0;
             const usdValue = amount * price;
             totalUsd += usdValue;
 
-            // Known token symbols
-            let symbol = 'Unknown';
-            let name = 'Unknown Token';
-            if (mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1') {
-                symbol = 'USDC';
-                name = 'USD Coin';
-            } else if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263') {
-                symbol = 'BONK';
-                name = 'Bonk';
-            } else if (mint === 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN') {
-                symbol = 'JUP';
-                name = 'Jupiter';
+            // Get token metadata from our map or use defaults
+            const metadata = TOKEN_METADATA[mint];
+            let symbol = metadata?.symbol;
+            let name = metadata?.name;
+            let logo = metadata?.logo;
+
+            // Fallback for unknown tokens
+            if (!symbol) {
+                symbol = mint.slice(0, 6) + '...';
+                name = 'Unknown Token';
+            }
+            
+            // Ensure we always have a logo URL (even if it might not load)
+            if (!logo) {
+                // Try multiple logo sources
+                logo = `https://dd.dexscreener.com/ds-data/tokens/solana/${mint}.png`;
             }
 
             holdings.push({
@@ -646,10 +904,14 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
                 balance: amount,
                 price,
                 usdValue,
-                decimals: info.tokenAmount.decimals
+                decimals: info.tokenAmount.decimals,
+                change24h: priceChanges[mint] || 0,
+                logo
             });
         }
 
+        console.log(`[Balances] Returning ${holdings.length} holdings for ${wallet.publicKey}:`, holdings.map(h => h.symbol));
+        
         res.json({
             success: true,
             publicKey: wallet.publicKey,
@@ -1741,7 +2003,7 @@ app.get('/market/trending', authMiddleware, async (_req: Request, res: Response)
 // Create Post
 app.post('/posts', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { content, visibility, tokenAddress } = req.body;
+        const { content, visibility, tokenAddress, tokenSymbol, tokenName, tokenVerified, tokenPriceAtPost } = req.body;
 
         if (!content || content.length > 500) {
             res.status(400).json({ error: 'Content required, max 500 chars' });
@@ -1752,18 +2014,37 @@ app.post('/posts', authMiddleware, async (req: AuthRequest, res: Response): Prom
         if (tokenAddress) {
             try {
                 new PublicKey(tokenAddress);
-                // Fetch token info from Jupiter
-                const jupRes = await axios.get(`https://price.jup.ag/v6/price?ids=${tokenAddress}`);
-                const priceData = jupRes.data.data[tokenAddress];
-                if (priceData) {
+                // Use provided token metadata if verified, otherwise fetch from Jupiter
+                if (tokenVerified && tokenSymbol) {
                     tokenData = {
                         address: tokenAddress,
-                        symbol: priceData.mintSymbol || 'Unknown',
-                        name: priceData.mintSymbol || 'Unknown Token'
+                        symbol: tokenSymbol,
+                        name: tokenName || tokenSymbol,
+                        verified: true,
+                        price: tokenPriceAtPost || 0
                     };
+                } else {
+                    // Fetch token info from Jupiter
+                    const jupRes = await axios.get(`https://price.jup.ag/v6/price?ids=${tokenAddress}`);
+                    const priceData = jupRes.data.data[tokenAddress];
+                    if (priceData) {
+                        tokenData = {
+                            address: tokenAddress,
+                            symbol: priceData.mintSymbol || 'Unknown',
+                            name: priceData.mintSymbol || 'Unknown Token',
+                            verified: true,
+                            price: priceData.price || 0
+                        };
+                    }
                 }
             } catch {
-                tokenData = { address: tokenAddress, symbol: 'Unknown', name: 'Unknown Token' };
+                tokenData = { 
+                    address: tokenAddress, 
+                    symbol: tokenSymbol || 'Unknown', 
+                    name: tokenName || 'Unknown Token',
+                    verified: false,
+                    price: 0
+                };
             }
         }
 
@@ -1774,7 +2055,9 @@ app.post('/posts', authMiddleware, async (req: AuthRequest, res: Response): Prom
                 visibility: visibility || 'public',
                 tokenAddress: tokenData?.address,
                 tokenSymbol: tokenData?.symbol,
-                tokenName: tokenData?.name
+                tokenName: tokenData?.name,
+                tokenVerified: tokenData?.verified || false,
+                tokenPriceAtPost: tokenData?.price
             },
             include: {
                 user: { select: { username: true, profileImage: true } }
@@ -1807,6 +2090,85 @@ app.get('/feed', authMiddleware, async (req: AuthRequest, res: Response): Promis
         });
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch feed' });
+    }
+});
+
+// Vote on Post (Agree/Disagree) - MUST be before /posts/:id
+app.post('/posts/:id/vote', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const postId = req.params.id as string;
+        const { type } = req.body; // "agree" or "disagree"
+
+        if (!type || (type !== 'agree' && type !== 'disagree')) {
+            res.status(400).json({ error: 'Vote type must be "agree" or "disagree"' });
+            return;
+        }
+
+        // Check if user already voted on this post
+        const existingVote = await prisma.vote.findUnique({
+            where: { postId_userId: { postId, userId: req.userId! } }
+        });
+
+        if (existingVote) {
+            res.status(409).json({ error: 'You have already voted on this post', existingVote });
+            return;
+        }
+
+        // Create the vote
+        const vote = await prisma.vote.create({
+            data: {
+                postId,
+                userId: req.userId!,
+                type
+            }
+        });
+
+        res.status(201).json({ success: true, vote });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to vote' });
+    }
+});
+
+// Get vote counts for a post - MUST be before /posts/:id
+app.get('/posts/:id/votes', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const postId = req.params.id as string;
+
+        // Get all votes for this post
+        const votes = await prisma.vote.findMany({
+            where: { postId }
+        });
+
+        // Get user's vote if any
+        const userVote = await prisma.vote.findUnique({
+            where: { postId_userId: { postId, userId: req.userId! } }
+        });
+
+        // Calculate metrics
+        const agreeCount = votes.filter(v => v.type === 'agree').length;
+        const disagreeCount = votes.filter(v => v.type === 'disagree').length;
+        const totalVotes = agreeCount + disagreeCount;
+
+        // Calculate percentages (round off, no decimals)
+        let agreePercent = 0;
+        let disagreePercent = 0;
+
+        if (totalVotes > 0) {
+            agreePercent = Math.round((agreeCount / totalVotes) * 100);
+            disagreePercent = Math.round((disagreeCount / totalVotes) * 100);
+        }
+
+        res.json({
+            success: true,
+            agreeCount,
+            disagreeCount,
+            totalVotes,
+            agreePercent,
+            disagreePercent,
+            userVote: userVote?.type || null
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch votes' });
     }
 });
 
@@ -2158,6 +2520,498 @@ app.post('/users/:id/follow', authMiddleware, async (req: AuthRequest, res: Resp
     }
 });
 
+// ====== IBUY Endpoints ======
+
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+// Token Verification
+app.post('/tokens/verify', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { address } = req.body;
+        if (!address) {
+            res.status(400).json({ error: 'Token address required' });
+            return;
+        }
+        const result = await verifyToken(address);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: 'Token verification failed' });
+    }
+});
+
+// IBUY Prepare
+app.post('/ibuy/prepare', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { postId, amount } = req.body;
+        if (!postId || !amount || amount <= 0) {
+            res.status(400).json({ error: 'Post ID and valid amount required' });
+            return;
+        }
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: { user: { include: { wallet: true } } }
+        });
+
+        if (!post || !post.tokenAddress) {
+            res.status(400).json({ error: 'Post not found or has no token' });
+            return;
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.userId! },
+            include: { wallet: true }
+        });
+
+        if (!user?.wallet?.publicKey) {
+            res.status(400).json({ error: 'User wallet not found' });
+            return;
+        }
+
+        // Get Jupiter quote (95% of amount goes to swap, 5% creator fee)
+        const swapAmount = amount * 0.95;
+        const creatorFee = amount * 0.05;
+        const amountLamports = Math.floor(swapAmount * 1e9);
+
+        const quoteRes = await axios.get('https://quote-api.jup.ag/v6/quote', {
+            params: {
+                inputMint: SOL_MINT,
+                outputMint: post.tokenAddress,
+                amount: amountLamports,
+                slippageBps: 50,
+                onlyDirectRoutes: 'false'
+            },
+            timeout: 10000
+        });
+
+        res.json({
+            success: true,
+            quote: quoteRes.data,
+            postId,
+            tokenAddress: post.tokenAddress,
+            tokenSymbol: post.tokenSymbol || 'Unknown',
+            amount: swapAmount,
+            creatorFee,
+            creatorWallet: post.user.wallet?.publicKey
+        });
+    } catch (err: any) {
+        console.error('IBUY prepare error:', err?.response?.data || err.message);
+        res.status(500).json({ error: 'Failed to prepare IBUY' });
+    }
+});
+
+// IBUY Execute
+app.post('/ibuy/execute', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { postId, signature, tokenAmount, solAmount, price, creatorFee } = req.body;
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: { user: true }
+        });
+
+        if (!post) {
+            res.status(400).json({ error: 'Post not found' });
+            return;
+        }
+
+        // Fetch SOL/USD price to convert entry price to USD
+        let entryPriceUsd = price;
+        try {
+            const solPriceRes = await axios.get(`https://price.jup.ag/v6/price?ids=${SOL_MINT}`, {
+                timeout: 5000
+            });
+            const solPrice = solPriceRes.data.data?.[SOL_MINT]?.price || 0;
+            if (solPrice > 0) {
+                entryPriceUsd = price * solPrice; // Convert SOL/token to USD/token
+            }
+        } catch {
+            // If price fetch fails, store SOL price and frontend will handle conversion
+            console.warn('Failed to fetch SOL/USD price, storing SOL price');
+        }
+
+        // Create position with entry price in USD
+        const position = await prisma.iBuyPosition.create({
+            data: {
+                userId: req.userId!,
+                postId,
+                creatorId: post.userId,
+                tokenAddress: post.tokenAddress!,
+                tokenSymbol: post.tokenSymbol || 'Unknown',
+                entryPrice: entryPriceUsd, // Stored in USD for consistent P&L
+                solAmount,
+                tokenAmount,
+                creatorFee,
+                remainingAmount: tokenAmount,
+                status: 'open'
+            }
+        });
+
+        // Record creator revenue for the buy fee
+        if (creatorFee > 0) {
+            await prisma.creatorRevenue.create({
+                data: {
+                    creatorId: post.userId,
+                    positionId: position.id,
+                    amount: creatorFee,
+                    type: 'ibuy_fee'
+                }
+            });
+        }
+
+        // Update post stats
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                ibuyCount: { increment: 1 },
+                ibuyVolume: { increment: solAmount }
+            }
+        });
+
+        res.json({ success: true, position });
+    } catch (err) {
+        console.error('IBUY execute error:', err);
+        res.status(500).json({ error: 'Failed to execute IBUY' });
+    }
+});
+
+// Get IBUY Positions
+app.get('/ibuy/positions', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const positions = await prisma.iBuyPosition.findMany({
+            where: { userId: req.userId!, status: 'open' }
+        });
+
+        // Get unique token addresses
+        const tokenAddresses = [...new Set(positions.map(p => p.tokenAddress))];
+
+        // Fetch current prices from Jupiter
+        const prices: Record<string, number> = {};
+        if (tokenAddresses.length > 0) {
+            try {
+                const priceRes = await axios.get(`https://price.jup.ag/v6/price?ids=${tokenAddresses.join(',')}`, {
+                    timeout: 5000
+                });
+                for (const addr of tokenAddresses) {
+                    prices[addr] = priceRes.data.data?.[addr]?.price || 0;
+                }
+            } catch {
+                // Prices will be 0 if fetch fails
+            }
+        }
+
+        // Calculate P&L for each position (prices in USD)
+        const positionsWithPnl = positions.map(pos => {
+            const currentPrice = prices[pos.tokenAddress] || 0; // USD per token
+            const currentValue = pos.remainingAmount * currentPrice; // USD
+            const costBasis = pos.remainingAmount * pos.entryPrice; // USD (entryPrice stored in USD)
+            const unrealizedPnl = currentPrice > 0 ? currentValue - costBasis : 0; // USD
+            const pnlPercent = costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0;
+
+            return {
+                ...pos,
+                currentPrice,      // USD per token
+                currentValue,      // USD
+                unrealizedPnl,     // USD
+                pnlPercent,        // %
+                currency: 'USD'
+            };
+        });
+
+        res.json({ success: true, positions: positionsWithPnl });
+    } catch (err) {
+        console.error('Get positions error:', err);
+        res.status(500).json({ error: 'Failed to fetch positions' });
+    }
+});
+
+// Helper to get token decimals from Jupiter for IBUY
+async function getIBuyTokenDecimals(mintAddress: string): Promise<number> {
+    try {
+        const response = await axios.get(`https://api.jup.ag/tokens/v1/token/${mintAddress}`, {
+            timeout: 5000
+        });
+        return response.data.decimals ?? 6;
+    } catch {
+        // Fallback: try Jupiter strict list
+        try {
+            const response = await axios.get('https://token.jup.ag/strict', { timeout: 5000 });
+            const token = response.data.find((t: any) => t.address === mintAddress);
+            return token?.decimals ?? 6;
+        } catch {
+            return 6;
+        }
+    }
+}
+
+// In-memory store for pending sells (reset on server restart)
+const pendingSells = new Map<string, {
+    positionId: string;
+    percentage: number;
+    sellAmount: number;
+    expectedOutAmount: string;
+    timestamp: number;
+}>();
+
+// IBUY Sell Prepare (Step 1: Get quote only, no DB changes)
+app.post('/ibuy/sell/prepare', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { positionId, percentage } = req.body;
+        if (!positionId || !percentage || percentage < 1 || percentage > 100) {
+            res.status(400).json({ error: 'Position ID and valid percentage required' });
+            return;
+        }
+
+        const position = await prisma.iBuyPosition.findFirst({
+            where: { id: positionId, userId: req.userId!, status: 'open' },
+            include: { post: { include: { user: { include: { wallet: true } } } } }
+        });
+
+        if (!position) {
+            res.status(404).json({ error: 'Position not found' });
+            return;
+        }
+
+        const sellAmount = position.remainingAmount * (percentage / 100);
+        if (sellAmount < 0.000001) {
+            res.status(400).json({ error: 'Sell amount too small' });
+            return;
+        }
+
+        // Get token decimals from Jupiter
+        const decimals = await getIBuyTokenDecimals(position.tokenAddress);
+        const rawAmount = Math.floor(sellAmount * Math.pow(10, decimals));
+
+        // Get Jupiter quote
+        const quoteRes = await axios.get('https://quote-api.jup.ag/v6/quote', {
+            params: {
+                inputMint: position.tokenAddress,
+                outputMint: SOL_MINT,
+                amount: rawAmount,
+                slippageBps: 50,
+                onlyDirectRoutes: 'false'
+            },
+            timeout: 10000
+        });
+
+        const quote = quoteRes.data;
+
+        // Store pending sell data (expires in 5 minutes)
+        const pendingId = `${req.userId!}_${positionId}_${Date.now()}`;
+        pendingSells.set(pendingId, {
+            positionId,
+            percentage,
+            sellAmount,
+            expectedOutAmount: quote.outAmount,
+            timestamp: Date.now()
+        });
+
+        // Clean old pending sells
+        const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+        for (const [key, value] of pendingSells.entries()) {
+            if (value.timestamp < fiveMinutesAgo) {
+                pendingSells.delete(key);
+            }
+        }
+
+        res.json({
+            success: true,
+            pendingId,
+            quote
+        });
+    } catch (err: any) {
+        console.error('IBUY sell prepare error:', err?.response?.data || err.message);
+        res.status(500).json({ error: 'Failed to prepare sell' });
+    }
+});
+
+// IBUY Sell Execute (Step 2: Execute after swap, update DB)
+app.post('/ibuy/sell/execute', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { pendingId, signature, actualOutAmount } = req.body;
+        if (!pendingId || !signature) {
+            res.status(400).json({ error: 'Pending ID and signature required' });
+            return;
+        }
+
+        const pending = pendingSells.get(pendingId);
+        if (!pending) {
+            res.status(400).json({ error: 'Sell session expired or not found' });
+            return;
+        }
+
+        // Verify the pending sell belongs to this user
+        if (!pendingId.startsWith(req.userId!)) {
+            res.status(403).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const position = await prisma.iBuyPosition.findFirst({
+            where: { id: pending.positionId, userId: req.userId!, status: 'open' }
+        });
+
+        if (!position) {
+            pendingSells.delete(pendingId);
+            res.status(404).json({ error: 'Position not found or already closed' });
+            return;
+        }
+
+        // Use actual output amount from swap, or fallback to expected
+        const solReceived = parseInt(actualOutAmount || pending.expectedOutAmount) / 1e9;
+
+        // Calculate P&L
+        const costBasis = pending.sellAmount * position.entryPrice;
+        const profit = solReceived - costBasis;
+        const creatorShare = profit > 0 ? profit * 0.05 : 0;
+
+        // Update position
+        const newRemaining = position.remainingAmount - pending.sellAmount;
+        const isFullyClosed = newRemaining < 0.000001;
+
+        await prisma.iBuyPosition.update({
+            where: { id: pending.positionId },
+            data: {
+                remainingAmount: newRemaining,
+                realizedPnl: { increment: Math.max(0, profit) },
+                creatorSharePaid: { increment: creatorShare },
+                status: isFullyClosed ? 'closed' : 'open',
+                closedAt: isFullyClosed ? new Date() : null
+            }
+        });
+
+        // Record creator revenue if there's profit
+        if (creatorShare > 0) {
+            await prisma.creatorRevenue.create({
+                data: {
+                    creatorId: position.creatorId,
+                    positionId: pending.positionId,
+                    amount: creatorShare,
+                    type: 'profit_share'
+                }
+            });
+        }
+
+        // Clean up pending sell
+        pendingSells.delete(pendingId);
+
+        res.json({
+            success: true,
+            solReceived,
+            profit,
+            creatorShare,
+            isFullyClosed
+        });
+    } catch (err: any) {
+        console.error('IBUY sell execute error:', err?.message);
+        res.status(500).json({ error: 'Failed to execute sell' });
+    }
+});
+
+// Get IBUY Settings
+app.get('/ibuy/settings', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        let settings = await prisma.userSettings.findUnique({
+            where: { userId: req.userId! }
+        });
+
+        if (!settings) {
+            settings = await prisma.userSettings.create({
+                data: {
+                    userId: req.userId!,
+                    ibuySlippage: 50,
+                    ibuyDefaultSol: 0.1,
+                    autoApprove: false
+                }
+            });
+        }
+
+        res.json({
+            success: true,
+            settings: {
+                ibuySlippage: settings.ibuySlippage,
+                ibuyDefaultSol: settings.ibuyDefaultSol,
+                autoApprove: settings.autoApprove
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+});
+
+// Update IBUY Settings
+app.put('/ibuy/settings', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { ibuySlippage, ibuyDefaultSol, autoApprove } = req.body;
+
+        const settings = await prisma.userSettings.upsert({
+            where: { userId: req.userId! },
+            create: {
+                userId: req.userId!,
+                ibuySlippage: ibuySlippage ?? 50,
+                ibuyDefaultSol: ibuyDefaultSol ?? 0.1,
+                autoApprove: autoApprove ?? false
+            },
+            update: {
+                ...(ibuySlippage !== undefined && { ibuySlippage }),
+                ...(ibuyDefaultSol !== undefined && { ibuyDefaultSol }),
+                ...(autoApprove !== undefined && { autoApprove })
+            }
+        });
+
+        res.json({
+            success: true,
+            settings: {
+                ibuySlippage: settings.ibuySlippage,
+                ibuyDefaultSol: settings.ibuyDefaultSol,
+                autoApprove: settings.autoApprove
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update settings' });
+    }
+});
+
+// Get Creator Earnings
+app.get('/ibuy/creator-earnings', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const revenues = await prisma.creatorRevenue.findMany({
+            where: { creatorId: req.userId! }
+        });
+
+        const totalEarnings = revenues.reduce((sum, r) => sum + r.amount, 0);
+        const positionCount = new Set(revenues.map(r => r.positionId)).size;
+        const avgProfit = positionCount > 0 ? totalEarnings / positionCount : 0;
+
+        // Group by post
+        const positionIds = [...new Set(revenues.map(r => r.positionId))];
+        const positions = await prisma.iBuyPosition.findMany({
+            where: { id: { in: positionIds } },
+            select: { id: true, postId: true, tokenSymbol: true }
+        });
+
+        const postMap = new Map(positions.map(p => [p.id, p]));
+        const breakdown = revenues.reduce((acc, r) => {
+            const pos = postMap.get(r.positionId);
+            const key = pos?.postId || 'unknown';
+            if (!acc[key]) {
+                acc[key] = { postId: key, tokenSymbol: pos?.tokenSymbol || 'Unknown', earnings: 0 };
+            }
+            acc[key].earnings += r.amount;
+            return acc;
+        }, {} as Record<string, { postId: string; tokenSymbol: string; earnings: number }>);
+
+        res.json({
+            success: true,
+            totalEarnings,
+            positionCount,
+            avgProfit,
+            breakdown: Object.values(breakdown)
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch earnings' });
+    }
+});
+
 // 404 Handler - Catch-all for undefined endpoints
 app.use((_req: Request, res: Response): void => {
     res.status(404).json({ error: 'Endpoint not found' });
@@ -2166,6 +3020,7 @@ app.use((_req: Request, res: Response): void => {
 // ====== Cron Jobs ======
 
 import { monitorTraderExits, monitorLimitOrders, cleanExpiredQueueItems } from './cron/monitor';
+import { distributeCreatorRevenues } from './cron/revenueDistribution';
 
 // Run every minute
 setInterval(async () => {
@@ -2175,6 +3030,16 @@ setInterval(async () => {
         cleanExpiredQueueItems()
     ]);
 }, 60 * 1000);
+
+// Run revenue distribution daily (every 24 hours)
+setInterval(async () => {
+    await distributeCreatorRevenues();
+}, 24 * 60 * 60 * 1000);
+
+// Run once on startup
+setTimeout(() => {
+    distributeCreatorRevenues();
+}, 5000);
 
 // ====== Start Server ======
 

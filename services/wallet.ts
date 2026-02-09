@@ -51,6 +51,7 @@ export interface Holding {
     usdValue: number;
     decimals: number;
     logo?: string;
+    change24h?: number;
 }
 
 // Portfolio response from backend
@@ -109,7 +110,12 @@ export const createWallet = async (authToken: string, userPin: string): Promise<
 export const fetchBalances = async (_authToken: string): Promise<PortfolioData | null> => {
     try {
         return await api.get<PortfolioData>('/wallet/balances');
-    } catch {
+    } catch (err: any) {
+        // Propagate specific errors for handling upstream
+        if (err.status === 404 || err.message?.includes('No wallet linked')) {
+            throw new Error('No wallet linked');
+        }
+        // For other errors, return null (will use fallback data)
         return null;
     }
 };
@@ -225,6 +231,7 @@ export const importWallet = async (
     privateKeyBase58: string,
     userPin: string
 ): Promise<{ success: boolean; publicKey?: string; secretKey?: Uint8Array; error?: string }> => {
+    let localStorageSet = false;
     try {
         // 1. Decode private key from base58
         const secretKey = bs58.decode(privateKeyBase58);
@@ -236,21 +243,43 @@ export const importWallet = async (
         // 3. Encrypt secret key with user PIN
         const encrypted = simpleEncrypt(JSON.stringify(Array.from(secretKey)), userPin);
 
-        // 4. Store encrypted secret locally
+        // 4. Store encrypted secret locally FIRST
         await SecureStore.setItemAsync('wallet_secret', encrypted);
         await SecureStore.setItemAsync('wallet_pubkey', publicKey);
         await SecureStore.setItemAsync('wallet_pin_hash', btoa(userPin));
+        localStorageSet = true;
 
-        // 5. Link public key to user account on backend (uses centralized api client)
-        await api.post('/wallet/link', { publicKey });
+        // 5. Link public key to user account on backend
+        try {
+            await api.post('/wallet/link', { publicKey });
+        } catch (linkError: any) {
+            // Handle specific backend errors
+            if (linkError.message?.includes('already linked to another account')) {
+                throw new Error('This wallet address is already linked to another account. Please use a different wallet.');
+            }
+            // If backend fails but local storage succeeded, we can still proceed
+            // The wallet will work locally and retry linking on next fetch
+            console.warn('Backend link failed, wallet stored locally:', linkError);
+        }
 
         return { success: true, publicKey, secretKey };
     } catch (error: unknown) {
-        // Rollback local storage on failure
-        await SecureStore.deleteItemAsync('wallet_secret');
-        await SecureStore.deleteItemAsync('wallet_pubkey');
-        await SecureStore.deleteItemAsync('wallet_pin_hash');
-        const errorMessage = error instanceof Error ? error.message : 'Invalid private key format';
+        // Only rollback if we set local storage
+        if (localStorageSet) {
+            await SecureStore.deleteItemAsync('wallet_secret');
+            await SecureStore.deleteItemAsync('wallet_pubkey');
+            await SecureStore.deleteItemAsync('wallet_pin_hash');
+        }
+        
+        // Provide specific error messages
+        let errorMessage = 'Failed to import wallet';
+        if (error instanceof Error) {
+            if (error.message.includes('base58') || error.message.includes('length')) {
+                errorMessage = 'Invalid private key format. Please check your key.';
+            } else {
+                errorMessage = error.message;
+            }
+        }
         return { success: false, error: errorMessage };
     }
 };

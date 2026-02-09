@@ -17,13 +17,14 @@ import {
   PanResponder,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Settings, Search, X, Plus, Link, ShoppingBag } from 'lucide-react-native';
+import { Settings, Search, X, Plus, Link, ShoppingBag, Zap } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { SocialPost, NeonButton, TokenBagModal, CopyTradingModal, SocialPostSkeleton } from '@/components';
 import { useRouter } from 'expo-router';
-import { fetchFeed, createPost, toggleLike, Post } from '@/services/social';
+import { fetchFeed, createPost, toggleLike, Post, TokenMetadata } from '@/services/social';
+import { executeIBuy, getIBuySettings, verifyTokenForPost } from '@/services/ibuy';
 
 type FeedTab = 'forYou' | 'following';
 
@@ -103,7 +104,7 @@ export default function SosioScreen() {
     const mode = activeTab === 'following' ? 'following' : undefined;
     const result = await fetchFeed(nextCursor, mode);
     if (result.success && result.posts && result.posts.length > 0) {
-      setPosts(prev => [...prev, ...result.posts]);
+      setPosts(prev => [...prev, ...(result.posts ?? [])]);
       setNextCursor(result.nextCursor || null);
     }
   };
@@ -161,6 +162,10 @@ export default function SosioScreen() {
   const [mentionToken, setMentionToken] = useState(false);
   const [tokenName, setTokenName] = useState('');
   const [tokenAddress, setTokenAddress] = useState('');
+  const [tokenVerified, setTokenVerified] = useState(false);
+  const [tokenVerifyLoading, setTokenVerifyLoading] = useState(false);
+  const [tokenVerifyError, setTokenVerifyError] = useState('');
+  const [verifiedTokenPrice, setVerifiedTokenPrice] = useState<number>(0);
   const [postVisibility, setPostVisibility] = useState<'public' | 'vip' | 'followers'>('public');
 
   // Copy trading state
@@ -170,6 +175,14 @@ export default function SosioScreen() {
     walletAddress: string;
     profileImage?: string;
   } | null>(null);
+
+  // IBUY PIN modal state
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pendingBuyPost, setPendingBuyPost] = useState<Post | null>(null);
+  const [pendingBuyAmount, setPendingBuyAmount] = useState(0);
+  const [isBuying, setIsBuying] = useState(false);
 
   // Fade indicator for swipe navigation
   const indicatorOpacity = useRef(new Animated.Value(0)).current;
@@ -280,10 +293,22 @@ export default function SosioScreen() {
       return;
     }
 
+    // Build token metadata if mentioning a token
+    let tokenMetadata: TokenMetadata | undefined;
+    if (mentionToken && tokenAddress.trim()) {
+      tokenMetadata = {
+        tokenAddress: tokenAddress.trim(),
+        tokenSymbol: tokenName.trim() || undefined,
+        tokenName: tokenName.trim() || undefined,
+        tokenVerified: tokenVerified,
+        tokenPrice: verifiedTokenPrice || undefined,
+      };
+    }
+
     const result = await createPost(
       postContent.trim(),
       postVisibility,
-      mentionToken ? tokenAddress : undefined
+      tokenMetadata
     );
 
     if (result.success) {
@@ -291,10 +316,40 @@ export default function SosioScreen() {
       setMentionToken(false);
       setTokenName('');
       setTokenAddress('');
+      setTokenVerified(false);
+      setTokenVerifyError('');
+      setVerifiedTokenPrice(0);
       setShowNewPostModal(false);
       await loadFeed();
     } else {
       Alert.alert('Error', result.error || 'Failed to create post');
+    }
+  };
+
+  // Verify token when address changes
+  const handleTokenAddressChange = async (address: string) => {
+    setTokenAddress(address);
+    setTokenVerified(false);
+    setTokenVerifyError('');
+    setVerifiedTokenPrice(0);
+
+    if (address.length < 32) return; // Solana addresses are 32-44 chars
+
+    setTokenVerifyLoading(true);
+    try {
+      const result = await verifyTokenForPost(address);
+      if (result.valid) {
+        setTokenVerified(true);
+        setTokenName(result.symbol || '');
+        setVerifiedTokenPrice(result.price || 0);
+      } else {
+        setTokenVerified(false);
+        setTokenVerifyError(result.error || 'Invalid token');
+      }
+    } catch {
+      setTokenVerifyError('Verification failed');
+    } finally {
+      setTokenVerifyLoading(false);
     }
   };
 
@@ -304,6 +359,37 @@ export default function SosioScreen() {
     // Show fade indicator
     showFadeIndicator(tab === 'forYou' ? 'For You' : 'Following');
     // Feed will be reloaded via useEffect when activeTab changes
+  };
+
+  const handleConfirmBuy = async () => {
+    // PIN validation
+    if (!/^\d+$/.test(pin)) {
+      setPinError('PIN must contain only digits');
+      return;
+    }
+    if (pin.length < 4) {
+      setPinError('PIN must be at least 4 digits');
+      return;
+    }
+    if (!pendingBuyPost) return;
+
+    setIsBuying(true);
+    try {
+      const result = await executeIBuy(pendingBuyPost.id, pendingBuyAmount, pin);
+      if (result.success) {
+        setShowPinModal(false);
+        setPin('');
+        setPendingBuyPost(null);
+        Alert.alert('Success!', `Bought ${pendingBuyPost.tokenSymbol || 'token'}`);
+        loadFeed();
+      } else {
+        setPinError(result.error || 'Buy failed');
+      }
+    } catch (e: any) {
+      setPinError(e.message || 'Buy failed');
+    } finally {
+      setIsBuying(false);
+    }
   };
 
   return (
@@ -475,7 +561,16 @@ export default function SosioScreen() {
                 onBuyPress={async () => {
                   const tokenMint = post.tokenAddress;
                   if (!tokenMint) return;
-                  Alert.alert('Coming Soon', 'iBuy feature will be available soon.');
+                  
+                  // Get settings for default amount
+                  const settings = await getIBuySettings();
+                  
+                  // Open PIN modal instead of Alert.prompt
+                  setPendingBuyPost(post);
+                  setPendingBuyAmount(settings.ibuyDefaultSol);
+                  setPin('');
+                  setPinError('');
+                  setShowPinModal(true);
                 }}
               />
             );
@@ -632,14 +727,30 @@ export default function SosioScreen() {
                     <Text style={styles.tokenInputLabel}>Token Address *</Text>
                     <View style={styles.tokenInputField}>
                       <TextInput
-                        style={styles.tokenTextInput}
+                        style={[
+                          styles.tokenTextInput,
+                          tokenVerified && styles.tokenInputVerified,
+                          tokenVerifyError && styles.tokenInputError,
+                        ]}
                         placeholder="Enter token contract address"
                         placeholderTextColor={COLORS.textSecondary}
                         value={tokenAddress}
-                        onChangeText={setTokenAddress}
+                        onChangeText={handleTokenAddressChange}
                         autoCorrect={false}
                         autoCapitalize="none"
                       />
+                      {tokenVerifyLoading && (
+                        <Text style={styles.tokenVerifyStatus}>Verifying...</Text>
+                      )}
+                      {!tokenVerifyLoading && tokenVerified && (
+                        <Text style={styles.tokenVerifySuccess}>
+                          ✓ {tokenName || 'Verified'}
+                          {verifiedTokenPrice > 0 && ` ($${verifiedTokenPrice.toFixed(4)})`}
+                        </Text>
+                      )}
+                      {!tokenVerifyLoading && tokenVerifyError && (
+                        <Text style={styles.tokenVerifyError}>✗ {tokenVerifyError}</Text>
+                      )}
                     </View>
                   </View>
                 </View>
@@ -720,6 +831,76 @@ export default function SosioScreen() {
         }}
         trader={selectedTrader}
       />
+
+      {/* PIN Input Modal for IBUY */}
+      <Modal
+        visible={showPinModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!isBuying) {
+            setShowPinModal(false);
+            setPin('');
+            setPinError('');
+          }
+        }}
+      >
+        <View style={pinStyles.overlay}>
+          <View style={pinStyles.container}>
+            <View style={pinStyles.header}>
+              <Text style={pinStyles.title}>Confirm IBUY</Text>
+              <Pressable
+                onPress={() => {
+                  if (!isBuying) {
+                    setShowPinModal(false);
+                    setPin('');
+                    setPinError('');
+                  }
+                }}
+              >
+                <X size={24} color={COLORS.textPrimary} />
+              </Pressable>
+            </View>
+
+            <Text style={pinStyles.label}>
+              Buy {pendingBuyPost?.tokenSymbol || 'token'} for {pendingBuyAmount} SOL
+            </Text>
+
+            <TextInput
+              style={[pinStyles.input, pinError ? pinStyles.inputError : null]}
+              value={pin}
+              onChangeText={(text) => {
+                setPin(text.replace(/[^0-9]/g, ''));
+                setPinError('');
+              }}
+              placeholder="Enter PIN"
+              placeholderTextColor={COLORS.textSecondary}
+              keyboardType="numeric"
+              secureTextEntry
+              maxLength={6}
+              autoFocus
+              editable={!isBuying}
+            />
+
+            {pinError ? <Text style={pinStyles.errorText}>{pinError}</Text> : null}
+
+            <Pressable
+              style={[
+                pinStyles.confirmButton,
+                (pin.length < 4 || isBuying) && pinStyles.confirmButtonDisabled,
+              ]}
+              onPress={handleConfirmBuy}
+              disabled={pin.length < 4 || isBuying}
+            >
+              {isBuying ? (
+                <ActivityIndicator color={COLORS.textPrimary} />
+              ) : (
+                <Text style={pinStyles.confirmButtonText}>Confirm Buy</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1016,6 +1197,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.m,
     fontSize: 16,
   },
+  tokenInputVerified: {
+    borderWidth: 1,
+    borderColor: COLORS.success,
+    borderRadius: BORDER_RADIUS.medium,
+  },
+  tokenInputError: {
+    borderWidth: 1,
+    borderColor: COLORS.error,
+    borderRadius: BORDER_RADIUS.medium,
+  },
+  tokenVerifyStatus: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: SPACING.xs,
+  },
+  tokenVerifySuccess: {
+    ...FONTS.phantomMedium,
+    color: COLORS.success,
+    fontSize: 12,
+    marginTop: SPACING.xs,
+  },
+  tokenVerifyError: {
+    ...FONTS.phantomMedium,
+    color: COLORS.error,
+    fontSize: 12,
+    marginTop: SPACING.xs,
+  },
   postActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1266,6 +1475,78 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: COLORS.solana + '50',
+  },
+});
+
+// PIN Modal styles
+const pinStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.l,
+  },
+  container: {
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.large,
+    padding: SPACING.l,
+    width: '100%',
+    maxWidth: 360,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.m,
+  },
+  title: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 18,
+  },
+  label: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginBottom: SPACING.m,
+    textAlign: 'center',
+  },
+  input: {
+    ...FONTS.phantomRegular,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.m,
+    fontSize: 24,
+    color: COLORS.textPrimary,
+    textAlign: 'center',
+    letterSpacing: 8,
+    marginBottom: SPACING.s,
+  },
+  inputError: {
+    borderWidth: 1,
+    borderColor: COLORS.error,
+  },
+  errorText: {
+    ...FONTS.phantomRegular,
+    color: COLORS.error,
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: SPACING.m,
+  },
+  confirmButton: {
+    backgroundColor: COLORS.success,
+    borderRadius: BORDER_RADIUS.medium,
+    padding: SPACING.m,
+    alignItems: 'center',
+  },
+  confirmButtonDisabled: {
+    backgroundColor: COLORS.textSecondary + '50',
+  },
+  confirmButtonText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textPrimary,
+    fontSize: 16,
   },
 });
 
