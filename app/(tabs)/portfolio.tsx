@@ -654,16 +654,16 @@ export default function PortfolioScreen() {
                           </Text>
                           <Text style={styles.tokenPercentage}>24h</Text>
                         </View>
-                        {/* Remove from watchlist button */}
+                        {/* Remove from watchlist button - small X at top right */}
                         <Pressable
                           style={styles.removeWatchlistButton}
                           onPress={(e) => {
                             e.stopPropagation();
                             removeFromWatchlist(watchToken.symbol);
                           }}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
                         >
-                          <X size={18} color={COLORS.error} />
+                          <X size={14} color={COLORS.textSecondary} />
                         </Pressable>
                       </Pressable>
                     ))
@@ -1212,7 +1212,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     padding: SPACING.m,
-    marginBottom: SPACING.s
+    marginBottom: SPACING.s,
+    position: 'relative'
   },
   tokenRow: {
     flexDirection: 'row',
@@ -1275,13 +1276,16 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   removeWatchlistButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.error + '15',
+    position: 'absolute',
+    top: SPACING.xs,
+    right: SPACING.xs,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.cardBackground,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: SPACING.s
+    zIndex: 10
   },
   walletsContainer: {
     marginBottom: SPACING.xs
