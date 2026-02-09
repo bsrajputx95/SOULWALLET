@@ -3,12 +3,32 @@ import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 import { getKeypairForSigning, getLocalPublicKey } from './wallet';
 
 const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
-const JUPITER_TOKEN_API = 'https://token.jup.ag/all';
+// Use Jupiter's strict token list (verified tokens only)
+const JUPITER_TOKEN_API = 'https://token.jup.ag/strict';
 // Use public Solana RPC as fallback if Helius fails
 const SOLANA_RPC = process.env.EXPO_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const HELIUS_RPC = process.env.EXPO_PUBLIC_HELIUS_API_KEY 
     ? `https://mainnet.helius-rpc.com/?api-key=${process.env.EXPO_PUBLIC_HELIUS_API_KEY}`
     : SOLANA_RPC;
+
+// Comprehensive fallback token list
+const FALLBACK_TOKENS: JupiterToken[] = [
+    { symbol: 'SOL', name: 'Solana', address: 'So11111111111111111111111111111111111111112', decimals: 9, logoURI: 'https://cryptologos.cc/logos/solana-sol-logo.png' },
+    { symbol: 'USDC', name: 'USD Coin', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logoURI: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' },
+    { symbol: 'USDT', name: 'Tether', address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6, logoURI: 'https://cryptologos.cc/logos/tether-usdt-logo.png' },
+    { symbol: 'BONK', name: 'Bonk', address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5, logoURI: 'https://cryptologos.cc/logos/bonk-bonk-logo.png' },
+    { symbol: 'JUP', name: 'Jupiter', address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', decimals: 6, logoURI: 'https://cryptologos.cc/logos/jupiter-ag-jup-logo.png' },
+    { symbol: 'RAY', name: 'Raydium', address: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', decimals: 6, logoURI: 'https://cryptologos.cc/logos/raydium-ray-logo.png' },
+    { symbol: 'ORCA', name: 'Orca', address: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE', decimals: 6, logoURI: 'https://cryptologos.cc/logos/orca-orca-logo.png' },
+    { symbol: 'PYTH', name: 'Pyth Network', address: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3', decimals: 6 },
+    { symbol: 'JTO', name: 'Jito', address: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL', decimals: 9 },
+    { symbol: 'WIF', name: 'dogwifhat', address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', decimals: 6 },
+    { symbol: 'POPCAT', name: 'Popcat', address: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr', decimals: 9 },
+    { symbol: 'W', name: 'Wormhole', address: '85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ', decimals: 6 },
+    { symbol: 'TNSR', name: 'Tensor', address: 'TNSRxcUxoT9xBG3de7Pi76yNzNdH1zvViMxfD4uNf9k', decimals: 9 },
+    { symbol: 'SAMO', name: 'Samoyedcoin', address: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', decimals: 9 },
+    { symbol: 'MEW', name: 'cat in a dogs world', address: 'MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5', decimals: 6 },
+];
 
 export interface JupiterToken {
     symbol: string;
@@ -42,43 +62,44 @@ export const getTokenList = async (): Promise<JupiterToken[]> => {
         return tokenListCache;
     }
 
+    // Try to fetch from API first
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
+        const timeout = setTimeout(() => controller.abort(), 5000);
         const response = await fetch(JUPITER_TOKEN_API, { signal: controller.signal });
         clearTimeout(timeout);
         
         if (!response.ok) {
-            throw new Error('Failed to fetch token list');
+            throw new Error(`HTTP ${response.status}`);
         }
 
         const data = await response.json();
         // Handle both array and object responses
         const tokens = Array.isArray(data) ? data : data.tokens || [];
         
-        tokenListCache = tokens
-            .filter((t: any) => t.symbol && t.name && t.address && t.decimals !== undefined)
-            .map((t: any) => ({
-                symbol: t.symbol,
-                name: t.name,
-                address: t.address,
-                decimals: t.decimals,
-                logoURI: t.logoURI || t.logo,
-            }));
-        tokenListCacheTime = now;
-        return tokenListCache;
+        if (tokens.length > 0) {
+            tokenListCache = tokens
+                .filter((t: any) => t.symbol && t.name && t.address && t.decimals !== undefined)
+                .map((t: any) => ({
+                    symbol: t.symbol,
+                    name: t.name,
+                    address: t.address,
+                    decimals: t.decimals,
+                    logoURI: t.logoURI || t.logo,
+                }));
+            tokenListCacheTime = now;
+            console.log(`[Swap] Fetched ${tokenListCache.length} tokens from API`);
+            return tokenListCache;
+        }
     } catch (error) {
-        console.warn('Failed to fetch token list:', error);
-        if (tokenListCache && tokenListCache.length > 0) return tokenListCache;
-        // Return hardcoded fallback for critical tokens
-        return [
-            { symbol: 'SOL', name: 'Solana', address: 'So11111111111111111111111111111111111111112', decimals: 9, logoURI: 'https://cryptologos.cc/logos/solana-sol-logo.png' },
-            { symbol: 'USDC', name: 'USD Coin', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logoURI: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' },
-            { symbol: 'USDT', name: 'Tether', address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6, logoURI: 'https://cryptologos.cc/logos/tether-usdt-logo.png' },
-            { symbol: 'BONK', name: 'Bonk', address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5 },
-            { symbol: 'JUP', name: 'Jupiter', address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', decimals: 6 },
-        ];
+        console.warn('[Swap] Failed to fetch token list from API:', error);
     }
+
+    // Use fallback tokens immediately if API fails
+    console.log('[Swap] Using fallback token list');
+    tokenListCache = FALLBACK_TOKENS;
+    tokenListCacheTime = now;
+    return tokenListCache;
 };
 
 /**
@@ -104,6 +125,17 @@ export const searchToken = async (query: string): Promise<JupiterToken[]> => {
             t.name.toLowerCase().includes(q) ||
             t.address.toLowerCase() === q
     );
+
+    // If no results and query looks like a mint address, allow direct input
+    if (results.length === 0 && query.length >= 32 && query.length <= 44) {
+        // Return as a custom token entry
+        return [{
+            symbol: 'Unknown',
+            name: 'Custom Token',
+            address: query,
+            decimals: 9, // Default
+        }];
+    }
 
     return results.slice(0, 20);
 };
