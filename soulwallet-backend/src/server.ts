@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js';
 import axios from 'axios';
+import fetch from 'cross-fetch';
 import bs58 from 'bs58';
 import prisma from './db';
 import { getConnection, executeRpcCall, getRpcStatus } from './services/rpcManager';
@@ -73,10 +74,10 @@ const handleRpcError = (error: any): { statusCode: number; message: string } => 
 };
 
 // Jupiter Price API (FREE - no API key needed)
-const JUPITER_PRICE_API = 'https://api.jup.ag/v6/price';
+const JUPITER_PRICE_API = 'https://lite-api.jup.ag/price/v3';
 
-// Jupiter Quote API (FREE - for swap quotes)
-const JUPITER_QUOTE_API = 'https://api.jup.ag/v6';
+// Jupiter Ultra Swap API (FREE - for swap quotes)
+const JUPITER_ULTRA_API = 'https://lite-api.jup.ag/ultra/v1';
 
 // DexScreener API for price fallback
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/tokens/v1/solana';
@@ -736,22 +737,24 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
             ...tokenAccounts.value.map(t => t.account.data.parsed.info.mint)
         ];
 
-        // 3. Fetch Prices from Jupiter (FREE API)
+        // 3. Fetch Prices from Jupiter Price V3 API (FREE)
         let prices: Record<string, number> = {};
         try {
-            console.log(`[Balances] Fetching prices from Jupiter for ${tokenAddresses.length} tokens...`);
-            // Jupiter accepts comma-separated mint addresses
+            console.log(`[Balances] Fetching prices from Jupiter V3 for ${tokenAddresses.length} tokens...`);
+            // Jupiter V3 API: https://lite-api.jup.ag/price/v3?ids=mint1,mint2,...
             const priceResponse = await axios.get(JUPITER_PRICE_API, {
                 params: { ids: tokenAddresses.join(',') },
                 timeout: 10000
             });
-            // Jupiter returns { data: { mint: { id, mintSymbol, vsToken, vsTokenSymbol, price } } }
-            const jupData = priceResponse.data?.data || {};
-            console.log(`[Balances] Jupiter response:`, JSON.stringify(jupData).substring(0, 500));
+            // Jupiter V3 returns { mint: { usdPrice, decimals, ... }, ... }
+            const jupData = priceResponse.data || {};
+            console.log(`[Balances] Jupiter V3 response:`, JSON.stringify(jupData).substring(0, 500));
             for (const [mint, info] of Object.entries(jupData)) {
-                const price = (info as any)?.price || 0;
-                prices[mint] = price;
-                console.log(`[Balances] Jupiter price for ${mint}: $${price}`);
+                const price = (info as any)?.usdPrice || 0;
+                if (price > 0) {
+                    prices[mint] = price;
+                    console.log(`[Balances] Jupiter V3 price for ${mint}: $${price}`);
+                }
             }
         } catch (priceErr: any) {
             console.warn('[Balances] Jupiter price fetch failed:', priceErr.message || priceErr);
@@ -942,110 +945,222 @@ app.get('/tokens/search', authMiddleware, async (_req: Request, res: Response): 
     res.json({ success: true, tokens: topTokens });
 });
 
-// GET /swap/quote - Proxy swap quote requests to Jupiter (avoids DNS issues in React Native)
+// GET /swap/quote - Proxy swap quote requests to Jupiter Ultra API
 app.get('/swap/quote', authMiddleware, async (req: Request, res: Response): Promise<void> => {
     try {
         const { inputMint, outputMint, amount, slippageBps } = req.query;
         
-        if (!inputMint || !outputMint || !amount || !slippageBps) {
-            res.status(400).json({ error: 'Missing required parameters: inputMint, outputMint, amount, slippageBps' });
+        if (!inputMint || !outputMint || !amount) {
+            res.status(400).json({ error: 'Missing required parameters: inputMint, outputMint, amount' });
             return;
         }
         
         console.log(`[SwapQuote] Proxying quote: ${inputMint} -> ${outputMint}, amount: ${amount}`);
         
+        // Use Jupiter Ultra API (lite-api.jup.ag)
         const params = new URLSearchParams({
             inputMint: inputMint as string,
             outputMint: outputMint as string,
             amount: amount as string,
-            slippageBps: slippageBps as string,
         });
         
-        // Try primary Jupiter API
-        const urls = [
-            `${JUPITER_QUOTE_API}/quote?${params}`,
-            `https://quote-api.jup.ag/v6/quote?${params}`, // Fallback
-        ];
-        
-        let lastError;
-        for (const url of urls) {
-            try {
-                console.log(`[SwapQuote] Trying: ${url.split('?')[0]}`);
-                const response = await axios.get(url, { timeout: 15000 });
-                console.log(`[SwapQuote] Success: ${response.data.outAmount} out`);
-                res.json(response.data);
-                return;
-            } catch (e: any) {
-                console.warn(`[SwapQuote] Failed for ${url.split('?')[0]}:`, e.message);
-                lastError = e;
-            }
+        // Add slippage if provided (Ultra API uses slippageBps)
+        if (slippageBps) {
+            params.append('slippageBps', slippageBps as string);
         }
         
-        throw lastError;
-    } catch (error: any) {
-        console.error('[SwapQuote] Error:', error.message);
-        if (error.response) {
-            res.status(error.response.status).json({ 
+        const url = `${JUPITER_ULTRA_API}/order?${params}`;
+        console.log(`[SwapQuote] Fetching from: ${url}`);
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(url, {
+            signal: controller.signal,
+        });
+        
+        clearTimeout(timeout);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[SwapQuote] Jupiter returned ${response.status}:`, errorText.substring(0, 500));
+            res.status(response.status).json({ 
                 error: 'Jupiter API error', 
-                details: error.response.data 
+                details: errorText 
             });
-        } else {
-            res.status(500).json({ error: 'Failed to fetch swap quote - Jupiter API unavailable' });
-        }
-    }
-});
-
-// POST /swap/transaction - Proxy swap transaction requests to Jupiter
-app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response): Promise<void> => {
-    try {
-        const { quoteResponse, userPublicKey } = req.body;
-        
-        if (!quoteResponse || !userPublicKey) {
-            res.status(400).json({ error: 'Missing required parameters: quoteResponse, userPublicKey' });
             return;
         }
         
-        console.log(`[SwapTx] Proxying swap transaction for: ${userPublicKey}`);
+        const data = await response.json();
         
-        const swapBody = {
-            quoteResponse,
-            userPublicKey,
-            wrapAndUnwrapSol: true,
-            dynamicComputeUnitLimit: true,
-            prioritizationFeeLamports: 'auto',
+        // Check for Ultra API error response
+        if (data.errorCode) {
+            console.error(`[SwapQuote] Jupiter error: ${data.errorCode} - ${data.errorMessage}`);
+            res.status(400).json({ 
+                error: data.errorMessage || data.errorCode 
+            });
+            return;
+        }
+        
+        console.log(`[SwapQuote] Success: ${data.outAmount} out`);
+        
+        // Transform Ultra API response to match v6 format expected by frontend
+        const transformedData = {
+            inputMint: data.inputMint,
+            outputMint: data.outputMint,
+            inAmount: data.inAmount,
+            outAmount: data.outAmount,
+            otherAmountThreshold: data.otherAmountThreshold,
+            swapMode: data.swapMode,
+            slippageBps: data.slippageBps,
+            priceImpactPct: data.priceImpactPct,
+            routePlan: data.routePlan,
+            // Ultra API specific fields
+            platformFee: data.platformFee,
+            feeMint: data.feeMint,
+            feeBps: data.feeBps,
+            requestId: data.requestId,
+            swapType: data.swapType,
+            router: data.router,
+            priceImpact: data.priceImpact,
+            inUsdValue: data.inUsdValue,
+            outUsdValue: data.outUsdValue,
+            swapUsdValue: data.swapUsdValue,
         };
         
-        // Try primary Jupiter API
-        const urls = [
-            `${JUPITER_QUOTE_API}/swap`,
-            `https://quote-api.jup.ag/v6/swap`, // Fallback
-        ];
+        res.json(transformedData);
         
-        let lastError;
-        for (const url of urls) {
-            try {
-                console.log(`[SwapTx] Trying: ${url}`);
-                const response = await axios.post(url, swapBody, { timeout: 15000 });
-                console.log(`[SwapTx] Success`);
-                res.json(response.data);
-                return;
-            } catch (e: any) {
-                console.warn(`[SwapTx] Failed for ${url}:`, e.message);
-                lastError = e;
-            }
+    } catch (error: any) {
+        console.error('[SwapQuote] Error:', error.message);
+        res.status(500).json({ 
+            error: 'Failed to fetch swap quote', 
+            details: error.message 
+        });
+    }
+});
+
+// POST /swap/transaction - Get swap transaction from Jupiter Ultra API
+app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { inputMint, outputMint, amount, userPublicKey, slippageBps } = req.body;
+        
+        if (!inputMint || !outputMint || !amount || !userPublicKey) {
+            res.status(400).json({ error: 'Missing required parameters: inputMint, outputMint, amount, userPublicKey' });
+            return;
         }
         
-        throw lastError;
+        console.log(`[SwapTx] Getting swap transaction for: ${userPublicKey}`);
+        
+        // Use Jupiter Ultra API - add taker to get transaction
+        const params = new URLSearchParams({
+            inputMint,
+            outputMint,
+            amount: amount.toString(),
+            taker: userPublicKey,
+        });
+        
+        if (slippageBps) {
+            params.append('slippageBps', slippageBps.toString());
+        }
+        
+        const url = `${JUPITER_ULTRA_API}/order?${params}`;
+        console.log(`[SwapTx] Fetching from: ${url}`);
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(url, {
+            signal: controller.signal,
+        });
+        
+        clearTimeout(timeout);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[SwapTx] Jupiter returned ${response.status}:`, errorText.substring(0, 500));
+            res.status(response.status).json({ 
+                error: 'Jupiter API error', 
+                details: errorText 
+            });
+            return;
+        }
+        
+        const data = await response.json();
+        
+        // Check for Ultra API error response
+        if (data.errorCode) {
+            console.error(`[SwapTx] Jupiter error: ${data.errorCode} - ${data.errorMessage}`);
+            res.status(400).json({ 
+                error: data.errorMessage || data.errorCode 
+            });
+            return;
+        }
+        
+        console.log(`[SwapTx] Success, transaction returned`);
+        
+        // Return in format expected by frontend
+        res.json({
+            swapTransaction: data.transaction,
+            requestId: data.requestId,
+            order: data,
+        });
+        
     } catch (error: any) {
         console.error('[SwapTx] Error:', error.message);
-        if (error.response) {
-            res.status(error.response.status).json({ 
-                error: 'Jupiter API error', 
-                details: error.response.data 
-            });
-        } else {
-            res.status(500).json({ error: 'Failed to build swap transaction - Jupiter API unavailable' });
+        res.status(500).json({ 
+            error: 'Failed to build swap transaction', 
+            details: error.message 
+        });
+    }
+});
+
+// POST /swap/execute - Execute a signed swap transaction
+app.post('/swap/execute', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { signedTransaction, requestId } = req.body;
+        
+        if (!signedTransaction || !requestId) {
+            res.status(400).json({ error: 'Missing required parameters: signedTransaction, requestId' });
+            return;
         }
+        
+        console.log(`[SwapExecute] Executing swap for request: ${requestId}`);
+        
+        const url = `${JUPITER_ULTRA_API}/execute`;
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signedTransaction, requestId }),
+            signal: controller.signal,
+        });
+        
+        clearTimeout(timeout);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[SwapExecute] Jupiter returned ${response.status}:`, errorText.substring(0, 500));
+            res.status(response.status).json({ 
+                error: 'Jupiter execute error', 
+                details: errorText 
+            });
+            return;
+        }
+        
+        const data = await response.json();
+        console.log(`[SwapExecute] Success: ${data.status}`);
+        
+        res.json(data);
+        
+    } catch (error: any) {
+        console.error('[SwapExecute] Error:', error.message);
+        res.status(500).json({ 
+            error: 'Failed to execute swap', 
+            details: error.message 
+        });
     }
 });
 
