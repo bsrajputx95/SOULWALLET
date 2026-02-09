@@ -10,8 +10,9 @@ import {
     Alert,
     ScrollView,
     Image,
+    TouchableOpacity,
 } from 'react-native';
-import { X, Search, AlertCircle, ShoppingCart, Shield } from 'lucide-react-native';
+import { X, Search, AlertCircle, ShoppingCart, Shield, ExternalLink } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../constants/colors';
@@ -19,6 +20,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { getQuote, executeSwap, getTokenList, JupiterToken } from '../services/swap';
 import { API_URL } from '../services/api';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
+import TokenDetails from './TokenDetails';
 
 interface QuickBuyModalProps {
     visible: boolean;
@@ -53,6 +55,8 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
     const [showPinInput, setShowPinInput] = useState(false);
     const [pin, setPin] = useState('');
     const [jupiterTokens, setJupiterTokens] = useState<JupiterToken[]>([]);
+    const [showTokenDetails, setShowTokenDetails] = useState(false);
+    const [tokenMetadata, setTokenMetadata] = useState<any>(null);
 
     // Load Jupiter token list on mount
     useEffect(() => {
@@ -124,18 +128,62 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
             const token = data.tokens.find((t: any) => t.address === addr);
             if (!token) return null;
             
+            // Store full metadata for TokenDetails
+            setTokenMetadata(token);
+            
             return {
                 address: token.address,
                 symbol: token.symbol,
                 name: token.name,
                 decimals: token.decimals || 9,
-                logoURI: token.logoURI,
+                logoURI: token.logoURI || token.icon,
                 verified: token.verified || false,
                 source: 'jupiter',
             };
         } catch {
             return null;
         }
+    };
+
+    // Open token details modal
+    const handleTokenPress = () => {
+        if (tokenInfo) {
+            setShowTokenDetails(true);
+        }
+    };
+
+    // Get token details data for modal
+    const getTokenDetailsData = () => {
+        if (!tokenInfo) return undefined;
+        
+        // Use metadata from Jupiter API if available
+        if (tokenMetadata) {
+            return {
+                symbol: tokenMetadata.symbol || tokenInfo.symbol,
+                name: tokenMetadata.name || tokenInfo.name,
+                price: tokenMetadata.usdPrice || tokenMetadata.price || 0,
+                change24h: tokenMetadata.priceChange24h || 0,
+                changePercent24h: tokenMetadata.priceChange24h || 0,
+                balance: 0,
+                value: 0,
+                marketCap: tokenMetadata.marketCap || tokenMetadata.mcap || 0,
+                volume24h: tokenMetadata.volume24h || 0,
+                supply: tokenMetadata.circSupply || tokenMetadata.totalSupply || 0,
+                address: tokenInfo.address,
+            };
+        }
+        
+        // Fallback to basic info
+        return {
+            symbol: tokenInfo.symbol,
+            name: tokenInfo.name,
+            price: 0,
+            change24h: 0,
+            changePercent24h: 0,
+            balance: 0,
+            value: 0,
+            address: tokenInfo.address,
+        };
     };
 
     // Verify token - check local list first, then Jupiter API
@@ -336,15 +384,23 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                             </View>
                         </View>
 
-                        {/* Token Info Card */}
+                        {/* Token Info Card - Tappable */}
                         {tokenInfo && (
-                            <View style={[
-                                styles.tokenCard,
-                                !tokenInfo.verified && styles.tokenCardUnverified
-                            ]}>
+                            <TouchableOpacity 
+                                style={[
+                                    styles.tokenCard,
+                                    !tokenInfo.verified && styles.tokenCardUnverified
+                                ]}
+                                onPress={handleTokenPress}
+                                activeOpacity={0.8}
+                            >
                                 <View style={styles.tokenInfo}>
                                     {tokenInfo.logoURI ? (
-                                        <Image source={{ uri: tokenInfo.logoURI }} style={styles.tokenLogo} />
+                                        <Image 
+                                            source={{ uri: tokenInfo.logoURI }} 
+                                            style={styles.tokenLogo}
+                                            resizeMode="cover"
+                                        />
                                     ) : (
                                         <View style={styles.tokenLogoPlaceholder}>
                                             <Text style={styles.tokenLogoText}>{tokenInfo.symbol?.[0]}</Text>
@@ -352,21 +408,29 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                                     )}
                                     <View style={styles.tokenDetails}>
                                         <Text style={styles.tokenSymbol}>{tokenInfo.symbol}</Text>
-                                        <Text style={styles.tokenName}>{tokenInfo.name}</Text>
+                                        <Text style={styles.tokenName} numberOfLines={1}>
+                                            {tokenInfo.name}
+                                        </Text>
                                     </View>
-                                    {tokenInfo.verified ? (
-                                        <View style={styles.verifiedBadge}>
-                                            <Shield size={16} color={COLORS.success} />
-                                            <Text style={styles.verifiedText}>Verified</Text>
+                                    <View style={styles.tokenBadgeContainer}>
+                                        {tokenInfo.verified ? (
+                                            <View style={styles.verifiedBadge}>
+                                                <Shield size={14} color={COLORS.success} />
+                                                <Text style={styles.verifiedText}>Verified</Text>
+                                            </View>
+                                        ) : (
+                                            <View style={styles.unverifiedBadge}>
+                                                <AlertCircle size={14} color={COLORS.warning || '#FFB800'} />
+                                                <Text style={styles.unverifiedText}>Unknown</Text>
+                                            </View>
+                                        )}
+                                        <View style={styles.viewDetailsHint}>
+                                            <Text style={styles.viewDetailsText}>Tap for details</Text>
+                                            <ExternalLink size={12} color={COLORS.textSecondary} />
                                         </View>
-                                    ) : (
-                                        <View style={styles.unverifiedBadge}>
-                                            <AlertCircle size={16} color={COLORS.warning || '#FFB800'} />
-                                            <Text style={styles.unverifiedText}>Unknown</Text>
-                                        </View>
-                                    )}
+                                    </View>
                                 </View>
-                            </View>
+                            </TouchableOpacity>
                         )}
 
                         {/* Warning for unverified tokens */}
@@ -539,6 +603,19 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                     </ScrollView>
                 </View>
             </View>
+
+            {/* Token Details Modal */}
+            {showTokenDetails && (
+                <TokenDetails
+                    token={getTokenDetailsData()!}
+                    visible={showTokenDetails}
+                    onClose={() => setShowTokenDetails(false)}
+                    onBuy={() => {
+                        setShowTokenDetails(false);
+                        // Already in buy flow
+                    }}
+                />
+            )}
         </Modal>
     );
 };
@@ -828,6 +905,10 @@ const styles = StyleSheet.create({
     tokenCardUnverified: {
         borderColor: (COLORS.warning || '#FFB800') + '50',
     },
+    tokenBadgeContainer: {
+        alignItems: 'flex-end',
+        gap: SPACING.xs,
+    },
     verifiedBadge: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -855,6 +936,17 @@ const styles = StyleSheet.create({
         ...FONTS.phantomMedium,
         color: COLORS.warning || '#FFB800',
         fontSize: 11,
+    },
+    viewDetailsHint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 2,
+    },
+    viewDetailsText: {
+        ...FONTS.phantomRegular,
+        color: COLORS.textSecondary,
+        fontSize: 10,
     },
     warningContainer: {
         flexDirection: 'row',
