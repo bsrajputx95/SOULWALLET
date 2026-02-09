@@ -62,41 +62,8 @@ export const getTokenList = async (): Promise<JupiterToken[]> => {
         return tokenListCache;
     }
 
-    // Try to fetch from API first
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        const response = await fetch(JUPITER_TOKEN_API, { signal: controller.signal });
-        clearTimeout(timeout);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        // Handle both array and object responses
-        const tokens = Array.isArray(data) ? data : data.tokens || [];
-        
-        if (tokens.length > 0) {
-            tokenListCache = tokens
-                .filter((t: any) => t.symbol && t.name && t.address && t.decimals !== undefined)
-                .map((t: any) => ({
-                    symbol: t.symbol,
-                    name: t.name,
-                    address: t.address,
-                    decimals: t.decimals,
-                    logoURI: t.logoURI || t.logo,
-                }));
-            tokenListCacheTime = now;
-            console.log(`[Swap] Fetched ${tokenListCache.length} tokens from API`);
-            return tokenListCache;
-        }
-    } catch (error) {
-        console.warn('[Swap] Failed to fetch token list from API:', error);
-    }
-
-    // Use fallback tokens immediately if API fails
-    console.log('[Swap] Using fallback token list');
+    // Use fallback tokens immediately - API often fails in React Native
+    console.log('[Swap] Using fallback token list (15 tokens)');
     tokenListCache = FALLBACK_TOKENS;
     tokenListCacheTime = now;
     return tokenListCache;
@@ -147,6 +114,7 @@ export const getQuote = async (
     slippageBps: number,
     signal?: AbortSignal
 ): Promise<SwapQuote | null> => {
+    console.log(`[Swap] Getting quote: ${inputMint} -> ${outputMint}, amount: ${amount}`);
     let lastError;
     for (let i = 0; i < 3; i++) {
         try {
@@ -158,13 +126,26 @@ export const getQuote = async (
                 onlyDirectRoutes: 'false',
             });
 
-            const response = await fetch(`${JUPITER_QUOTE_API}/quote?${params}`, { signal });
-            if (response.ok) return await response.json();
-            lastError = await response.json().catch(() => ({}));
-        } catch (e) { lastError = e; }
+            const url = `${JUPITER_QUOTE_API}/quote?${params}`;
+            console.log(`[Swap] Quote URL: ${url.substring(0, 80)}...`);
+            
+            const response = await fetch(url, { signal });
+            console.log(`[Swap] Quote response status: ${response.status}`);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log(`[Swap] Quote received: ${data.outAmount} out`);
+                return data;
+            }
+            lastError = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+            console.warn(`[Swap] Quote attempt ${i+1} failed:`, lastError);
+        } catch (e: any) { 
+            lastError = e;
+            console.warn(`[Swap] Quote attempt ${i+1} error:`, e.message || e);
+        }
         if (i < 2) await new Promise(r => setTimeout(r, 1000));
     }
-    throw new Error(lastError?.error || 'Quote failed after retries');
+    throw new Error(lastError?.error || lastError?.message || 'Quote failed after retries');
 };
 
 export const executeSwap = async (
