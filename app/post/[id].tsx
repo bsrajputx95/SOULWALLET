@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { MessageSquare, Repeat, Heart, Send, X, Share2 } from 'lucide-react-native';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
-import { NeonCard } from '@/components';
+import { NeonCard, TokenCard } from '@/components';
 import { fetchPost, toggleLike, addComment, voteOnPost, getPostVotes } from '@/services/social';
 import { useAlert } from '@/contexts/AlertContext';
 
@@ -28,6 +28,7 @@ interface PostData {
   createdAt: string;
   isLiked?: boolean;
   tokenSymbol?: string;
+  tokenAddress?: string;
   user: {
     username: string;
     profileImage?: string;
@@ -41,6 +42,14 @@ interface PostData {
       profileImage?: string;
     };
   }>;
+}
+
+interface TokenInfo {
+  symbol: string;
+  name: string;
+  price: number;
+  change24h: number;
+  logo?: string;
 }
 
 
@@ -65,8 +74,41 @@ export default function PostDetailScreen() {
     const result = await fetchPost(id);
     if (result.success && result.post) {
       setPost(result.post as PostData);
+      // Fetch token info if post has a token
+      if (result.post.tokenAddress) {
+        fetchTokenInfo(result.post.tokenAddress);
+      }
     }
     setLoading(false);
+  };
+
+  // Token info state
+  const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
+
+  const fetchTokenInfo = async (mint: string) => {
+    try {
+      const res = await fetch(`https://api.jup.ag/tokens/v1/token/${mint}`);
+      const data = await res.json();
+      // Also try to get price from DexScreener
+      let price = 0;
+      let change24h = 0;
+      try {
+        const priceRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
+        const priceData = await priceRes.json();
+        if (priceData.pairs && priceData.pairs.length > 0) {
+          price = parseFloat(priceData.pairs[0].priceUsd || '0');
+          change24h = priceData.pairs[0].priceChange?.h24 || 0;
+        }
+      } catch { /* ignore price fetch errors */ }
+
+      setTokenInfo({
+        symbol: data.symbol || '',
+        name: data.name || '',
+        price,
+        change24h,
+        logo: data.logoURI,
+      });
+    } catch { /* ignore */ }
   };
 
   // Get counts from post
@@ -321,6 +363,18 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           </View>
         </NeonCard>
+
+        {/* Token Info Card - only if post has a token */}
+        {post.tokenAddress && tokenInfo && (
+          <TokenCard
+            symbol={tokenInfo.symbol}
+            name={tokenInfo.name}
+            price={tokenInfo.price}
+            change={tokenInfo.change24h}
+            logo={tokenInfo.logo || ''}
+          />
+        )}
+
         {/* Index: Agree / Disagree */}
         <NeonCard style={styles.indexCard}>
           <View style={styles.indexHeaderRow}>
