@@ -372,6 +372,19 @@ export default function PostDetailScreen() {
             price={tokenInfo.price}
             change={tokenInfo.change24h}
             logo={tokenInfo.logo || ''}
+            onPress={() => {
+              router.push({
+                pathname: `/coin/${tokenInfo.symbol.toLowerCase()}` as any,
+                params: {
+                  symbol: tokenInfo.symbol,
+                  name: tokenInfo.name,
+                  price: tokenInfo.price.toString(),
+                  change: tokenInfo.change24h.toString(),
+                  logo: tokenInfo.logo || '',
+                  contractAddress: post.tokenAddress || '',
+                },
+              });
+            }}
           />
         )}
 
