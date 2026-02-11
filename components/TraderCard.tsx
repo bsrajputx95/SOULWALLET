@@ -1,10 +1,11 @@
 import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { Copy } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING } from '../constants/theme';
 import { NeonCard } from './NeonCard';
+import { useAlert } from '../contexts/AlertContext';
 
 interface TraderCardProps {
   username?: string;
@@ -21,6 +22,7 @@ export const TraderCard: React.FC<TraderCardProps> = ({
   period: _period = '24h',
   onPress,
 }) => {
+  const { showAlert } = useAlert();
   // Format wallet address: first 4 chars...last 4 chars
   const formatAddress = (addr?: string) => {
     if (!addr) return '...';
@@ -31,7 +33,7 @@ export const TraderCard: React.FC<TraderCardProps> = ({
   const handleCopyAddress = async () => {
     if (!walletAddress) return;
     await Clipboard.setStringAsync(walletAddress);
-    Alert.alert('Copied!', 'Wallet address copied to clipboard');
+    showAlert('Copied!', 'Wallet address copied to clipboard');
   };
 
   return (

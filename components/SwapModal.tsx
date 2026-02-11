@@ -7,7 +7,6 @@ import {
     TextInput,
     Modal,
     ScrollView,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     useWindowDimensions,
@@ -21,6 +20,7 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { getQuote, searchToken, getTokenList, executeSwap, JupiterToken, SwapQuote } from '../services/swap';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
+import { useAlert } from '../contexts/AlertContext';
 
 interface Token {
     symbol: string;
@@ -44,6 +44,7 @@ export const SwapModal: React.FC<SwapModalProps> = ({
     onSuccess,
     holdings = [],
 }) => {
+    const { showAlert } = useAlert();
     const { height } = useWindowDimensions();
     const modalHeight = height * 0.9;
 
@@ -137,7 +138,7 @@ export const SwapModal: React.FC<SwapModalProps> = ({
     useEffect(() => {
         if (abortControllerRef.current) abortControllerRef.current.abort();
         abortControllerRef.current = new AbortController();
-        
+
         const timer = setTimeout(() => fetchQuote(abortControllerRef.current!.signal), 500);
         return () => {
             clearTimeout(timer);
@@ -217,12 +218,12 @@ export const SwapModal: React.FC<SwapModalProps> = ({
 
         const amountNum = parseFloat(amount);
         if (isNaN(amountNum) || amountNum <= 0) {
-            Alert.alert('Error', 'Enter a valid amount');
+            showAlert('Error', 'Enter a valid amount');
             return;
         }
 
         if (fromToken && amountNum > fromToken.balance) {
-            Alert.alert('Error', 'Insufficient balance');
+            showAlert('Error', 'Insufficient balance');
             return;
         }
 
@@ -261,7 +262,7 @@ export const SwapModal: React.FC<SwapModalProps> = ({
                 showSuccessToast(`Swapped ${amount} ${fromToken?.symbol}`);
                 // Trigger refresh immediately before showing alert
                 if (onSuccess) await onSuccess();
-                Alert.alert(
+                showAlert(
                     'Swap Successful!',
                     `Signature: ${result.signature?.slice(0, 8)}...${result.signature?.slice(-8)}`,
                     [
@@ -286,7 +287,7 @@ export const SwapModal: React.FC<SwapModalProps> = ({
                 showErrorToast(result.error || 'Swap failed');
             }
         } catch (error: any) {
-            Alert.alert('Swap Failed', error.message || 'Failed to execute swap');
+            showAlert('Swap Failed', error.message || 'Failed to execute swap');
         } finally {
             setSwapping(false);
             setPin('');

@@ -8,6 +8,7 @@ export interface Post {
   tokenAddress?: string;
   tokenSymbol?: string;
   tokenName?: string;
+  hashtags?: string[];
   likesCount: number;
   commentsCount: number;
   createdAt: string;
@@ -55,6 +56,14 @@ export interface TokenMetadata {
   tokenPrice?: number;
 }
 
+// Extract hashtags from content
+export const extractHashtags = (content: string): string[] => {
+  const matches = content.match(/#[\w]+/g);
+  if (!matches) return [];
+  // Return unique lowercase hashtags without the # prefix
+  return [...new Set(matches.map(tag => tag.slice(1).toLowerCase()))];
+};
+
 export const createPost = async (
   content: string,
   visibility: string = 'public',
@@ -65,7 +74,7 @@ export const createPost = async (
       content,
       visibility,
     };
-    
+
     if (tokenMetadata) {
       payload.tokenAddress = tokenMetadata.tokenAddress;
       payload.tokenSymbol = tokenMetadata.tokenSymbol;
@@ -73,7 +82,13 @@ export const createPost = async (
       payload.tokenVerified = tokenMetadata.tokenVerified;
       payload.tokenPriceAtPost = tokenMetadata.tokenPrice;
     }
-    
+
+    // Auto-extract hashtags from content
+    const hashtags = extractHashtags(content);
+    if (hashtags.length > 0) {
+      payload.hashtags = hashtags;
+    }
+
     const response = await api.post<{ success: boolean; post: Post }>('/posts', payload);
     return response;
   } catch (error: any) {
@@ -168,7 +183,7 @@ export const fetchUserPosts = async (
   visibility?: 'public' | 'followers' | 'vip'
 ): Promise<{ success: boolean; posts?: Post[]; error?: string }> => {
   try {
-    const url = visibility 
+    const url = visibility
       ? `/users/${username}/posts?visibility=${visibility}`
       : `/users/${username}/posts`;
     const response = await api.get<{ success: boolean; posts: Post[] }>(url);

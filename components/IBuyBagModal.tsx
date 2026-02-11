@@ -10,7 +10,6 @@ import {
     KeyboardAvoidingView,
     Platform,
     TextInput,
-    Alert,
     ActivityIndicator,
 } from 'react-native';
 import { X, ShoppingBag, Settings } from 'lucide-react-native';
@@ -27,6 +26,7 @@ import {
     IBuyPosition,
     IBuySettings,
 } from '../services/ibuy';
+import { useAlert } from '../contexts/AlertContext';
 
 interface IBuyBagModalProps {
     visible: boolean;
@@ -39,6 +39,7 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     onClose,
     onRefresh,
 }) => {
+    const { showAlert } = useAlert();
     const { height } = useWindowDimensions();
     const modalHeight = height * 0.67;
 
@@ -52,6 +53,9 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
         autoApprove: false,
     });
     const [tempSettings, setTempSettings] = useState(settings);
+    // Separate string states for text inputs to avoid snap-back on edit
+    const [slippageText, setSlippageText] = useState(String(settings.ibuySlippage / 100));
+    const [solAmountText, setSolAmountText] = useState(String(settings.ibuyDefaultSol));
 
     // PIN modal state
     const [showPinModal, setShowPinModal] = useState(false);
@@ -78,6 +82,7 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
         const s = await getIBuySettings();
         setSettings(s);
         setTempSettings(s);
+        setSlippageText(String(s.ibuySlippage / 100));
     }, []);
 
     useEffect(() => {
@@ -113,16 +118,15 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
         try {
             const result = await sellIBuyPosition(pendingSellPosition.id, pendingSellPercentage, pin);
             if (result.success) {
-                Alert.alert(
+                showAlert(
                     'Sold!',
-                    `Profit: ${result.profit && result.profit > 0 ? '+' : ''}${result.profit?.toFixed(4) || '0'} SOL${
-                        result.creatorShare ? `\nCreator fee: ${result.creatorShare.toFixed(4)} SOL` : ''
+                    `Profit: ${result.profit && result.profit > 0 ? '+' : ''}${result.profit?.toFixed(4) || '0'} SOL${result.creatorShare ? `\nCreator fee: ${result.creatorShare.toFixed(4)} SOL` : ''
                     }`
                 );
                 loadPositions();
                 onRefresh?.();
             } else {
-                Alert.alert('Error', result.error || 'Sell failed');
+                showAlert('Error', result.error || 'Sell failed');
             }
         } finally {
             setSelling(null);
@@ -132,12 +136,20 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     };
 
     const handleSaveSettings = async () => {
-        const result = await updateIBuySettings(tempSettings);
+        // Apply slippage text to tempSettings before saving
+        const slippageNum = parseFloat(slippageText);
+        const finalSettings = {
+            ...tempSettings,
+            ibuySlippage: !isNaN(slippageNum) && slippageNum > 0 ? Math.round(slippageNum * 100) : tempSettings.ibuySlippage,
+        };
+        const result = await updateIBuySettings(finalSettings);
         if (result.success) {
-            setSettings(tempSettings);
+            setSettings(finalSettings);
+            setTempSettings(finalSettings);
+            setSlippageText(String(finalSettings.ibuySlippage / 100));
             setShowSettings(false);
         } else {
-            Alert.alert('Error', result.error || 'Failed to save settings');
+            showAlert('Error', result.error || 'Failed to save settings');
         }
     };
 
@@ -180,19 +192,24 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
 
                                     <View style={styles.settingsRow}>
                                         <Text style={styles.settingsLabel}>Default SOL Amount</Text>
-                                        <View style={styles.presetsRow}>
-                                            {[0.05, 0.1, 0.5, 1.0].map((amt) => (
-                                                <Pressable
-                                                    key={amt}
-                                                    style={[
-                                                        styles.presetButton,
-                                                        tempSettings.ibuyDefaultSol === amt && styles.presetButtonActive,
-                                                    ]}
-                                                    onPress={() => setTempSettings({ ...tempSettings, ibuyDefaultSol: amt })}
-                                                >
-                                                    <Text style={styles.presetText}>{amt}</Text>
-                                                </Pressable>
-                                            ))}
+                                        <View style={styles.inputWrapper}>
+                                            <TextInput
+                                                style={styles.textInput}
+                                                value={solAmountText}
+                                                placeholder="Enter SOL amount (e.g. 0.1)"
+                                                placeholderTextColor={COLORS.textSecondary}
+                                                keyboardType="decimal-pad"
+                                                onChangeText={(text) => {
+                                                    const cleaned = text.replace(/[^0-9.]/g, '');
+                                                    setSolAmountText(cleaned);
+                                                }}
+                                                onBlur={() => {
+                                                    const num = parseFloat(solAmountText);
+                                                    if (!isNaN(num) && num > 0) {
+                                                        setTempSettings({ ...tempSettings, ibuyDefaultSol: num });
+                                                    }
+                                                }}
+                                            />
                                         </View>
                                     </View>
 
@@ -201,11 +218,12 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
                                         <View style={styles.inputWrapper}>
                                             <TextInput
                                                 style={styles.textInput}
-                                                value={String(tempSettings.ibuySlippage / 100)}
+                                                value={slippageText}
                                                 keyboardType="decimal-pad"
-                                                onChangeText={(text) => {
-                                                    const num = parseFloat(text);
-                                                    if (!isNaN(num)) {
+                                                onChangeText={setSlippageText}
+                                                onBlur={() => {
+                                                    const num = parseFloat(slippageText);
+                                                    if (!isNaN(num) && num > 0) {
                                                         setTempSettings({
                                                             ...tempSettings,
                                                             ibuySlippage: Math.round(num * 100),

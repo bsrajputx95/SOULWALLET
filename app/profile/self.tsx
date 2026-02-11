@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
-  Alert,
   Modal,
   TextInput,
   useWindowDimensions,
@@ -22,10 +21,12 @@ import { NeonCard, SocialPost } from '@/components';
 import { fetchUserProfile, fetchMe, fetchUserPosts, deletePost, Post } from '@/services/social';
 import { getCreatorEarnings } from '@/services/ibuy';
 import * as SecureStore from 'expo-secure-store';
+import { useAlert } from '@/contexts/AlertContext';
 
 export default function SelfProfileScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const { showAlert } = useAlert();
 
   // Real user data from API
   const [user, setUser] = useState<any>(null);
@@ -129,7 +130,7 @@ export default function SelfProfileScreen() {
   });
 
   const handleDeletePost = async (postId: string) => {
-    Alert.alert(
+    showAlert(
       'Delete Post',
       'Are you sure you want to delete this post?',
       [
@@ -143,7 +144,7 @@ export default function SelfProfileScreen() {
               // Remove post from local state
               setPosts(prev => prev.filter(p => p.id !== postId));
             } else {
-              Alert.alert('Error', result.error || 'Failed to delete post');
+              showAlert('Error', result.error || 'Failed to delete post');
             }
           },
         },
@@ -372,7 +373,7 @@ export default function SelfProfileScreen() {
           {/* Get Verified - Coming Soon */}
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => Alert.alert('Coming Soon', 'Verification feature will be available soon!')}
+            onPress={() => showAlert('Coming Soon', 'Verification feature will be available soon!')}
           >
             <Shield size={20} color={COLORS.solana} />
             <Text style={styles.actionButtonText}>Get Verified</Text>
@@ -523,7 +524,7 @@ export default function SelfProfileScreen() {
                 style={styles.enableButton}
                 onPress={() => {
                   setShowVipSetup(false);
-                  Alert.alert('Coming Soon', 'VIP Mode feature will be available soon!');
+                  showAlert('Coming Soon', 'VIP Mode feature will be available soon!');
                 }}
               >
                 <Text style={styles.enableButtonText}>Enable VIP Mode</Text>

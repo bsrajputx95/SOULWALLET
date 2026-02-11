@@ -7,7 +7,6 @@ import {
     TextInput,
     Modal,
     ScrollView,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     useWindowDimensions,
@@ -24,6 +23,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { VALIDATION } from '../constants/validation';
 import { sendTransaction, getLocalPublicKey } from '../services/wallet';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
+import { useAlert } from '../contexts/AlertContext';
 
 interface Token {
     symbol: string;
@@ -47,6 +47,7 @@ export const SendModal: React.FC<SendModalProps> = ({
     onSuccess,
     holdings = [],
 }) => {
+    const { showAlert } = useAlert();
     const { height } = useWindowDimensions();
     const modalHeight = height * 0.85;
 
@@ -159,7 +160,7 @@ export const SendModal: React.FC<SendModalProps> = ({
         if (!permission?.granted) {
             const result = await requestPermission();
             if (!result.granted) {
-                Alert.alert('Camera Permission', 'Camera access is required to scan QR codes');
+                showAlert('Camera Permission', 'Camera access is required to scan QR codes');
                 return;
             }
         }
@@ -180,7 +181,7 @@ export const SendModal: React.FC<SendModalProps> = ({
 
     const handleSend = () => {
         if (!selectedToken) {
-            Alert.alert('Error', 'Please select a token');
+            showAlert('Error', 'Please select a token');
             return;
         }
 
@@ -214,7 +215,7 @@ export const SendModal: React.FC<SendModalProps> = ({
             // Get auth token
             const authToken = await SecureStore.getItemAsync('token');
             if (!authToken) {
-                Alert.alert('Error', 'Session expired, please log in');
+                showAlert('Error', 'Session expired, please log in');
                 setIsSending(false);
                 setShowPinModal(false);
                 return;
@@ -222,7 +223,7 @@ export const SendModal: React.FC<SendModalProps> = ({
 
             // Only SOL supported in Phase 2.2
             if (selectedToken?.symbol !== 'SOL') {
-                Alert.alert('Coming Soon', 'SPL token transfers will be available in Phase 2.3');
+                showAlert('Coming Soon', 'SPL token transfers will be available in Phase 2.3');
                 setIsSending(false);
                 setShowPinModal(false);
                 return;
@@ -247,7 +248,7 @@ export const SendModal: React.FC<SendModalProps> = ({
                 // Trigger refresh immediately before showing alert
                 if (onSuccess) await onSuccess();
                 // Also show Alert with Solscan link
-                Alert.alert(
+                showAlert(
                     '✅ Transaction Sent!',
                     `Signature: ${result.signature?.slice(0, 8)}...${result.signature?.slice(-8)}`,
                     [
@@ -273,7 +274,7 @@ export const SendModal: React.FC<SendModalProps> = ({
                 showErrorToast(result.error || 'Transaction failed');
             }
         } catch (error: any) {
-            Alert.alert('Transaction Failed', error.message || 'Failed to send transaction');
+            showAlert('Transaction Failed', error.message || 'Failed to send transaction');
         } finally {
             setIsSending(false);
             setPin('');

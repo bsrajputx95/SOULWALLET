@@ -8,7 +8,6 @@ import {
   TextInput,
   Image,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +16,7 @@ import { MessageSquare, Repeat, Heart, Send, X, Share2 } from 'lucide-react-nati
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard } from '@/components';
 import { fetchPost, toggleLike, addComment, voteOnPost, getPostVotes } from '@/services/social';
+import { useAlert } from '@/contexts/AlertContext';
 
 // Post data interface
 interface PostData {
@@ -72,6 +72,7 @@ export default function PostDetailScreen() {
   // Get counts from post
   const likeCount = post?.likesCount || 0;
   const isLiked = post?.isLiked || false;
+  const { showAlert } = useAlert();
 
   // Handlers
   const handleLike = async () => {
@@ -83,7 +84,7 @@ export default function PostDetailScreen() {
   };
 
   const handleRepost = () => {
-    Alert.alert('Coming Soon', 'Repost functionality will be available soon.');
+    showAlert('Coming Soon', 'Repost functionality will be available soon.');
   };
 
   const handleAddComment = async () => {
@@ -131,18 +132,18 @@ export default function PostDetailScreen() {
 
   const handleVote = async (choice: 'agree' | 'disagree') => {
     if (isVoting || voteData.userVote) return; // Already voted or voting in progress
-    
+
     setIsVoting(true);
     const result = await voteOnPost(id, choice);
     if (result.success) {
       // Refresh vote data
       await loadVotes();
     } else if (result.error?.includes('already voted')) {
-      Alert.alert('Already Voted', 'You can only vote once on this post.');
+      showAlert('Already Voted', 'You can only vote once on this post.');
       // Refresh to get the actual vote
       await loadVotes();
     } else {
-      Alert.alert('Error', result.error || 'Failed to vote');
+      showAlert('Error', result.error || 'Failed to vote');
     }
     setIsVoting(false);
   };
@@ -167,7 +168,7 @@ export default function PostDetailScreen() {
     if (!id) return;
     const postLink = `soulwallet/post/${id}`;
     await Clipboard.setStringAsync(postLink);
-    Alert.alert('Link Copied!', `Share this link:\n\n${postLink}\n\nPaste it in search or a post to share.`);
+    showAlert('Link Copied!', `Share this link:\n\n${postLink}\n\nPaste it in search or a post to share.`);
   };
 
   const formatContent = (text: string) => {
@@ -331,7 +332,7 @@ export default function PostDetailScreen() {
           <View style={styles.voteRow}>
             <TouchableOpacity
               style={[
-                styles.voteChip, 
+                styles.voteChip,
                 voteData.userVote === 'agree' && styles.voteChipSelectedAgree,
                 voteData.userVote && voteData.userVote !== 'agree' && styles.voteChipDisabled
               ]}
@@ -339,7 +340,7 @@ export default function PostDetailScreen() {
               disabled={isVoting || !!voteData.userVote}
             >
               <Text style={[
-                styles.voteText, 
+                styles.voteText,
                 voteData.userVote === 'agree' && styles.voteTextSelected,
                 voteData.userVote && voteData.userVote !== 'agree' && styles.voteTextDisabled
               ]}>
@@ -348,7 +349,7 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[
-                styles.voteChip, 
+                styles.voteChip,
                 voteData.userVote === 'disagree' && styles.voteChipSelectedDisagree,
                 voteData.userVote && voteData.userVote !== 'disagree' && styles.voteChipDisabled
               ]}
@@ -356,7 +357,7 @@ export default function PostDetailScreen() {
               disabled={isVoting || !!voteData.userVote}
             >
               <Text style={[
-                styles.voteText, 
+                styles.voteText,
                 voteData.userVote === 'disagree' && styles.voteTextSelected,
                 voteData.userVote && voteData.userVote !== 'disagree' && styles.voteTextDisabled
               ]}>
@@ -367,17 +368,17 @@ export default function PostDetailScreen() {
           {hasVotes ? (
             <>
               <View style={styles.indexBarContainer}>
-                <View 
+                <View
                   style={[
-                    styles.indexBarAgree, 
+                    styles.indexBarAgree,
                     { flex: agreePercent || 1 }
-                  ]} 
+                  ]}
                 />
-                <View 
+                <View
                   style={[
-                    styles.indexBarDisagree, 
+                    styles.indexBarDisagree,
                     { flex: disagreePercent || 1 }
-                  ]} 
+                  ]}
                 />
               </View>
               <View style={styles.indexBarLabels}>

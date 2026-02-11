@@ -8,7 +8,6 @@ import {
   RefreshControl,
   Modal,
   TextInput,
-  Alert,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,15 +18,16 @@ import * as Clipboard from 'expo-clipboard';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { SocialPost, NeonCard, GlowingText } from '@/components';
 import { fetchUserProfile, toggleFollow, fetchUserPosts, Post } from '@/services/social';
+import { useAlert } from '@/contexts/AlertContext';
 
 // Mock hooks for local-only mode
-const useMockMutation = <T,>(_options: { onSuccess?: () => void; onError?: (e: any) => void }) => ({
+const useMockMutation = <T,>(alertFn: (title: string, message: string) => void, _options: { onSuccess?: () => void; onError?: (e: any) => void }) => ({
   mutate: (_params: any) => {
     // Simulate success for demo
-    Alert.alert('Coming Soon', 'This feature is not available yet.');
+    alertFn('Coming Soon', 'This feature is not available yet.');
   },
   mutateAsync: async (_params: any) => {
-    Alert.alert('Coming Soon', 'This feature is not available yet.');
+    alertFn('Coming Soon', 'This feature is not available yet.');
     return {} as T;
   },
   isPending: false,
@@ -61,6 +61,7 @@ type PostVisibility = 'public' | 'followers' | 'vip';
 export default function UserProfileScreen() {
   useRouter(); // Keep router available for future navigation
   const { username } = useLocalSearchParams<{ username: string }>();
+  const { showAlert } = useAlert();
 
   // Real profile data from API
   const [profile, setProfile] = useState<ProfileData | null>(null);
@@ -115,14 +116,14 @@ export default function UserProfileScreen() {
   };
 
   // Mock copy trading mutation - coming soon
-  const startCopyingMutation = useMockMutation({
+  const startCopyingMutation = useMockMutation(showAlert, {
     onSuccess: () => {
-      Alert.alert('Success', `Now copying @${username}! Check your copy trades in the Home tab.`);
+      showAlert('Success', `Now copying @${username}! Check your copy trades in the Home tab.`);
       setShowCopyModal(false);
       setTotpCode('');
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to start copy trading.');
+      showAlert('Error', error.message || 'Failed to start copy trading.');
     },
   });
 
@@ -132,7 +133,7 @@ export default function UserProfileScreen() {
     if (result.success) {
       await loadProfile();
     } else {
-      Alert.alert('Error', result.error || 'Failed to follow user');
+      showAlert('Error', result.error || 'Failed to follow user');
     }
   };
 
@@ -262,7 +263,7 @@ export default function UserProfileScreen() {
                 onPress={async () => {
                   try {
                     await Clipboard.setStringAsync(walletAddress);
-                    Alert.alert('Copied', 'Wallet address copied to clipboard');
+                    showAlert('Copied', 'Wallet address copied to clipboard');
                   } catch (e) {
                     // Clipboard copy failed silently
                   }
@@ -401,7 +402,7 @@ export default function UserProfileScreen() {
                 style={styles.joinVipButton}
                 onPress={() => {
                   setIsVipMember(true);
-                  Alert.alert('Joined VIP', `You are now a VIP member of @${userProfile.username}`);
+                  showAlert('Joined VIP', `You are now a VIP member of @${userProfile.username}`);
                 }}
               >
                 <Text style={styles.joinVipText}>{isVipMember ? 'VIP Active' : 'Join VIP'}</Text>
@@ -456,7 +457,7 @@ export default function UserProfileScreen() {
                 style={[styles.joinVipButton, styles.gatedVipButton]}
                 onPress={() => {
                   setIsVipMember(true);
-                  Alert.alert('Joined VIP', `You are now a VIP member of @${userProfile.username}`);
+                  showAlert('Joined VIP', `You are now a VIP member of @${userProfile.username}`);
                 }}
               >
                 <Text style={styles.joinVipText}>Join VIP</Text>
@@ -668,14 +669,14 @@ export default function UserProfileScreen() {
                   const perTrade = parseFloat(amountPerTrade) || 100;
 
                   if (perTrade > totalBudget) {
-                    Alert.alert('Error', 'Amount per trade cannot exceed total budget');
+                    showAlert('Error', 'Amount per trade cannot exceed total budget');
                     return;
                   }
 
                   // Get the actual wallet address
                   const traderWallet = (userProfile as any)?.walletAddress;
                   if (!traderWallet) {
-                    Alert.alert('Error', 'Trader wallet address not found. This user may not have a wallet set up.');
+                    showAlert('Error', 'Trader wallet address not found. This user may not have a wallet set up.');
                     return;
                   }
 

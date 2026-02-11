@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
@@ -30,6 +29,7 @@ import { SkeletonLoader, ErrorBoundary } from '@/components';
 import { ProfileForm } from '../components/account/ProfileForm';
 import { showSuccessToast, showErrorToast, validateSession } from '@/utils';
 import { api } from '@/services';
+import { useAlert } from '@/contexts/AlertContext';
 
 // Profile type from backend
 interface UserProfile {
@@ -48,6 +48,7 @@ interface UserProfile {
 
 export default function AccountScreen() {
   const router = useRouter();
+  const { showAlert, showPrompt } = useAlert();
 
   // Real profile state
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -108,18 +109,18 @@ export default function AccountScreen() {
   const uploadProfileImage = async (base64: string, mimeType: string) => {
     try {
       setIsProcessingImage(true);
-      
+
       // Send base64 image to backend
       const token = await SecureStore.getItemAsync('token');
       const response = await api.put('/profile', {
         profileImage: `data:${mimeType};base64,${base64}`
       });
-      
+
       if (response.success) {
         setProfile(response.user);
         return { success: true };
       }
-      
+
       return { success: false };
     } catch (error: any) {
       throw new Error(error.message || 'Failed to upload image');
@@ -152,28 +153,28 @@ export default function AccountScreen() {
 
   // Password reset handler
   const handleResetPassword = () => {
-    Alert.prompt(
+    showPrompt(
       'Reset Password',
       'Enter your current password:',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Next',
-          onPress: (currentPassword: string | undefined) => {
+          onPress: (currentPassword?: string) => {
             if (!currentPassword) {
-              Alert.alert('Error', 'Please enter your current password');
+              showAlert('Error', 'Please enter your current password');
               return;
             }
-            Alert.prompt(
+            showPrompt(
               'New Password',
               'Enter your new password (min 6 characters):',
               [
                 { text: 'Cancel', style: 'cancel' },
                 {
                   text: 'Update',
-                  onPress: async (newPassword: string | undefined) => {
+                  onPress: async (newPassword?: string) => {
                     if (!newPassword || newPassword.length < 6) {
-                      Alert.alert('Error', 'Password must be at least 6 characters');
+                      showAlert('Error', 'Password must be at least 6 characters');
                       return;
                     }
                     try {
@@ -181,20 +182,22 @@ export default function AccountScreen() {
                         currentPassword,
                         newPassword,
                       });
-                      Alert.alert('✅ Password Changed', 'Your password has been updated successfully');
+                      showAlert('✅ Password Changed', 'Your password has been updated successfully');
                     } catch (error: unknown) {
                       const errorMessage = error instanceof Error ? error.message : 'Failed to update password';
-                      Alert.alert('Error', errorMessage);
+                      showAlert('Error', errorMessage);
                     }
                   },
                 },
               ],
-              'secure-text'
+              true,
+              'Enter new password'
             );
           },
         },
       ],
-      'secure-text'
+      true,
+      'Enter current password'
     );
   };
 
@@ -229,7 +232,7 @@ export default function AccountScreen() {
 
   // Image picker handler
   const handlePickImage = async () => {
-    Alert.alert(
+    showAlert(
       'Change Profile Picture',
       'Choose an option',
       [
@@ -238,7 +241,7 @@ export default function AccountScreen() {
           onPress: async () => {
             const { status } = await ImagePicker.requestCameraPermissionsAsync();
             if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Please grant camera access in Settings');
+              showAlert('Permission Required', 'Please grant camera access in Settings');
               return;
             }
             const result = await ImagePicker.launchCameraAsync({
@@ -258,7 +261,7 @@ export default function AccountScreen() {
           onPress: async () => {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Please grant photo library access in Settings');
+              showAlert('Permission Required', 'Please grant photo library access in Settings');
               return;
             }
             const result = await ImagePicker.launchImageLibraryAsync({
@@ -297,7 +300,7 @@ export default function AccountScreen() {
 
       await uploadImage(processed.base64, 'image/jpeg');
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'Failed to process image');
+      showAlert('Error', error?.message || 'Failed to process image');
     } finally {
       setIsProcessingImage(false);
     }
@@ -307,7 +310,7 @@ export default function AccountScreen() {
     try {
       const result = await uploadProfileImage(base64, mimeType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif');
       if (result?.success) {
-        Alert.alert('Success', 'Profile picture updated!');
+        showAlert('Success', 'Profile picture updated!');
         // Refresh profile to show new image
         await fetchProfile();
       } else {
@@ -315,7 +318,7 @@ export default function AccountScreen() {
         return;
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to upload image');
+      showAlert('Error', error.message || 'Failed to upload image');
     }
   };
 
@@ -327,7 +330,7 @@ export default function AccountScreen() {
       if (email) {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
-          Alert.alert('Invalid Email', 'Please enter a valid email address');
+          showAlert('Invalid Email', 'Please enter a valid email address');
           return;
         }
       }
@@ -336,7 +339,7 @@ export default function AccountScreen() {
       if (phone && phone.length > 0) {
         const phoneRegex = /^[+]?[\d\s()-]{7,20}$/;
         if (!phoneRegex.test(phone)) {
-          Alert.alert('Invalid Phone', 'Please enter a valid phone number');
+          showAlert('Invalid Phone', 'Please enter a valid phone number');
           return;
         }
       }
@@ -345,23 +348,23 @@ export default function AccountScreen() {
       if (dateOfBirth) {
         const dobRegex = /^\d{4}-\d{2}-\d{2}$/;
         if (!dobRegex.test(dateOfBirth)) {
-          Alert.alert('Invalid Date', 'Date of birth must be YYYY-MM-DD format');
+          showAlert('Invalid Date', 'Date of birth must be YYYY-MM-DD format');
           return;
         }
         const dob = new Date(dateOfBirth);
         if (isNaN(dob.getTime()) || dob >= new Date()) {
-          Alert.alert('Invalid Date', 'Date of birth must be a past date');
+          showAlert('Invalid Date', 'Date of birth must be a past date');
           return;
         }
       }
 
       // Validate name lengths (1-50 chars)
       if (firstName && (firstName.length < 1 || firstName.length > 50)) {
-        Alert.alert('Invalid Name', 'First name must be 1-50 characters');
+        showAlert('Invalid Name', 'First name must be 1-50 characters');
         return;
       }
       if (lastName && (lastName.length < 1 || lastName.length > 50)) {
-        Alert.alert('Invalid Name', 'Last name must be 1-50 characters');
+        showAlert('Invalid Name', 'Last name must be 1-50 characters');
         return;
       }
 
@@ -377,10 +380,10 @@ export default function AccountScreen() {
       });
 
       showSuccessToast('Profile updated!');
-      Alert.alert('✅ Profile Updated', 'Your account settings have been saved.');
+      showAlert('✅ Profile Updated', 'Your account settings have been saved.');
     } catch (error: any) {
       showErrorToast(error.message || 'Update failed');
-      Alert.alert('Error', error.message || 'Failed to update settings. Please try again.');
+      showAlert('Error', error.message || 'Failed to update settings. Please try again.');
     }
   };
 
@@ -395,11 +398,11 @@ export default function AccountScreen() {
 
   const handleConfirmDeleteAccount = async () => {
     if (!deletePassword.trim()) {
-      Alert.alert('Error', 'Please enter your password');
+      showAlert('Error', 'Please enter your password');
       return;
     }
     if (deleteConfirmText !== 'DELETE MY ACCOUNT') {
-      Alert.alert('Error', 'Please type "DELETE MY ACCOUNT" to confirm');
+      showAlert('Error', 'Please type "DELETE MY ACCOUNT" to confirm');
       return;
     }
 
@@ -408,11 +411,11 @@ export default function AccountScreen() {
       await deleteAccountMutation.mutateAsync({
         password: deletePassword,
       });
-      Alert.alert('Account Deleted', 'Your account has been permanently deleted.');
+      showAlert('Account Deleted', 'Your account has been permanently deleted.');
       setShowDeleteAccountModal(false);
       // The user will be logged out automatically since their session is invalidated
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'Failed to delete account');
+      showAlert('Error', error?.message || 'Failed to delete account');
     } finally {
       setIsDeleting(false);
     }
@@ -495,93 +498,93 @@ export default function AccountScreen() {
           style={styles.scrollView}
           showsVerticalScrollIndicator={false}
         >
-        <ProfileForm
-          styles={styles}
-          profile={profile}
-          isLoading={false}
-          isUploadingImage={isUploadingImage}
-          isProcessingImage={isProcessingImage}
-          onPickImage={handlePickImage}
-          firstName={firstName}
-          lastName={lastName}
-          email={email}
-          phone={phone}
-          dateOfBirth={dateOfBirth}
-          setFirstName={setFirstName}
-          setLastName={setLastName}
-          setEmail={setEmail}
-          setPhone={setPhone}
-          setDateOfBirth={setDateOfBirth}
-        />
+          <ProfileForm
+            styles={styles}
+            profile={profile}
+            isLoading={false}
+            isUploadingImage={isUploadingImage}
+            isProcessingImage={isProcessingImage}
+            onPickImage={handlePickImage}
+            firstName={firstName}
+            lastName={lastName}
+            email={email}
+            phone={phone}
+            dateOfBirth={dateOfBirth}
+            setFirstName={setFirstName}
+            setLastName={setLastName}
+            setEmail={setEmail}
+            setPhone={setPhone}
+            setDateOfBirth={setDateOfBirth}
+          />
 
 
 
-        {/* Security & Privacy */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Security & Privacy</Text>
+          {/* Security & Privacy */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Security & Privacy</Text>
 
-          <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
-            <View style={styles.settingLeft}>
-              <Lock size={20} color={COLORS.textSecondary} />
-              <Text style={styles.settingText}>Reset Password</Text>
-            </View>
-            <Text style={styles.settingArrow}>›</Text>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.settingRow} onPress={handleResetPassword}>
+              <View style={styles.settingLeft}>
+                <Lock size={20} color={COLORS.textSecondary} />
+                <Text style={styles.settingText}>Reset Password</Text>
+              </View>
+              <Text style={styles.settingArrow}>›</Text>
+            </TouchableOpacity>
 
 
-        </View>
-
-        {/* App Settings - Fixed Dummy Values */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>App Settings</Text>
-
-          <View style={styles.settingRow}>
-            <View style={styles.settingLeft}>
-              <DollarSign size={20} color={COLORS.textSecondary} />
-              <Text style={styles.settingText}>Default Currency</Text>
-            </View>
-            <Text style={styles.settingValue}>USD</Text>
           </View>
 
-          <View style={styles.settingRow}>
-            <View style={styles.settingLeft}>
-              <Languages size={20} color={COLORS.textSecondary} />
-              <Text style={styles.settingText}>Language</Text>
+          {/* App Settings - Fixed Dummy Values */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>App Settings</Text>
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingLeft}>
+                <DollarSign size={20} color={COLORS.textSecondary} />
+                <Text style={styles.settingText}>Default Currency</Text>
+              </View>
+              <Text style={styles.settingValue}>USD</Text>
             </View>
-            <Text style={styles.settingValue}>English</Text>
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingLeft}>
+                <Languages size={20} color={COLORS.textSecondary} />
+                <Text style={styles.settingText}>Language</Text>
+              </View>
+              <Text style={styles.settingValue}>English</Text>
+            </View>
           </View>
-        </View>
 
 
 
-        {/* Social - Dummy for now */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Social</Text>
+          {/* Social - Dummy for now */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Social</Text>
 
-          <TouchableOpacity style={styles.settingRow} onPress={() => Alert.alert('Invite Friends', 'This feature is coming soon!')}>
-            <View style={styles.settingLeft}>
-              <Users size={20} color={COLORS.textSecondary} />
-              <Text style={styles.settingText}>Invite Friends</Text>
-            </View>
-            <Text style={styles.settingArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.settingRow} onPress={() => showAlert('Invite Friends', 'This feature is coming soon!')}>
+              <View style={styles.settingLeft}>
+                <Users size={20} color={COLORS.textSecondary} />
+                <Text style={styles.settingText}>Invite Friends</Text>
+              </View>
+              <Text style={styles.settingArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Danger Zone */}
-        <View style={[styles.section, styles.dangerSection]}>
-          <Text style={[styles.sectionTitle, { color: COLORS.error }]}>Danger Zone</Text>
+          {/* Danger Zone */}
+          <View style={[styles.section, styles.dangerSection]}>
+            <Text style={[styles.sectionTitle, { color: COLORS.error }]}>Danger Zone</Text>
 
-          <TouchableOpacity testID="account-delete-account-open-button" style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
-            <Trash2 size={20} color={COLORS.error} />
-            <Text style={styles.deleteAccountText}>Delete Account</Text>
-          </TouchableOpacity>
-          <Text style={styles.deleteAccountWarning}>
-            This action is permanent and cannot be undone.
-          </Text>
-        </View>
+            <TouchableOpacity testID="account-delete-account-open-button" style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+              <Trash2 size={20} color={COLORS.error} />
+              <Text style={styles.deleteAccountText}>Delete Account</Text>
+            </TouchableOpacity>
+            <Text style={styles.deleteAccountWarning}>
+              This action is permanent and cannot be undone.
+            </Text>
+          </View>
 
-        <View style={styles.bottomPadding} />
-      </ScrollView>
+          <View style={styles.bottomPadding} />
+        </ScrollView>
       </ErrorBoundary>
 
 

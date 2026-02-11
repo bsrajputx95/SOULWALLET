@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Image,
   RefreshControl,
-  Alert,
   Linking,
   Modal,
   TextInput,
@@ -31,7 +30,11 @@ import { WebView } from 'react-native-webview';
 import { SimpleCandlestickChart } from '@/components/SimpleCandlestickChart';
 import { COLORS, BORDER_RADIUS, FONTS, SPACING } from '@/constants';
 import { NeonCard, NeonButton, GlowingText } from '@/components';
-import { formatSubscriptPrice, formatLargeNumber as formatLargeNum } from '@/utils';
+import { formatSubscriptPrice, formatLargeNumber as formatLargeNum, showErrorToast, showSuccessToast } from '@/utils';
+import { getQuote, executeSwap, getTokenDecimals, JupiterToken } from '@/services/swap';
+import { createTriggerOrder, executeTriggerOrder, calculateLimitOutput, calculateLimitInput } from '@/services/trigger';
+import { getLocalPublicKey } from '@/services/wallet';
+import { useAlert } from '@/contexts/AlertContext';
 
 type Timeframe = '1h' | '1d' | '1w' | '1m' | '1y';
 type ChartTimeframe = '5m' | '15m' | '1h' | '4h' | '1d';
@@ -70,6 +73,7 @@ interface CoinData {
 }
 
 export default function CoinDetailsScreen() {
+  const { showAlert, showPrompt } = useAlert();
   // Read all params passed from home screen for data consistency
   const params = useLocalSearchParams<{
     symbol: string;
@@ -133,7 +137,7 @@ export default function CoinDetailsScreen() {
         holders: apiData.holders || 0,
         contractAddress: passedContractAddress || apiData.address,
         verified: apiData.verified,
-        age: apiData.pairAge ? `${apiData.pairAge}h` : 'Unknown',
+        age: apiData.pairAge ? apiData.pairAge + 'h' : 'Unknown',
         pairAge: apiData.pairAge,
         // Use passed logo from home screen for consistency
         logo: passedLogo || apiData.logo,
@@ -316,7 +320,7 @@ export default function CoinDetailsScreen() {
         const next = arr.filter((_, i) => i !== existingIndex);
         setWatchlisted(false);
         await AsyncStorage.setItem('watchlist_tokens', JSON.stringify(next));
-        Alert.alert('Removed from watchlist');
+        showAlert('Removed from watchlist');
       } else {
         // Add full token data to watchlist
         const tokenData = {
@@ -334,10 +338,10 @@ export default function CoinDetailsScreen() {
         const next = [...arr, tokenData];
         setWatchlisted(true);
         await AsyncStorage.setItem('watchlist_tokens', JSON.stringify(next));
-        Alert.alert('Added to watchlist');
+        showAlert('Added to watchlist');
       }
     } catch (e) {
-      Alert.alert('Error', 'Could not update watchlist');
+      showAlert('Error', 'Could not update watchlist');
     }
   };
 
@@ -350,39 +354,382 @@ export default function CoinDetailsScreen() {
   const [tradePriceType, setTradePriceType] = useState<'market' | 'target'>('market');
   const [tradeTargetPrice, setTradeTargetPrice] = useState<string>('');
   const [tradeSlippage, setTradeSlippage] = useState<string>('0.5');
+  const [isTrading, setIsTrading] = useState(false);
+  const [tokenBalance, setTokenBalance] = useState<number>(0);
+  const [solBalance, setSolBalance] = useState<number>(0);
 
-  const openTradeModal = (mode: 'buy' | 'sell') => {
+  // Token addresses
+  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+
+  const openTradeModal = async (mode: 'buy' | 'sell') => {
     setTradeMode(mode);
     setTradeAmount('');
     setTradePriceType('market');
     setTradeTargetPrice('');
     setTradeSlippage('0.5');
     setTradeModalVisible(true);
+
+    // Fetch balances when opening modal
+    await fetchBalances();
   };
 
   const closeTradeModal = () => {
     setTradeModalVisible(false);
+    setIsTrading(false);
   };
 
-  const confirmTrade = () => {
-    // Validate amount
-    const amount = parseFloat(tradeAmount);
-    if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid amount');
-      return;
+  // Fetch user's token balances
+  const fetchBalances = async () => {
+    try {
+      const publicKey = await getLocalPublicKey();
+      if (!publicKey) return;
+
+      // Fetch balances from backend
+      const { fetchBalances: fetchWalletBalances } = await import('@/services/wallet');
+      const token = await import('@/services/api').then(m => m.api).then(api =>
+        import('expo-secure-store').then(s => s.getItemAsync('token'))
+      );
+
+      // Get token from SecureStore
+      const authToken = await import('expo-secure-store').then(s => s.getItemAsync('token'));
+      if (!authToken) return;
+
+      const portfolio = await fetchWalletBalances(authToken);
+      if (portfolio) {
+        // Find the token balance
+        const tokenHolding = portfolio.holdings.find(
+          h => h.mint.toLowerCase() === (coinData?.contractAddress || '').toLowerCase()
+        );
+        setTokenBalance(tokenHolding?.balance || 0);
+
+        // Find SOL balance
+        const solHolding = portfolio.holdings.find(
+          h => h.mint === SOL_MINT
+        );
+        setSolBalance(solHolding?.balance || 0);
+
+
+      }
+    } catch (error) {
+      console.error('[Trade] Failed to fetch balances:', error);
     }
+  };
 
-    // Close modal - trade now done via Market tab WebView
-    setTradeModalVisible(false);
+  // Handle MAX button for sell
+  const handleMaxSell = () => {
+    setTradeAmount(tokenBalance.toString());
+  };
 
-    Alert.alert(
-      'Trade via Market Tab',
-      `To ${tradeMode === 'buy' ? 'buy' : 'sell'} ${coinData?.symbol || 'this token'}, go to the Market tab and find the token on DexScreener. Tap on it, then use the "Buy Token" button.`,
-      [
-        { text: 'Go to Market', onPress: () => router.push('/(tabs)/market') },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+  // Get current balance based on mode
+  const getCurrentBalance = () => {
+    if (tradeMode === 'buy') {
+      return solBalance;
+    }
+    return tokenBalance;
+  };
+
+  // Get input mint address (SOL for buy, token for sell)
+  const getInputMint = () => {
+    if (tradeMode === 'buy') {
+      return SOL_MINT;
+    }
+    return coinData?.contractAddress || '';
+  };
+
+  // Get output mint address (token for buy, SOL for sell)
+  const getOutputMint = () => {
+    if (tradeMode === 'buy') {
+      return coinData?.contractAddress || '';
+    }
+    return SOL_MINT;
+  };
+
+  // Execute market order via swap API
+  const executeMarketOrder = async () => {
+    try {
+      const amount = parseFloat(tradeAmount);
+      if (isNaN(amount) || amount <= 0) {
+        showAlert('Invalid Amount', 'Please enter a valid amount');
+        return;
+      }
+
+      // Check balance
+      const balance = getCurrentBalance();
+      if (amount > balance) {
+        showAlert('Insufficient Balance', 'You only have ' + balance.toFixed(6) + ' ' + (tradeMode === 'buy' ? 'SOL' : coinData?.symbol));
+        return;
+      }
+
+      setIsTrading(true);
+
+      // Get token decimals
+      const inputMint = getInputMint();
+      const outputMint = getOutputMint();
+      const inputDecimals = await getTokenDecimals(inputMint);
+
+      // Convert amount to raw units
+      const rawAmount = Math.floor(amount * Math.pow(10, inputDecimals));
+
+      // Get slippage in bps (1% = 100 bps)
+      const slippageBps = Math.floor(parseFloat(tradeSlippage || '0.5') * 100);
+
+      showSuccessToast('Getting best price...');
+
+      // Get quote from Jupiter
+      const quote = await getQuote(inputMint, outputMint, rawAmount, slippageBps);
+
+      if (!quote) {
+        throw new Error('Could not get swap quote');
+      }
+
+      // Request PIN for signing
+      const outDecimals = await getTokenDecimals(outputMint);
+      const outAmount = (parseInt(quote.outAmount) / Math.pow(10, outDecimals)).toFixed(6);
+
+      showAlert(
+        'Confirm Swap',
+        (tradeMode === 'buy' ? 'Buy ' : 'Sell ') + amount + ' ' + (tradeMode === 'buy' ? 'SOL' : coinData?.symbol) + ' for ~' + outAmount + ' ' + (tradeMode === 'buy' ? coinData?.symbol : 'SOL'),
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => setIsTrading(false) },
+          {
+            text: 'Confirm',
+            onPress: () => executeMarketSwap(quote)
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error('[Trade] Market order failed:', error);
+      showErrorToast(error.message || 'Swap failed');
+      setIsTrading(false);
+    }
+  };
+
+  // Execute the actual swap transaction
+  const executeMarketSwap = async (quote: any) => {
+    try {
+      showSuccessToast('Please enter your PIN to sign...');
+
+      // Request PIN from user
+      showPrompt(
+        'Enter PIN',
+        'Enter your wallet PIN to sign the transaction',
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => setIsTrading(false) },
+          {
+            text: 'Sign & Swap',
+            onPress: async (pin?: string) => {
+              if (!pin) {
+                showErrorToast('PIN is required');
+                setIsTrading(false);
+                return;
+              }
+
+              try {
+                showSuccessToast('Executing swap...');
+                const result = await executeSwap(quote, pin);
+
+                if (result.success) {
+                  showSuccessToast('Swap successful!');
+                  showAlert(
+                    'Swap Successful!',
+                    'Transaction: ' + result.signature?.slice(0, 20) + '...',
+                    [
+                      { text: 'View on Solscan', onPress: () => Linking.openURL(result.explorerUrl || '') },
+                      { text: 'OK', style: 'cancel' },
+                    ]
+                  );
+                  closeTradeModal();
+                } else {
+                  throw new Error(result.error || 'Swap failed');
+                }
+              } catch (error: any) {
+                console.error('[Trade] Swap execution failed:', error);
+                showErrorToast(error.message || 'Swap failed');
+                setIsTrading(false);
+              }
+            },
+          },
+        ],
+        true,
+        'Enter PIN'
+      );
+    } catch (error: any) {
+      console.error('[Trade] Market swap failed:', error);
+      showErrorToast(error.message || 'Swap failed');
+      setIsTrading(false);
+    }
+  };
+
+  // Execute limit order via trigger API
+  const executeLimitOrder = async () => {
+    try {
+      const amount = parseFloat(tradeAmount);
+      const targetPrice = parseFloat(tradeTargetPrice);
+
+      if (isNaN(amount) || amount <= 0) {
+        showAlert('Invalid Amount', 'Please enter a valid amount');
+        return;
+      }
+
+      if (isNaN(targetPrice) || targetPrice <= 0) {
+        showAlert('Invalid Target Price', 'Please enter a valid target price');
+        return;
+      }
+
+      // Check balance
+      const balance = getCurrentBalance();
+      if (amount > balance) {
+        showAlert('Insufficient Balance', 'You only have ' + balance.toFixed(6) + ' ' + (tradeMode === 'buy' ? 'SOL' : coinData?.symbol));
+        return;
+      }
+
+      setIsTrading(true);
+
+      const inputMint = getInputMint();
+      const outputMint = getOutputMint();
+      const inputDecimals = await getTokenDecimals(inputMint);
+      const outputDecimals = await getTokenDecimals(outputMint);
+
+      let makingAmount: string;
+      let takingAmount: string;
+
+      if (tradeMode === 'buy') {
+        // Buying: input is SOL, output is token
+        // makingAmount = how much SOL we're spending
+        // takingAmount = how much token we want at target price
+        const inputRaw = Math.floor(amount * Math.pow(10, inputDecimals));
+        makingAmount = inputRaw.toString();
+
+        // Calculate output based on target price
+        // For buy: targetPrice is in USD per token
+        // We need to calculate how many tokens we get for our SOL
+        const solPriceUsd = 85; // Approximate SOL price - should fetch dynamically
+        const solValueUsd = amount * solPriceUsd;
+        const expectedTokens = solValueUsd / targetPrice;
+        takingAmount = Math.floor(expectedTokens * Math.pow(10, outputDecimals)).toString();
+      } else {
+        // Selling: input is token, output is SOL
+        // makingAmount = how much token we're selling
+        // takingAmount = how much SOL we want at target price
+        const inputRaw = Math.floor(amount * Math.pow(10, inputDecimals));
+        makingAmount = inputRaw.toString();
+
+        // Calculate output based on target price
+        // For sell: targetPrice is in USD per token
+        const tokenValueUsd = amount * targetPrice;
+        const solPriceUsd = 85; // Approximate SOL price - should fetch dynamically
+        const expectedSol = tokenValueUsd / solPriceUsd;
+        takingAmount = Math.floor(expectedSol * Math.pow(10, outputDecimals)).toString();
+      }
+
+      showAlert(
+        'Confirm Limit Order',
+        'Create limit order to ' + (tradeMode === 'buy' ? 'buy' : 'sell') + ' ' + amount + ' ' + coinData?.symbol + ' at $' + targetPrice,
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => setIsTrading(false) },
+          {
+            text: 'Create Order',
+            onPress: async () => {
+              try {
+                showSuccessToast('Creating limit order...');
+
+                const order = await createTriggerOrder({
+                  inputMint,
+                  outputMint,
+                  makingAmount,
+                  takingAmount,
+                  slippageBps: Math.floor(parseFloat(tradeSlippage || '0.5') * 100),
+                });
+
+                if (!order) {
+                  throw new Error('Failed to create limit order');
+                }
+
+                // Request PIN to sign
+                showPrompt(
+                  'Enter PIN',
+                  'Enter your wallet PIN to sign the limit order',
+                  [
+                    { text: 'Cancel', style: 'cancel', onPress: () => setIsTrading(false) },
+                    {
+                      text: 'Sign & Submit',
+                      onPress: async (pin?: string) => {
+                        if (!pin) {
+                          showErrorToast('PIN is required');
+                          setIsTrading(false);
+                          return;
+                        }
+
+                        try {
+                          // Decode and sign transaction
+                          const { Keypair } = await import('@solana/web3.js');
+                          const { decryptWalletSecret } = await import('@/services/wallet');
+                          const secretKey = await decryptWalletSecret(pin);
+
+                          if (!secretKey) {
+                            throw new Error('Invalid PIN');
+                          }
+
+                          const keypair = Keypair.fromSecretKey(secretKey);
+
+                          // Deserialize transaction
+                          const { Buffer } = await import('buffer');
+                          const transactionBuffer = Buffer.from(order.transaction, 'base64');
+                          const { VersionedTransaction } = await import('@solana/web3.js');
+                          const transaction = VersionedTransaction.deserialize(transactionBuffer);
+
+                          // Sign
+                          transaction.sign([keypair]);
+
+                          // Execute
+                          const signedTx = Buffer.from(transaction.serialize()).toString('base64');
+                          const result = await executeTriggerOrder(signedTx, order.orderId);
+
+                          if (result) {
+                            showSuccessToast('Limit order created!');
+                            showAlert(
+                              'Limit Order Created!',
+                              'Your order will execute when the price reaches $' + targetPrice,
+                              [{ text: 'OK' }]
+                            );
+                            closeTradeModal();
+                          } else {
+                            throw new Error('Failed to submit order');
+                          }
+                        } catch (error: any) {
+                          console.error('[Trade] Limit order submission failed:', error);
+                          showErrorToast(error.message || 'Failed to submit order');
+                          setIsTrading(false);
+                        }
+                      },
+                    },
+                  ],
+                  true,
+                  'Enter PIN'
+                );
+              } catch (error: any) {
+                console.error('[Trade] Limit order creation failed:', error);
+                showErrorToast(error.message || 'Failed to create limit order');
+                setIsTrading(false);
+              }
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error('[Trade] Limit order failed:', error);
+      showErrorToast(error.message || 'Failed to create limit order');
+      setIsTrading(false);
+    }
+  };
+
+  const confirmTrade = async () => {
+    if (tradePriceType === 'market') {
+      await executeMarketOrder();
+    } else {
+      await executeLimitOrder();
+    }
   };
 
   // Mock data loading removed - Trades and Holders tabs now show "Coming Soon"
@@ -395,7 +742,7 @@ export default function CoinDetailsScreen() {
 
   const copyToClipboard = (_text: string) => {
     // In a real app, use Clipboard API
-    Alert.alert('Copied', 'Address copied to clipboard');
+    showAlert('Copied', 'Address copied to clipboard');
   };
 
   const openLink = (url: string) => {
@@ -422,7 +769,7 @@ export default function CoinDetailsScreen() {
       <View style={styles.loadingContainer}>
         <Text style={styles.errorTitle}>Token Not Found</Text>
         <Text style={styles.errorText}>
-          {`Could not find data for ${getDisplaySymbol()}`}
+          {'Could not find data for ' + getDisplaySymbol()}
         </Text>
         <NeonButton
           title="Go Back"
@@ -927,32 +1274,72 @@ export default function CoinDetailsScreen() {
         onRequestClose={closeTradeModal}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{tradeMode === 'buy' ? 'Buy' : 'Sell'} {coinData.symbol}</Text>
+          <View style={[styles.modalCard, isTrading && styles.modalCardDisabled]}>
+            <Text style={styles.modalTitle}>
+              {tradeMode === 'buy' ? 'Buy' : 'Sell'} {coinData.symbol}
+              {isTrading && ' (Processing...)'}
+            </Text>
 
             {/* Single-page trade form */}
             <View style={styles.modalSection}>
-              <Text style={styles.modalLabel}>Amount</Text>
-              <TextInput
-                value={tradeAmount}
-                onChangeText={setTradeAmount}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor={COLORS.textSecondary}
-                style={styles.modalInput}
-              />
+              {/* Balance Display */}
+              <View style={styles.balanceRow}>
+                <Text style={styles.balanceLabel}>
+                  {tradeMode === 'buy'
+                    ? 'SOL Balance: ' + solBalance.toFixed(4) + ' SOL'
+                    : 'Token Balance: ' + tokenBalance.toFixed(6) + ' ' + coinData.symbol}
+                </Text>
+              </View>
+
+              <Text style={styles.modalLabel}>
+                {tradeMode === 'buy'
+                  ? 'Amount (SOL)'
+                  : 'Amount (' + coinData.symbol + ')'}
+              </Text>
+              <View style={styles.amountInputContainer}>
+                <TextInput
+                  value={tradeAmount}
+                  onChangeText={setTradeAmount}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor={COLORS.textSecondary}
+                  style={[styles.modalInput, styles.amountInput]}
+                  editable={!isTrading}
+                />
+                {/* MAX button for sell mode */}
+                {tradeMode === 'sell' && (
+                  <TouchableOpacity
+                    style={styles.maxButton}
+                    onPress={handleMaxSell}
+                    disabled={isTrading}
+                  >
+                    <Text style={styles.maxButtonText}>MAX</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Direction Indicator */}
+              <View style={styles.swapDirectionRow}>
+                <Text style={styles.swapDirectionText}>
+                  {tradeMode === 'buy'
+                    ? 'Using SOL to buy ' + coinData.symbol
+                    : 'Selling ' + coinData.symbol + ' for SOL'}
+                </Text>
+              </View>
 
               <Text style={styles.modalLabel}>Price Type</Text>
               <View style={styles.segmentedRow}>
                 <TouchableOpacity
                   style={[styles.segmentedItem, tradePriceType === 'market' && styles.segmentedItemActive]}
                   onPress={() => setTradePriceType('market')}
+                  disabled={isTrading}
                 >
                   <Text style={[styles.segmentedText, tradePriceType === 'market' && styles.segmentedTextActive]}>Market</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.segmentedItem, tradePriceType === 'target' && styles.segmentedItemActive]}
                   onPress={() => setTradePriceType('target')}
+                  disabled={isTrading}
                 >
                   <Text style={[styles.segmentedText, tradePriceType === 'target' && styles.segmentedTextActive]}>Target</Text>
                 </TouchableOpacity>
@@ -968,7 +1355,14 @@ export default function CoinDetailsScreen() {
                     placeholder={formatPrice(coinData.price)}
                     placeholderTextColor={COLORS.textSecondary}
                     style={styles.modalInput}
+                    editable={!isTrading}
                   />
+                  <Text style={styles.targetHint}>
+                    'Current: ' + formatPrice(coinData.price) + ' | ',
+                    {tradeMode === 'buy'
+                      ? `Order executes when price drops to target`
+                      : `Order executes when price rises to target`}
+                  </Text>
                 </View>
               )}
 
@@ -981,11 +1375,23 @@ export default function CoinDetailsScreen() {
                   placeholder="0.5"
                   placeholderTextColor={COLORS.textSecondary}
                   style={styles.modalInput}
+                  editable={!isTrading}
                 />
               </View>
 
-              <NeonButton title={tradeMode === 'buy' ? 'Buy' : 'Sell'} onPress={confirmTrade} style={styles.modalPrimary} />
-              <NeonButton title="Cancel" variant="secondary" onPress={closeTradeModal} style={styles.modalSecondary} />
+              <NeonButton
+                title={isTrading ? 'Processing...' : (tradeMode === 'buy' ? 'Buy' : 'Sell')}
+                onPress={confirmTrade}
+                style={styles.modalPrimary}
+                disabled={isTrading}
+              />
+              <NeonButton
+                title="Cancel"
+                variant="secondary"
+                onPress={closeTradeModal}
+                style={styles.modalSecondary}
+                disabled={isTrading}
+              />
             </View>
           </View>
         </View>
@@ -1613,7 +2019,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1748,6 +2154,63 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: 60,
+  },
+  // Trading modal styles
+  modalCardDisabled: {
+    pointerEvents: 'none' as const,
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.s,
+  },
+  balanceLabel: {
+    ...FONTS.phantomMedium,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  amountInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.s,
+    marginBottom: SPACING.m,
+  },
+  amountInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  maxButton: {
+    backgroundColor: COLORS.solana + '20',
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderRadius: BORDER_RADIUS.medium,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '40',
+  },
+  maxButtonText: {
+    ...FONTS.phantomBold,
+    color: COLORS.solana,
+    fontSize: 12,
+  },
+  swapDirectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.m,
+    paddingHorizontal: SPACING.s,
+  },
+  swapDirectionText: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+  },
+  targetHint: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.s,
   },
 });
 

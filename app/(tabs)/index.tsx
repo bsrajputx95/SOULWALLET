@@ -10,12 +10,11 @@ import {
   useWindowDimensions,
   Modal,
   TextInput,
-  Alert,
   Linking,
   Pressable
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -37,6 +36,7 @@ import * as SecureStore from 'expo-secure-store';
 import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api, API_URL } from '@/services';
 import { fetchTrendingTokens } from '@/services/market';
 import { showErrorToast, validateSession } from '@/utils';
+import { useAlert } from '@/contexts/AlertContext';
 
 // Static fallback wallet data for UI display
 const DUMMY_WALLET = {
@@ -75,6 +75,7 @@ function getWellKnownTokenLogo(symbol?: string): string | undefined {
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const { showAlert } = useAlert();
   const isSmallScreen = width < 375;
 
   // Real wallet state
@@ -168,6 +169,13 @@ export default function HomeScreen() {
     loadWalletData();
   }, [loadWalletData]);
 
+  // Refresh wallet data when tab gains focus (e.g. after swap on coin detail)
+  useFocusEffect(
+    useCallback(() => {
+      loadWalletData();
+    }, [loadWalletData])
+  );
+
   const refetch = async () => {
     setRefreshing(true);
     await loadWalletData();
@@ -177,7 +185,7 @@ export default function HomeScreen() {
   // Handle wallet creation
   const handleCreateWallet = async () => {
     if (walletPin.length < 4) {
-      Alert.alert('Error', 'PIN must be at least 4 digits');
+      showAlert('Error', 'PIN must be at least 4 digits');
       return;
     }
 
@@ -185,7 +193,7 @@ export default function HomeScreen() {
     try {
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
-        Alert.alert('Error', 'Please login first');
+        showAlert('Error', 'Please login first');
         return;
       }
 
@@ -195,13 +203,13 @@ export default function HomeScreen() {
         setHasWallet(true);
         setShowCreateWalletModal(false);
         setWalletPin('');
-        Alert.alert('Success', 'Wallet created successfully!');
+        showAlert('Success', 'Wallet created successfully!');
         await loadWalletData();
       } else {
-        Alert.alert('Error', result.error || 'Failed to create wallet');
+        showAlert('Error', result.error || 'Failed to create wallet');
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to create wallet');
+      showAlert('Error', error.message || 'Failed to create wallet');
     } finally {
       setIsCreatingWallet(false);
     }
@@ -344,7 +352,7 @@ export default function HomeScreen() {
       if (!custodialWalletData?.hasWallet) {
         // Setup custodial wallet first
         const result = await setupCustodialWalletMutation.mutateAsync();
-        Alert.alert(
+        showAlert(
           'Custodial Wallet Created',
           `Deposit USDC to ${result.publicKey?.slice(0, 8)}...${result.publicKey?.slice(-8)} to start copy trading.`,
           [{ text: 'OK', onPress: () => refetchCustodialWallet() }]
@@ -354,7 +362,7 @@ export default function HomeScreen() {
 
       // Check if user has sufficient USDC balance
       if ((custodialWalletData?.usdcBalance || 0) < params.totalAmount) {
-        Alert.alert(
+        showAlert(
           'Insufficient Balance',
           `You need ${params.totalAmount} USDC but only have ${custodialWalletData?.usdcBalance?.toFixed(2) || 0} USDC.\n\nDeposit to: ${custodialWalletData?.publicKey?.slice(0, 8)}...${custodialWalletData?.publicKey?.slice(-8)}`
         );
@@ -433,11 +441,11 @@ export default function HomeScreen() {
   const stopCopyTrade = async (copyTradingId: string) => {
     try {
       await stopCopyTradeMutation.mutateAsync({ copyTradingId });
-      Alert.alert('Success', 'Stopped copy trading');
+      showAlert('Success', 'Stopped copy trading');
       // Refresh copy trading data
       loadCopyTradingData();
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to stop copy trading');
+      showAlert('Error', error.message || 'Failed to stop copy trading');
     }
   };
 
@@ -570,35 +578,35 @@ export default function HomeScreen() {
     const tp = takeProfit ? parseFloat(takeProfit) : undefined;
     const slip = maxSlippage ? parseFloat(maxSlippage) : 0.5;
     if (!selectedTraderWallet || !validateSolanaAddress(selectedTraderWallet)) {
-      Alert.alert('Error', 'Please enter a valid wallet address');
+      showAlert('Error', 'Please enter a valid wallet address');
       return false;
     }
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Invalid Input', 'Total amount must be a positive number');
+      showAlert('Invalid Input', 'Total amount must be a positive number');
       return false;
     }
     if (isNaN(perTrade) || perTrade <= 0) {
-      Alert.alert('Invalid Input', 'Amount per trade must be a positive number');
+      showAlert('Invalid Input', 'Amount per trade must be a positive number');
       return false;
     }
     if (perTrade > amount) {
-      Alert.alert('Invalid Input', 'Amount per trade cannot exceed total budget');
+      showAlert('Invalid Input', 'Amount per trade cannot exceed total budget');
       return false;
     }
     if (sl !== undefined && (isNaN(sl) || sl > 0 || sl < -100)) {
-      Alert.alert('Invalid Input', 'Stop loss must be between -100% and 0%');
+      showAlert('Invalid Input', 'Stop loss must be between -100% and 0%');
       return false;
     }
     if (tp !== undefined && (isNaN(tp) || tp <= 0 || tp > 1000)) {
-      Alert.alert('Invalid Input', 'Take profit must be between 0% and 1000%');
+      showAlert('Invalid Input', 'Take profit must be between 0% and 1000%');
       return false;
     }
     if (isNaN(slip) || slip <= 0 || slip > 50) {
-      Alert.alert('Invalid Input', 'Max slippage must be between 0% and 50%');
+      showAlert('Invalid Input', 'Max slippage must be between 0% and 50%');
       return false;
     }
     if (typeof totalBalance === 'number' && amount > totalBalance) {
-      Alert.alert('Insufficient Balance', 'Reduce total amount to fit your balance');
+      showAlert('Insufficient Balance', 'Reduce total amount to fit your balance');
       return false;
     }
     return true;
@@ -608,12 +616,12 @@ export default function HomeScreen() {
     const base = process.env.EXPO_PUBLIC_FIAT_ONRAMP_URL;
     const key = process.env.EXPO_PUBLIC_MOONPAY_KEY;
     if (!base || !key) {
-      Alert.alert('Unavailable', 'Fiat on-ramp is not configured');
+      showAlert('Unavailable', 'Fiat on-ramp is not configured');
       return;
     }
     const moonpayUrl = `${base}?apiKey=${key}&currencyCode=sol`;
     Linking.openURL(moonpayUrl).catch(() => {
-      Alert.alert('Error', 'Could not open MoonPay');
+      showAlert('Error', 'Could not open MoonPay');
     });
   };
 

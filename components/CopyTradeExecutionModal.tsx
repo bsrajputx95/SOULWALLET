@@ -6,7 +6,6 @@ import {
     TouchableOpacity,
     Modal,
     TextInput,
-    Alert,
     ActivityIndicator,
 } from 'react-native';
 import { X, AlertTriangle } from 'lucide-react-native';
@@ -15,6 +14,7 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { CopyTradeQueueItem, executeCopyTrade } from '../services/copyTrading';
 import * as SecureStore from 'expo-secure-store';
+import { useAlert } from '../contexts/AlertContext';
 
 interface CopyTradeExecutionModalProps {
     visible: boolean;
@@ -29,6 +29,7 @@ export function CopyTradeExecutionModal({
     onSuccess,
     queueItem
 }: CopyTradeExecutionModalProps) {
+    const { showAlert } = useAlert();
     const [pin, setPin] = useState('');
     const [isExecuting, setIsExecuting] = useState(false);
     const [step, setStep] = useState<'pin' | 'confirm' | 'executing'>('pin');
@@ -37,7 +38,7 @@ export function CopyTradeExecutionModal({
         if (!queueItem) return;
 
         if (pin.length < 4) {
-            Alert.alert('Error', 'PIN must be at least 4 digits');
+            showAlert('Error', 'PIN must be at least 4 digits');
             return;
         }
 
@@ -47,7 +48,7 @@ export function CopyTradeExecutionModal({
         try {
             const authToken = await SecureStore.getItemAsync('token');
             if (!authToken) {
-                Alert.alert('Error', 'Session expired');
+                showAlert('Error', 'Session expired');
                 setIsExecuting(false);
                 return;
             }
@@ -55,17 +56,17 @@ export function CopyTradeExecutionModal({
             const result = await executeCopyTrade(queueItem, pin, authToken);
 
             if (result.success) {
-                Alert.alert(
+                showAlert(
                     'Trade Executed!',
                     `Successfully copied ${queueItem.inputSymbol}\nSignature: ${result.signature?.slice(0, 8)}...`,
                     [{ text: 'OK', onPress: () => { onSuccess(); onClose(); } }]
                 );
             } else {
-                Alert.alert('Execution Failed', result.error || 'Failed to execute trade');
+                showAlert('Execution Failed', result.error || 'Failed to execute trade');
                 setStep('confirm');
             }
         } catch (error: any) {
-            Alert.alert('Error', error.message || 'Execution failed');
+            showAlert('Error', error.message || 'Execution failed');
             setStep('confirm');
         } finally {
             setIsExecuting(false);

@@ -72,14 +72,51 @@ export const getTokenList = async (): Promise<JupiterToken[]> => {
     return tokenListCache;
 };
 
+// Cache for token decimals fetched from API
+const decimalsCache: Record<string, number> = {};
+
 /**
- * Get decimals for a specific token by mint address
- * Returns 6 as default fallback if token not found
+ * Get decimals for a specific token by mint address.
+ * First checks the local fallback list, then fetches from Jupiter API.
+ * Falls back to 9 (most common for Solana SPL tokens) if API fails.
  */
 export const getTokenDecimals = async (mintAddress: string): Promise<number> => {
+    // Check fallback list first
     const tokens = await getTokenList();
     const token = tokens.find(t => t.address === mintAddress);
-    return token?.decimals ?? 6; // Default to 6 if not found
+    if (token) return token.decimals;
+
+    // Check cache
+    if (decimalsCache[mintAddress] !== undefined) {
+        return decimalsCache[mintAddress];
+    }
+
+    // Fetch from Jupiter token API
+    try {
+        console.log(`[Swap] Fetching decimals for unknown token: ${mintAddress}`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const response = await fetch(
+            `https://api.jup.ag/tokens/v1/token/${mintAddress}`,
+            { signal: controller.signal }
+        );
+        clearTimeout(timeout);
+
+        if (response.ok) {
+            const data = await response.json();
+            const decimals = data.decimals ?? 9;
+            decimalsCache[mintAddress] = decimals;
+            console.log(`[Swap] Token ${mintAddress} has ${decimals} decimals`);
+            return decimals;
+        }
+    } catch (err: any) {
+        console.warn(`[Swap] Failed to fetch decimals for ${mintAddress}:`, err.message);
+    }
+
+    // Default to 9 (most Solana SPL tokens use 9 decimals)
+    console.log(`[Swap] Using default 9 decimals for ${mintAddress}`);
+    decimalsCache[mintAddress] = 9;
+    return 9;
 };
 
 export const searchToken = async (query: string): Promise<JupiterToken[]> => {
@@ -118,7 +155,7 @@ export const getQuote = async (
     signal?: AbortSignal
 ): Promise<SwapQuote | null> => {
     console.log(`[Swap] Getting quote via backend: ${inputMint} -> ${outputMint}, amount: ${amount}`);
-    
+
     try {
         const params = new URLSearchParams({
             inputMint,
@@ -126,17 +163,17 @@ export const getQuote = async (
             amount: amount.toString(),
             slippageBps: slippageBps.toString(),
         });
-        
+
         const options: RequestInit = {};
         if (signal) {
             options.signal = signal;
         }
-        
+
         const data = await api.request<SwapQuote>(`/swap/quote?${params}`, options);
-        
+
         console.log(`[Swap] Quote success: ${data.outAmount} out`);
         return data;
-    } catch (e: any) { 
+    } catch (e: any) {
         console.error(`[Swap] Quote failed:`, e.message || e);
         throw new Error(e.message || 'Quote failed. Please try again.');
     }
@@ -154,7 +191,7 @@ export const executeSwap = async (
         }
 
         console.log('[Swap] Getting swap transaction from backend...');
-        
+
         // Use Ultra API flow - get transaction with taker
         const swapData = await api.request<{ swapTransaction: string; requestId: string }>('/swap/transaction', {
             method: 'POST',
@@ -166,7 +203,7 @@ export const executeSwap = async (
                 slippageBps: quote.slippageBps,
             }),
         });
-        
+
         console.log(`[Swap] Got transaction from backend`);
 
         const { swapTransaction, requestId } = swapData;
@@ -187,7 +224,7 @@ export const executeSwap = async (
 
         console.log('[Swap] Signing transaction...');
         transaction.sign([keypair]);
-        
+
         const signedTx = Buffer.from(transaction.serialize()).toString('base64');
 
         // Clear keypair from memory
@@ -198,7 +235,7 @@ export const executeSwap = async (
         keypair = null;
 
         console.log('[Swap] Executing swap via backend...');
-        
+
         // Execute via Ultra API
         const result = await api.request<{ status: string; signature: string; error?: string }>('/swap/execute', {
             method: 'POST',

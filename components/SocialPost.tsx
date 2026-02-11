@@ -171,6 +171,33 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     ? content.substring(0, MAX_CONTENT_LENGTH) + '...'
     : content;
 
+  // Render content with highlighted hashtags and @mentions
+  const renderFormattedContent = useCallback((text: string) => {
+    // Split by #hashtags and @mentions, keeping the delimiters
+    const parts = text.split(/(#[\w]+|@[\w]+)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith('#')) {
+        return (
+          <Text key={index} style={styles.hashtag}>
+            {part}
+          </Text>
+        );
+      }
+      if (part.startsWith('@')) {
+        return (
+          <Text
+            key={index}
+            style={styles.mention}
+            onPress={() => router.push(`/profile/${part.slice(1)}`)}
+          >
+            {part}
+          </Text>
+        );
+      }
+      return <Text key={index}>{part}</Text>;
+    });
+  }, [router]);
+
 
 
 
@@ -256,7 +283,7 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
           accessibilityHint="Double tap to view full post"
         >
           <Text style={styles.content} numberOfLines={isExpanded ? undefined : 6}>
-            {displayContent}
+            {renderFormattedContent(displayContent)}
           </Text>
           {shouldTruncate && (
             <Pressable onPress={() => setIsExpanded(true)}>

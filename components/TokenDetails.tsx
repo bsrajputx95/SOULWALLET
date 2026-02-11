@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Image, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { X, TrendingUp, TrendingDown, Copy } from 'lucide-react-native';
 
@@ -66,173 +66,175 @@ export default function TokenDetails({
   const hasPriceData = safeToken.price > 0;
 
   return (
-    <View style={styles.overlay}>
-      <View style={styles.container}>
-        <LinearGradient
-          colors={[COLORS.cardBackground, COLORS.background]}
-          style={styles.gradient}
-        >
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.tokenInfo}>
-              {safeToken.logoURI ? (
-                <Image source={{ uri: safeToken.logoURI }} style={styles.tokenLogo} />
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent={true}
+      onRequestClose={onClose}
+    >
+      <View style={styles.overlay}>
+        <View style={styles.container}>
+          <LinearGradient
+            colors={[COLORS.cardBackground, COLORS.background]}
+            style={styles.gradient}
+          >
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={styles.tokenInfo}>
+                {safeToken.logoURI ? (
+                  <Image source={{ uri: safeToken.logoURI }} style={styles.tokenLogo} />
+                ) : (
+                  <View style={styles.tokenLogoPlaceholder}>
+                    <Text style={styles.tokenLogoText}>{safeToken.symbol[0]}</Text>
+                  </View>
+                )}
+                <View style={styles.tokenTextInfo}>
+                  <Text style={styles.tokenSymbol}>{safeToken.symbol}</Text>
+                  <Text style={styles.tokenName}>{safeToken.name}</Text>
+                </View>
+              </View>
+              <Pressable onPress={onClose} style={styles.closeButton}>
+                <X size={24} color={COLORS.textPrimary} />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+              {/* Price Section */}
+              {hasPriceData ? (
+                <View style={styles.priceSection}>
+                  <Text style={styles.price}>
+                    ${safeToken.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                  </Text>
+                  <View style={styles.changeContainer}>
+                    {isPositive ? (
+                      <TrendingUp size={16} color={COLORS.success} />
+                    ) : (
+                      <TrendingDown size={16} color={COLORS.error} />
+                    )}
+                    <Text style={[styles.changeText, { color: isPositive ? COLORS.success : COLORS.error }]}>
+                      ${Math.abs(safeToken.change24h).toFixed(2)} ({Math.abs(safeToken.changePercent24h).toFixed(2)}%)
+                    </Text>
+                  </View>
+                </View>
               ) : (
-                <View style={styles.tokenLogoPlaceholder}>
-                  <Text style={styles.tokenLogoText}>{safeToken.symbol[0]}</Text>
+                <View style={styles.priceSection}>
+                  <Text style={styles.noDataText}>Price data unavailable</Text>
                 </View>
               )}
-              <View style={styles.tokenTextInfo}>
-                <Text style={styles.tokenSymbol}>{safeToken.symbol}</Text>
-                <Text style={styles.tokenName}>{safeToken.name}</Text>
-              </View>
-            </View>
-            <Pressable onPress={onClose} style={styles.closeButton}>
-              <X size={24} color={COLORS.textPrimary} />
-            </Pressable>
-          </View>
 
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-            {/* Price Section */}
-            {hasPriceData ? (
-              <View style={styles.priceSection}>
-                <Text style={styles.price}>
-                  ${safeToken.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
-                </Text>
-                <View style={styles.changeContainer}>
-                  {isPositive ? (
-                    <TrendingUp size={16} color={COLORS.success} />
-                  ) : (
-                    <TrendingDown size={16} color={COLORS.error} />
-                  )}
-                  <Text style={[styles.changeText, { color: isPositive ? COLORS.success : COLORS.error }]}>
-                    ${Math.abs(safeToken.change24h).toFixed(2)} ({Math.abs(safeToken.changePercent24h).toFixed(2)}%)
-                  </Text>
+              {/* Holdings Section */}
+              {safeToken.balance > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Your Holdings</Text>
+                  <View style={styles.holdingRow}>
+                    <Text style={styles.holdingLabel}>Balance</Text>
+                    <Text style={styles.holdingValue}>
+                      {safeToken.balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {safeToken.symbol}
+                    </Text>
+                  </View>
+                  <View style={styles.holdingRow}>
+                    <Text style={styles.holdingLabel}>Value</Text>
+                    <Text style={styles.holdingValue}>
+                      ${safeToken.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            ) : (
-              <View style={styles.priceSection}>
-                <Text style={styles.noDataText}>Price data unavailable</Text>
-              </View>
-            )}
+              )}
 
-            {/* Holdings Section */}
-            {safeToken.balance > 0 && (
+              {/* Market Stats */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Your Holdings</Text>
-                <View style={styles.holdingRow}>
-                  <Text style={styles.holdingLabel}>Balance</Text>
-                  <Text style={styles.holdingValue}>
-                    {safeToken.balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {safeToken.symbol}
-                  </Text>
-                </View>
-                <View style={styles.holdingRow}>
-                  <Text style={styles.holdingLabel}>Value</Text>
-                  <Text style={styles.holdingValue}>
-                    ${safeToken.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </Text>
-                </View>
+                <Text style={styles.sectionTitle}>Market Statistics</Text>
+                {safeToken.marketCap ? (
+                  <View style={styles.statRow}>
+                    <Text style={styles.statLabel}>Market Cap</Text>
+                    <Text style={styles.statValue}>${formatNumber(safeToken.marketCap)}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.statRow}>
+                    <Text style={styles.statLabel}>Market Cap</Text>
+                    <Text style={styles.statValue}>-</Text>
+                  </View>
+                )}
+                {safeToken.volume24h ? (
+                  <View style={styles.statRow}>
+                    <Text style={styles.statLabel}>24h Volume</Text>
+                    <Text style={styles.statValue}>${formatNumber(safeToken.volume24h)}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.statRow}>
+                    <Text style={styles.statLabel}>24h Volume</Text>
+                    <Text style={styles.statValue}>-</Text>
+                  </View>
+                )}
+                {safeToken.supply ? (
+                  <View style={styles.statRow}>
+                    <Text style={styles.statLabel}>Circulating Supply</Text>
+                    <Text style={styles.statValue}>{formatNumber(safeToken.supply, 0)} {safeToken.symbol}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.statRow}>
+                    <Text style={styles.statLabel}>Circulating Supply</Text>
+                    <Text style={styles.statValue}>-</Text>
+                  </View>
+                )}
               </View>
-            )}
 
-            {/* Market Stats */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Market Statistics</Text>
-              {safeToken.marketCap ? (
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Market Cap</Text>
-                  <Text style={styles.statValue}>${formatNumber(safeToken.marketCap)}</Text>
-                </View>
-              ) : (
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Market Cap</Text>
-                  <Text style={styles.statValue}>-</Text>
-                </View>
-              )}
-              {safeToken.volume24h ? (
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>24h Volume</Text>
-                  <Text style={styles.statValue}>${formatNumber(safeToken.volume24h)}</Text>
-                </View>
-              ) : (
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>24h Volume</Text>
-                  <Text style={styles.statValue}>-</Text>
+              {/* Contract Address */}
+              {safeToken.address && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Contract Address</Text>
+                  <View style={styles.addressContainer}>
+                    <Text style={styles.addressText} numberOfLines={1}>
+                      {safeToken.address}
+                    </Text>
+                    <Pressable style={styles.copyButton}>
+                      <Copy size={16} color={COLORS.solana} />
+                    </Pressable>
+                  </View>
                 </View>
               )}
-              {safeToken.supply ? (
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Circulating Supply</Text>
-                  <Text style={styles.statValue}>{formatNumber(safeToken.supply, 0)} {safeToken.symbol}</Text>
-                </View>
-              ) : (
-                <View style={styles.statRow}>
-                  <Text style={styles.statLabel}>Circulating Supply</Text>
-                  <Text style={styles.statValue}>-</Text>
-                </View>
-              )}
-            </View>
 
-            {/* Contract Address */}
-            {safeToken.address && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Contract Address</Text>
-                <View style={styles.addressContainer}>
-                  <Text style={styles.addressText} numberOfLines={1}>
-                    {safeToken.address}
-                  </Text>
-                  <Pressable style={styles.copyButton}>
-                    <Copy size={16} color={COLORS.solana} />
-                  </Pressable>
-                </View>
+              {/* Action Buttons */}
+              <View style={styles.actionButtons}>
+                {onBuy && (
+                  <NeonButton
+                    title="Buy"
+                    onPress={onBuy}
+                    style={styles.actionButton}
+                    variant="primary"
+                  />
+                )}
+                {onSell && (
+                  <NeonButton
+                    title="Sell"
+                    onPress={onSell}
+                    style={styles.actionButton}
+                    variant="secondary"
+                  />
+                )}
+                {onSwap && (
+                  <NeonButton
+                    title="Swap"
+                    onPress={onSwap}
+                    style={styles.actionButton}
+                    variant="outline"
+                  />
+                )}
               </View>
-            )}
-
-            {/* Action Buttons */}
-            <View style={styles.actionButtons}>
-              {onBuy && (
-                <NeonButton
-                  title="Buy"
-                  onPress={onBuy}
-                  style={styles.actionButton}
-                  variant="primary"
-                />
-              )}
-              {onSell && (
-                <NeonButton
-                  title="Sell"
-                  onPress={onSell}
-                  style={styles.actionButton}
-                  variant="secondary"
-                />
-              )}
-              {onSwap && (
-                <NeonButton
-                  title="Swap"
-                  onPress={onSwap}
-                  style={styles.actionButton}
-                  variant="outline"
-                />
-              )}
-            </View>
-          </ScrollView>
-        </LinearGradient>
+            </ScrollView>
+          </LinearGradient>
+        </View>
       </View>
-    </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000,
   },
   container: {
     width: '90%',

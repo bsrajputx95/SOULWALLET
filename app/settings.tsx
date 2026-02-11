@@ -5,7 +5,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Alert,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,12 +26,13 @@ import * as SecureStore from 'expo-secure-store';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, ErrorBoundary, NeonButton } from '@/components';
-import { 
-  getLocalPublicKey, 
-  clearWalletData, 
+import {
+  getLocalPublicKey,
+  clearWalletData,
   api,
 } from '@/services';
 import { validateSession } from '@/utils';
+import { useAlert } from '@/contexts/AlertContext';
 
 interface UserProfile {
   id: string;
@@ -45,6 +45,7 @@ interface UserProfile {
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { showAlert } = useAlert();
 
   // State for user profile and wallet
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -111,7 +112,7 @@ export default function SettingsScreen() {
   };
 
   const handleRemoveWallet = () => {
-    Alert.alert(
+    showAlert(
       '⚠️ Remove Wallet',
       'Are you sure you want to remove this wallet? Make sure you have backed up your private key. This action cannot be undone.',
       [
@@ -122,9 +123,9 @@ export default function SettingsScreen() {
           onPress: async () => {
             try {
               await deleteWallet();
-              Alert.alert('Success', 'Wallet removed successfully.');
+              showAlert('Success', 'Wallet removed successfully.');
             } catch (error: any) {
-              Alert.alert('Error', error?.message || 'Failed to remove wallet.');
+              showAlert('Error', error?.message || 'Failed to remove wallet.');
             }
           },
         },
@@ -135,9 +136,9 @@ export default function SettingsScreen() {
   const copyToClipboard = async (text: string, label: string) => {
     try {
       await Clipboard.setStringAsync(text);
-      Alert.alert('Copied!', `${label} copied to clipboard`);
+      showAlert('Copied!', `${label} copied to clipboard`);
     } catch (error) {
-      Alert.alert('Error', 'Failed to copy to clipboard');
+      showAlert('Error', 'Failed to copy to clipboard');
     }
   };
 
@@ -155,7 +156,7 @@ export default function SettingsScreen() {
       } else {
         // Fallback: copy to clipboard and show alert
         await Clipboard.setStringAsync(shareData.text);
-        Alert.alert(
+        showAlert(
           'Wallet Address Copied',
           'Your wallet address has been copied to clipboard',
           [{ text: 'OK' }]
@@ -166,7 +167,7 @@ export default function SettingsScreen() {
       // Fallback: copy to clipboard
       try {
         await Clipboard.setStringAsync(walletData.publicKey);
-        Alert.alert(
+        showAlert(
           'Wallet Address Copied',
           'Your wallet address has been copied to clipboard',
           [{ text: 'OK' }]
@@ -208,193 +209,193 @@ export default function SettingsScreen() {
           contentContainerStyle={styles.contentContainer}
           showsVerticalScrollIndicator={false}
         >
-        {/* User Info */}
-        <NeonCard style={styles.userCard}>
-          <View style={styles.userInfo}>
-            <Text style={styles.userName}>@{user?.username || 'user'}</Text>
-            <Text style={styles.userEmail}>{user?.email || 'user@example.com'}</Text>
-          </View>
-        </NeonCard>
-
-        {/* Gating: prompt to create/import if no wallet */}
-        {!hasWallet && (
-          <NeonCard style={styles.warningCard}>
-            <Text style={styles.warningTitle}>Wallet Not Connected</Text>
-            <Text style={styles.warningText}>
-              Add or import a wallet to access wallet settings and support.
-            </Text>
-            <View style={{ marginTop: SPACING.s }}>
-              <NeonButton
-                title="Create Wallet"
-                onPress={() => router.push('/solana-setup')}
-                icon={<Wallet size={20} color={COLORS.textPrimary} />}
-              />
-              <NeonButton
-                title="Import Wallet"
-                onPress={() => router.push('/solana-setup')}
-                style={{ marginTop: SPACING.s }}
-                icon={<Key size={20} color={COLORS.textPrimary} />}
-              />
+          {/* User Info */}
+          <NeonCard style={styles.userCard}>
+            <View style={styles.userInfo}>
+              <Text style={styles.userName}>@{user?.username || 'user'}</Text>
+              <Text style={styles.userEmail}>{user?.email || 'user@example.com'}</Text>
             </View>
           </NeonCard>
-        )}
 
-        {/* Wallet Needs Reconnection */}
-        {needsReconnect && (
-          <NeonCard style={[styles.warningCard, { backgroundColor: COLORS.warning + '10', borderColor: COLORS.warning + '30' }]}>
-            <Text style={[styles.warningTitle, { color: COLORS.warning }]}>⚠️ Wallet Needs Reconnection</Text>
-            <Text style={styles.warningText}>
-              Your wallet address is saved, but you need to import your private key to access transactions.
-            </Text>
-            <View style={{ marginTop: SPACING.s }}>
-              <NeonButton
-                title="Import Private Key"
-                onPress={() => router.push('/solana-setup')}
-                icon={<Key size={20} color={COLORS.textPrimary} />}
-              />
-            </View>
-          </NeonCard>
-        )}
-
-        {/* Wallet Section */}
-        {hasWallet && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Wallet Information</Text>
-
-            <NeonCard style={styles.walletCard}>
-              <View style={styles.walletItem}>
-                <View style={styles.walletItemHeader}>
-                  <Wallet size={20} color={COLORS.solana} />
-                  <Text style={styles.walletItemTitle}>Public Key</Text>
-                  <TouchableOpacity
-                    onPress={() => copyToClipboard(walletData.publicKey, 'Public key')}
-                    style={styles.copyButton}
-                  >
-                    <Copy size={16} color={COLORS.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.walletAddress}>
-                  {walletData.publicKey.length > 16
-                    ? `${walletData.publicKey.slice(0, 8)}...${walletData.publicKey.slice(-8)}`
-                    : walletData.publicKey}
-                </Text>
-              </View>
-
-              <View style={styles.divider} />
-
-              <View style={styles.walletItem}>
-                <View style={styles.walletItemHeader}>
-                  <Key size={20} color={COLORS.error} />
-                  <Text style={styles.walletItemTitle}>Private Key</Text>
-                  <View style={styles.walletActions}>
-                    <TouchableOpacity
-                      onPress={() => setShowPrivateKey(!showPrivateKey)}
-                      style={styles.eyeButton}
-                    >
-                      {showPrivateKey ? (
-                        <EyeOff size={16} color={COLORS.textSecondary} />
-                      ) : (
-                        <Eye size={16} color={COLORS.textSecondary} />
-                      )}
-                    </TouchableOpacity>
-                    {showPrivateKey && (
-                      <TouchableOpacity
-                        onPress={() => copyToClipboard(walletData.privateKey, 'Private key')}
-                        style={styles.copyButton}
-                      >
-                        <Copy size={16} color={COLORS.textSecondary} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-                <Text style={styles.walletAddress}>
-                  {showPrivateKey
-                    ? (walletData.privateKey.length > 16
-                      ? `${walletData.privateKey.slice(0, 8)}...${walletData.privateKey.slice(-8)}`
-                      : walletData.privateKey)
-                    : '•••••••••••••••••••••••••••••••••••••••••••••••••••••'}
-                </Text>
-              </View>
-
-              <View style={styles.divider} />
-
-              <View style={styles.walletItem}>
-                <View style={styles.walletItemHeader}>
-                  <Key size={20} color={COLORS.binance} />
-                  <Text style={styles.walletItemTitle}>Recovery Phrase</Text>
-                  <View style={styles.walletActions}>
-                    <TouchableOpacity
-                      onPress={() => setShowMnemonic(!showMnemonic)}
-                      style={styles.eyeButton}
-                    >
-                      {showMnemonic ? (
-                        <EyeOff size={16} color={COLORS.textSecondary} />
-                      ) : (
-                        <Eye size={16} color={COLORS.textSecondary} />
-                      )}
-                    </TouchableOpacity>
-                    {showMnemonic && (
-                      <TouchableOpacity
-                        onPress={() => copyToClipboard(walletData.mnemonic, 'Recovery phrase')}
-                        style={styles.copyButton}
-                      >
-                        <Copy size={16} color={COLORS.textSecondary} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-                <Text style={styles.walletAddress}>
-                  {showMnemonic
-                    ? walletData.mnemonic
-                    : '•••• •••• •••• •••• •••• •••• •••• •••• •••• •••• •••• ••••'}
-                </Text>
+          {/* Gating: prompt to create/import if no wallet */}
+          {!hasWallet && (
+            <NeonCard style={styles.warningCard}>
+              <Text style={styles.warningTitle}>Wallet Not Connected</Text>
+              <Text style={styles.warningText}>
+                Add or import a wallet to access wallet settings and support.
+              </Text>
+              <View style={{ marginTop: SPACING.s }}>
+                <NeonButton
+                  title="Create Wallet"
+                  onPress={() => router.push('/solana-setup')}
+                  icon={<Wallet size={20} color={COLORS.textPrimary} />}
+                />
+                <NeonButton
+                  title="Import Wallet"
+                  onPress={() => router.push('/solana-setup')}
+                  style={{ marginTop: SPACING.s }}
+                  icon={<Key size={20} color={COLORS.textPrimary} />}
+                />
               </View>
             </NeonCard>
+          )}
 
-            <NeonButton
-              title="Share Wallet Address"
-              onPress={shareWallet}
-              style={styles.shareButton}
-              icon={<Share2 size={20} color={COLORS.textPrimary} />}
-            />
+          {/* Wallet Needs Reconnection */}
+          {needsReconnect && (
+            <NeonCard style={[styles.warningCard, { backgroundColor: COLORS.warning + '10', borderColor: COLORS.warning + '30' }]}>
+              <Text style={[styles.warningTitle, { color: COLORS.warning }]}>⚠️ Wallet Needs Reconnection</Text>
+              <Text style={styles.warningText}>
+                Your wallet address is saved, but you need to import your private key to access transactions.
+              </Text>
+              <View style={{ marginTop: SPACING.s }}>
+                <NeonButton
+                  title="Import Private Key"
+                  onPress={() => router.push('/solana-setup')}
+                  icon={<Key size={20} color={COLORS.textPrimary} />}
+                />
+              </View>
+            </NeonCard>
+          )}
+
+          {/* Wallet Section */}
+          {hasWallet && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Wallet Information</Text>
+
+              <NeonCard style={styles.walletCard}>
+                <View style={styles.walletItem}>
+                  <View style={styles.walletItemHeader}>
+                    <Wallet size={20} color={COLORS.solana} />
+                    <Text style={styles.walletItemTitle}>Public Key</Text>
+                    <TouchableOpacity
+                      onPress={() => copyToClipboard(walletData.publicKey, 'Public key')}
+                      style={styles.copyButton}
+                    >
+                      <Copy size={16} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.walletAddress}>
+                    {walletData.publicKey.length > 16
+                      ? `${walletData.publicKey.slice(0, 8)}...${walletData.publicKey.slice(-8)}`
+                      : walletData.publicKey}
+                  </Text>
+                </View>
+
+                <View style={styles.divider} />
+
+                <View style={styles.walletItem}>
+                  <View style={styles.walletItemHeader}>
+                    <Key size={20} color={COLORS.error} />
+                    <Text style={styles.walletItemTitle}>Private Key</Text>
+                    <View style={styles.walletActions}>
+                      <TouchableOpacity
+                        onPress={() => setShowPrivateKey(!showPrivateKey)}
+                        style={styles.eyeButton}
+                      >
+                        {showPrivateKey ? (
+                          <EyeOff size={16} color={COLORS.textSecondary} />
+                        ) : (
+                          <Eye size={16} color={COLORS.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                      {showPrivateKey && (
+                        <TouchableOpacity
+                          onPress={() => copyToClipboard(walletData.privateKey, 'Private key')}
+                          style={styles.copyButton}
+                        >
+                          <Copy size={16} color={COLORS.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                  <Text style={styles.walletAddress}>
+                    {showPrivateKey
+                      ? (walletData.privateKey.length > 16
+                        ? `${walletData.privateKey.slice(0, 8)}...${walletData.privateKey.slice(-8)}`
+                        : walletData.privateKey)
+                      : '•••••••••••••••••••••••••••••••••••••••••••••••••••••'}
+                  </Text>
+                </View>
+
+                <View style={styles.divider} />
+
+                <View style={styles.walletItem}>
+                  <View style={styles.walletItemHeader}>
+                    <Key size={20} color={COLORS.binance} />
+                    <Text style={styles.walletItemTitle}>Recovery Phrase</Text>
+                    <View style={styles.walletActions}>
+                      <TouchableOpacity
+                        onPress={() => setShowMnemonic(!showMnemonic)}
+                        style={styles.eyeButton}
+                      >
+                        {showMnemonic ? (
+                          <EyeOff size={16} color={COLORS.textSecondary} />
+                        ) : (
+                          <Eye size={16} color={COLORS.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                      {showMnemonic && (
+                        <TouchableOpacity
+                          onPress={() => copyToClipboard(walletData.mnemonic, 'Recovery phrase')}
+                          style={styles.copyButton}
+                        >
+                          <Copy size={16} color={COLORS.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                  <Text style={styles.walletAddress}>
+                    {showMnemonic
+                      ? walletData.mnemonic
+                      : '•••• •••• •••• •••• •••• •••• •••• •••• •••• •••• •••• ••••'}
+                  </Text>
+                </View>
+              </NeonCard>
+
+              <NeonButton
+                title="Share Wallet Address"
+                onPress={shareWallet}
+                style={styles.shareButton}
+                icon={<Share2 size={20} color={COLORS.textPrimary} />}
+              />
+              <TouchableOpacity
+                style={[styles.supportItem, { borderColor: COLORS.error + '30', borderWidth: 1, marginTop: SPACING.s }]}
+                onPress={handleRemoveWallet}
+                disabled={walletLoading}
+              >
+                <Trash2 size={20} color={COLORS.error} />
+                <Text style={[styles.supportText, { color: COLORS.error }]}>Remove Wallet</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+
+
+          {/* Privacy & Data Section - Available to all authenticated users */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Privacy & Data</Text>
             <TouchableOpacity
-              style={[styles.supportItem, { borderColor: COLORS.error + '30', borderWidth: 1, marginTop: SPACING.s }]}
-              onPress={handleRemoveWallet}
-              disabled={walletLoading}
+              style={styles.supportItem}
+              onPress={() => router.push('/account')}
             >
-              <Trash2 size={20} color={COLORS.error} />
-              <Text style={[styles.supportText, { color: COLORS.error }]}>Remove Wallet</Text>
+              <Shield size={20} color={COLORS.textSecondary} />
+              <Text style={styles.supportText}>Account & Privacy Settings</Text>
+              <ExternalLink size={16} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
-        )}
 
 
 
-        {/* Privacy & Data Section - Available to all authenticated users */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Privacy & Data</Text>
-          <TouchableOpacity
-            style={styles.supportItem}
-            onPress={() => router.push('/account')}
-          >
-            <Shield size={20} color={COLORS.textSecondary} />
-            <Text style={styles.supportText}>Account & Privacy Settings</Text>
-            <ExternalLink size={16} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
-
-
-
-        {/* Warning */}
-        {hasWallet && (
-          <NeonCard style={styles.warningCard}>
-            <Text style={styles.warningTitle}>⚠️ Security Warning</Text>
-            <Text style={styles.warningText}>
-              Never share your private key or recovery phrase with anyone. Soul Wallet will never ask for this information.
-            </Text>
-          </NeonCard>
-        )}
-      </ScrollView>
+          {/* Warning */}
+          {hasWallet && (
+            <NeonCard style={styles.warningCard}>
+              <Text style={styles.warningTitle}>⚠️ Security Warning</Text>
+              <Text style={styles.warningText}>
+                Never share your private key or recovery phrase with anyone. Soul Wallet will never ask for this information.
+              </Text>
+            </NeonCard>
+          )}
+        </ScrollView>
       </ErrorBoundary>
     </SafeAreaView>
   );

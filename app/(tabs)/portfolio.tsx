@@ -9,12 +9,11 @@ import {
   RefreshControl,
   Modal,
   Image,
-  Alert,
   useWindowDimensions,
   Linking
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Settings, ChevronRight, X, TrendingUp, ShoppingCart, DollarSign } from 'lucide-react-native';
+import { Settings, ChevronRight, X, TrendingUp } from 'lucide-react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -23,6 +22,7 @@ import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, NeonButton, NeonInput, QueueStatusBanner, PortfolioSkeleton, ErrorBoundary } from '@/components';
 import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, api } from '@/services';
 import { validateSession } from '@/utils';
+import { useAlert } from '@/contexts/AlertContext';
 
 // Static dummy types for pure UI mode
 type Token = {
@@ -35,6 +35,7 @@ type Token = {
   price: number;
   change24h: number;
   value: number;
+  contractAddress?: string;
 };
 type CopiedWallet = {
   id: string;
@@ -59,7 +60,7 @@ type ChartType = 'line' | 'candle';
 // Token Logo component with fallback
 const TokenLogo: React.FC<{ token: Token }> = ({ token }) => {
   const [failed, setFailed] = useState(false);
-  
+
   if (!token.logo || failed) {
     return (
       <View style={styles.tokenLogoPlaceholder}>
@@ -67,10 +68,10 @@ const TokenLogo: React.FC<{ token: Token }> = ({ token }) => {
       </View>
     );
   }
-  
+
   return (
-    <Image 
-      source={{ uri: token.logo }} 
+    <Image
+      source={{ uri: token.logo }}
       style={styles.tokenLogo}
       onError={() => setFailed(true)}
     />
@@ -79,6 +80,7 @@ const TokenLogo: React.FC<{ token: Token }> = ({ token }) => {
 
 export default function PortfolioScreen() {
   const router = useRouter();
+  const { showAlert } = useAlert();
 
   // Real user profile state
   const [user, setUser] = useState<any>(null);
@@ -145,7 +147,7 @@ export default function PortfolioScreen() {
         }
         if (__DEV__) console.log('Holdings count:', portfolio.holdings.length);
         if (__DEV__) console.log('Holdings:', portfolio.holdings.map((h: Holding) => ({ symbol: h.symbol, balance: h.balance, usdValue: h.usdValue, price: h.price })));
-        
+
         // Transform holdings to Token type with real price data
         setTokens(portfolio.holdings.map((h: Holding, i: number) => ({
           id: String(i + 1),
@@ -156,6 +158,7 @@ export default function PortfolioScreen() {
           price: h.price || (h.balance > 0 ? h.usdValue / h.balance : 0),
           change24h: h.change24h || 0,
           value: h.usdValue,
+          contractAddress: h.mint || '',
           ...(h.logo ? { logo: h.logo } : {}),
         })));
       } else {
@@ -184,7 +187,7 @@ export default function PortfolioScreen() {
       }
       // Show error toast on refresh
       if (isRefresh) {
-        Alert.alert('Error', 'Failed to fetch wallet data. Please try again.');
+        showAlert('Error', 'Failed to fetch wallet data. Please try again.');
       }
     }
   }, []);
@@ -214,7 +217,7 @@ export default function PortfolioScreen() {
   );
 
   const updateCopiedWallet = async (_id: string, _updates: any, _totp: string) => {
-    Alert.alert('🚧 Demo Mode', 'Copy trade update is simulated.');
+    showAlert('🚧 Demo Mode', 'Copy trade update is simulated.');
     return true;
   };
   const isUpdatingCopyTrade = false;
@@ -260,10 +263,6 @@ export default function PortfolioScreen() {
   }>>([]);
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('24h');
   const [chartType, setChartType] = useState<ChartType>('line');
-  const [selectedToken, setSelectedToken] = useState<Token | null>(null);
-  const [tradeMode, setTradeMode] = useState<'buy' | 'sell' | null>(null);
-  const [tradeAmount, setTradeAmount] = useState('');
-  const [tradeError, setTradeError] = useState<string | undefined>(undefined);
   const [selectedWallet, setSelectedWallet] = useState<CopiedWallet | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editAmountPerTrade, setEditAmountPerTrade] = useState('');
@@ -501,10 +500,22 @@ export default function PortfolioScreen() {
                       key={token.id}
                       style={styles.tokenItem}
                       onPress={() => {
-                        setSelectedToken(token);
-                        setTradeMode(null);
-                        setTradeAmount('');
-                        setTradeError(undefined);
+                        // Navigate to token details page like market tab
+                        router.push({
+                          pathname: `/coin/${token.symbol.toLowerCase()}`,
+                          params: {
+                            symbol: token.symbol,
+                            name: token.name,
+                            logo: token.logo || '',
+                            price: String(token.price || 0),
+                            change: String(token.change24h || 0),
+                            contractAddress: token.contractAddress || '',
+                            banner: '',
+                            marketCap: '0',
+                            volume24h: '0',
+                            liquidity: '0',
+                          }
+                        } as any);
                       }}
                     >
                       <View style={styles.tokenRow}>
@@ -740,7 +751,7 @@ export default function PortfolioScreen() {
                     const url = `https://solscan.io/account/${user.walletAddress}#txs`;
                     Linking.openURL(url);
                   } else {
-                    Alert.alert('No Wallet', 'Connect a wallet to view activity');
+                    showAlert('No Wallet', 'Connect a wallet to view activity');
                   }
                 }}
               >
@@ -751,136 +762,6 @@ export default function PortfolioScreen() {
           )}
         </ScrollView>
       </ErrorBoundary>
-
-      {/* Token Details Modal */}
-      <Modal
-        visible={selectedToken !== null}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => { setSelectedToken(null); setTradeMode(null); setTradeAmount(''); setTradeError(undefined); }}
-      >
-        <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
-          <View
-            style={[
-              styles.modalContainer,
-              {
-                borderTopLeftRadius: 0,
-                borderTopRightRadius: 0,
-                borderRadius: BORDER_RADIUS.large,
-                alignSelf: 'center',
-                width: Math.min(width * 0.9, 560),
-                maxHeight: '66%'
-              }
-            ]}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{selectedToken?.symbol} Details</Text>
-              <Pressable onPress={() => { setSelectedToken(null); setTradeMode(null); setTradeAmount(''); setTradeError(undefined); }}>
-                <X size={24} color={COLORS.textPrimary} />
-              </Pressable>
-            </View>
-
-            <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={true}>
-              <View style={styles.tokenDetailsHeader}>
-                <Text style={styles.tokenDetailsSymbol}>{selectedToken?.symbol}</Text>
-                <Text style={styles.tokenDetailsName}>{selectedToken?.name}</Text>
-                <Text style={styles.tokenDetailsPrice}>
-                  ${selectedToken?.price && selectedToken.price < 0.01
-                    ? selectedToken.price.toFixed(6)
-                    : selectedToken?.price.toFixed(2)}
-                </Text>
-                <Text style={[
-                  styles.tokenDetailsChange,
-                  { color: (selectedToken?.change24h || 0) >= 0 ? COLORS.success : COLORS.error }
-                ]}>
-                  {(selectedToken?.change24h || 0) >= 0 ? '+' : ''}{selectedToken?.change24h.toFixed(1)}%
-                </Text>
-              </View>
-
-              <View style={styles.chartPlaceholder}>
-                <TrendingUp size={48} color={COLORS.textSecondary} />
-                <Text style={styles.chartPlaceholderText}>Price Chart</Text>
-              </View>
-
-              <View style={styles.tokenActions}>
-                <Pressable
-                  style={styles.tokenActionButton}
-                  onPress={() => {
-                    setTradeMode('buy');
-                    setTradeAmount('');
-                    setTradeError(undefined);
-                  }}
-                >
-                  <ShoppingCart size={20} color={COLORS.success} />
-                  <Text style={styles.tokenActionText}>Buy</Text>
-                </Pressable>
-
-                <Pressable
-                  style={styles.tokenActionButton}
-                  onPress={() => {
-                    setTradeMode('sell');
-                    setTradeAmount('');
-                    setTradeError(undefined);
-                  }}
-                >
-                  <DollarSign size={20} color={COLORS.error} />
-                  <Text style={styles.tokenActionText}>Sell</Text>
-                </Pressable>
-              </View>
-
-              {tradeMode && (
-                <View style={styles.tradeContainer}>
-                  <Text style={styles.tradeTitle}>
-                    {tradeMode === 'buy' ? 'Buy' : 'Sell'} {selectedToken?.symbol}
-                  </Text>
-                  <NeonInput
-                    label="Amount"
-                    placeholder="0.00"
-                    value={tradeAmount}
-                    onChangeText={(text) => { setTradeAmount(text); setTradeError(undefined); }}
-                    keyboardType="numeric"
-                    error={tradeError || ''}
-                  />
-                  <View style={styles.tradeActions}>
-                    <NeonButton
-                      title="Cancel"
-                      variant="outline"
-                      onPress={() => { setTradeMode(null); setTradeAmount(''); setTradeError(undefined); }}
-                      style={{ flex: 1 }}
-                    />
-                    <NeonButton
-                      title={tradeMode === 'buy' ? 'Confirm Buy' : 'Confirm Sell'}
-                      variant={tradeMode === 'buy' ? 'secondary' : 'danger'}
-                      onPress={() => {
-                        const value = parseFloat(tradeAmount);
-                        if (!tradeAmount || isNaN(value) || value <= 0) {
-                          setTradeError('Enter a valid amount');
-                          return;
-                        }
-                        // Trade now done via Market tab WebView
-                        setSelectedToken(null);
-                        setTradeMode(null);
-                        setTradeAmount('');
-
-                        Alert.alert(
-                          'Trade via Market Tab',
-                          `To ${tradeMode === 'buy' ? 'buy' : 'sell'} ${selectedToken?.symbol || 'this token'}, go to Market tab and use DexScreener.`,
-                          [
-                            { text: 'Go to Market', onPress: () => router.push('/(tabs)/market') },
-                            { text: 'Cancel', style: 'cancel' },
-                          ]
-                        );
-                      }}
-                      style={{ flex: 1, marginLeft: SPACING.m }}
-                    />
-                  </View>
-                </View>
-              )}
-
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
 
       {/* Edit Copied Wallet Modal */}
       <Modal
@@ -982,7 +863,7 @@ export default function PortfolioScreen() {
 
                       const success = await updateCopiedWallet(selectedWallet.id, updates, '');
                       if (success) {
-                        Alert.alert('Success', 'Copy trade settings updated');
+                        showAlert('Success', 'Copy trade settings updated');
                         setSelectedWallet(null);
                       }
                     }
@@ -1466,72 +1347,6 @@ const styles = StyleSheet.create({
   },
   modalScrollContent: {
     paddingBottom: SPACING.l
-  },
-  tokenDetailsHeader: {
-    alignItems: 'center',
-    marginBottom: SPACING.l
-  },
-  tokenDetailsSymbol: {
-    ...FONTS.orbitronBold,
-    color: COLORS.textPrimary,
-    fontSize: 24,
-    marginBottom: SPACING.xs
-  },
-  tokenDetailsName: {
-    ...FONTS.sfProRegular,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-    marginBottom: SPACING.s
-  },
-  tokenDetailsPrice: {
-    ...FONTS.monospace,
-    color: COLORS.textPrimary,
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: SPACING.xs
-  },
-  tokenDetailsChange: {
-    ...FONTS.monospace,
-    fontSize: 16,
-    fontWeight: '700'
-  },
-  tokenActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: SPACING.l
-  },
-  tokenActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    paddingVertical: SPACING.m,
-    paddingHorizontal: SPACING.l,
-    borderRadius: BORDER_RADIUS.medium,
-    minWidth: 120,
-    justifyContent: 'center'
-  },
-  tokenActionText: {
-    ...FONTS.orbitronMedium,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    marginLeft: SPACING.s
-  },
-  tradeContainer: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginTop: SPACING.m,
-  },
-  tradeTitle: {
-    ...FONTS.orbitronBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginBottom: SPACING.s,
-    textAlign: 'center',
-  },
-  tradeActions: {
-    flexDirection: 'row',
-    marginTop: SPACING.s,
   },
   editWalletTitle: {
     ...FONTS.orbitronBold,

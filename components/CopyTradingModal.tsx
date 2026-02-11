@@ -6,7 +6,6 @@ import {
     TouchableOpacity,
     Modal,
     TextInput,
-    Alert,
     ScrollView,
     Image,
 } from 'react-native';
@@ -17,6 +16,7 @@ import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { createCopyConfig } from '../services/copyTrading';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
+import { useAlert } from '../contexts/AlertContext';
 
 interface CopyTradingModalProps {
     visible: boolean;
@@ -29,8 +29,9 @@ interface CopyTradingModalProps {
 }
 
 export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalProps) {
-    const [copyAmount, setCopyAmount] = useState('1000');
-    const [amountPerTrade, setAmountPerTrade] = useState('100');
+    const { showAlert } = useAlert();
+    const [copyAmount, setCopyAmount] = useState('5');
+    const [amountPerTrade, setAmountPerTrade] = useState('0.5');
     const [stopLoss, setStopLoss] = useState('10');
     const [takeProfit, setTakeProfit] = useState('30');
     const [maxSlippage, setMaxSlippage] = useState('0.5');
@@ -45,7 +46,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
 
     const handleStartCopying = async () => {
         if (!effectiveWalletAddress || effectiveWalletAddress.trim().length === 0) {
-            Alert.alert('Error', 'Please enter a wallet address to copy.');
+            showAlert('Error', 'Please enter a wallet address to copy.');
             return;
         }
 
@@ -53,7 +54,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
         const perTrade = parseFloat(amountPerTrade) || 100;
 
         if (perTrade > totalBudget) {
-            Alert.alert('Error', 'Amount per trade cannot exceed total budget');
+            showAlert('Error', 'Amount per trade cannot exceed total budget');
             return;
         }
 
@@ -62,7 +63,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
 
             const authToken = await SecureStore.getItemAsync('token');
             if (!authToken) {
-                Alert.alert('Error', 'Please login first');
+                showAlert('Error', 'Please login first');
                 return;
             }
 
@@ -77,7 +78,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
 
             if (result.success) {
                 showSuccessToast('Copy trading configured!');
-                Alert.alert('Success', `You are now copying ${trader?.username || 'this trader'}`);
+                showAlert('Success', `You are now copying ${trader?.username || 'this trader'}`);
                 onClose();
             } else {
                 showErrorToast(result.error || 'Failed to start copy trading');
@@ -144,12 +145,12 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                         )}
 
                         <View style={styles.inputSection}>
-                            <Text style={styles.inputLabel}>Total Budget (USDC)</Text>
+                            <Text style={styles.inputLabel}>Total Budget (SOL)</Text>
                             <View style={styles.inputContainer}>
-                                <Text style={styles.inputPrefix}>$</Text>
+                                <Text style={styles.inputPrefix}>◎</Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="1000"
+                                    placeholder="5"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={copyAmount}
                                     onChangeText={setCopyAmount}
@@ -159,12 +160,12 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                         </View>
 
                         <View style={styles.inputSection}>
-                            <Text style={styles.inputLabel}>Amount per Trade (USDC)</Text>
+                            <Text style={styles.inputLabel}>Amount per Trade (SOL)</Text>
                             <View style={styles.inputContainer}>
-                                <Text style={styles.inputPrefix}>$</Text>
+                                <Text style={styles.inputPrefix}>◎</Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="100"
+                                    placeholder="0.5"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={amountPerTrade}
                                     onChangeText={setAmountPerTrade}
@@ -229,9 +230,10 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                                 Automatically exit when trader exits
                             </Text>
                         </TouchableOpacity>
+                    </ScrollView>
 
-
-
+                    {/* Fixed footer button - outside ScrollView so it never gets clipped */}
+                    <View style={styles.footerButton}>
                         <TouchableOpacity
                             style={[
                                 styles.startCopyButton,
@@ -244,7 +246,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                                 {isPending ? 'Starting...' : 'Start Copying'}
                             </Text>
                         </TouchableOpacity>
-                    </ScrollView>
+                    </View>
                 </View>
             </View>
         </Modal >
@@ -263,8 +265,8 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderRadius: BORDER_RADIUS.large,
         width: '100%',
-        maxHeight: '75%',
-        paddingBottom: SPACING.l,
+        maxHeight: '85%',
+        overflow: 'hidden',
     },
     modalHeader: {
         flexDirection: 'row',
@@ -308,6 +310,14 @@ const styles = StyleSheet.create({
     modalContent: {
         paddingHorizontal: SPACING.l,
         paddingTop: SPACING.m,
+        paddingBottom: SPACING.m,
+    },
+    footerButton: {
+        paddingHorizontal: SPACING.l,
+        paddingBottom: SPACING.l,
+        paddingTop: SPACING.s,
+        borderTopWidth: 1,
+        borderTopColor: COLORS.background,
     },
     modalDescription: {
         ...FONTS.phantomRegular,
@@ -391,7 +401,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderWidth: 1,
         borderColor: COLORS.success + '30',
-        marginBottom: SPACING.s,
     },
     startCopyButtonDisabled: {
         backgroundColor: COLORS.cardBackground,

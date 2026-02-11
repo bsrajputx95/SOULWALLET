@@ -5,7 +5,6 @@ import {
   Text,
   TouchableOpacity,
   TextInput,
-  Alert,
   ScrollView,
   ActivityIndicator,
   Dimensions,
@@ -24,6 +23,7 @@ import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { VALIDATION } from '../constants/validation';
 import { createWallet, importWallet, decryptWalletSecret } from '../services/wallet';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
+import { useAlert } from '../contexts/AlertContext';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
@@ -51,6 +51,7 @@ const getResponsiveFontSize = (size: number) => {
 
 export default function SolanaSetupScreen() {
   const router = useRouter();
+  const { showAlert } = useAlert();
 
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'create' | 'import' | null>(null);
@@ -64,20 +65,20 @@ export default function SolanaSetupScreen() {
   const handleCreateWallet = async () => {
     try {
       if (!walletPassword || walletPassword !== confirmWalletPassword) {
-        Alert.alert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
+        showAlert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
         return;
       }
       // Numeric-only check
       if (!VALIDATION.PIN.PATTERN.test(walletPassword)) {
-        Alert.alert('Error', 'PIN must contain only digits (0-9)');
+        showAlert('Error', 'PIN must contain only digits (0-9)');
         return;
       }
       if (walletPassword.length < VALIDATION.PIN.MIN_LENGTH) {
-        Alert.alert('Error', `PIN must be at least ${VALIDATION.PIN.MIN_LENGTH} digits`);
+        showAlert('Error', `PIN must be at least ${VALIDATION.PIN.MIN_LENGTH} digits`);
         return;
       }
       if (walletPassword.length > VALIDATION.PIN.MAX_LENGTH) {
-        Alert.alert('Error', `PIN must not exceed ${VALIDATION.PIN.MAX_LENGTH} digits`);
+        showAlert('Error', `PIN must not exceed ${VALIDATION.PIN.MAX_LENGTH} digits`);
         return;
       }
 
@@ -86,7 +87,7 @@ export default function SolanaSetupScreen() {
       // Get auth token from SecureStore
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
-        Alert.alert('Error', 'Please log in first');
+        showAlert('Error', 'Please log in first');
         setIsLoading(false);
         return;
       }
@@ -107,7 +108,7 @@ export default function SolanaSetupScreen() {
           });
           setMode('create');
           showSuccessToast('Wallet created successfully!');
-          Alert.alert('✅ Wallet Created!', 'Save your private key in a secure location.');
+          showAlert('✅ Wallet Created!', 'Save your private key in a secure location.');
         } else {
           // Could not decrypt - show success but hide copy controls
           setGeneratedWallet({
@@ -116,15 +117,15 @@ export default function SolanaSetupScreen() {
           });
           setMode('create');
           showSuccessToast('Wallet created successfully!');
-          Alert.alert('✅ Wallet Created!', 'Wallet created. Private key is securely stored.');
+          showAlert('✅ Wallet Created!', 'Wallet created. Private key is securely stored.');
         }
       } else {
         showErrorToast(result.error || 'Failed to create wallet');
-        Alert.alert('Error', result.error || 'Failed to create wallet');
+        showAlert('Error', result.error || 'Failed to create wallet');
       }
     } catch (error: any) {
       setIsLoading(false);
-      Alert.alert('Error', error.message || 'Failed to create wallet');
+      showAlert('Error', error.message || 'Failed to create wallet');
       if (__DEV__) console.error('Create wallet error:', error);
     }
   };
@@ -132,31 +133,31 @@ export default function SolanaSetupScreen() {
   const handleImportWallet = async () => {
     const trimmedKey = privateKey.trim();
     if (!trimmedKey) {
-      Alert.alert('Error', 'Please enter a private key');
+      showAlert('Error', 'Please enter a private key');
       return;
     }
     // Base58 format validation
     const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
     if (!base58Regex.test(trimmedKey)) {
-      Alert.alert('Error', '❌ Invalid private key format (must be base58)');
+      showAlert('Error', '❌ Invalid private key format (must be base58)');
       return;
     }
     // Length check (Solana private keys are typically 64-88 chars in base58)
     if (trimmedKey.length < 64 || trimmedKey.length > 88) {
-      Alert.alert('Error', 'Invalid private key length');
+      showAlert('Error', 'Invalid private key length');
       return;
     }
     if (!walletPassword || walletPassword !== confirmWalletPassword) {
-      Alert.alert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
+      showAlert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
       return;
     }
     // Numeric-only check
     if (!/^\d+$/.test(walletPassword)) {
-      Alert.alert('Error', 'PIN must contain only digits (0-9)');
+      showAlert('Error', 'PIN must contain only digits (0-9)');
       return;
     }
     if (walletPassword.length < 4 || walletPassword.length > 6) {
-      Alert.alert('Error', 'PIN must be 4-6 digits');
+      showAlert('Error', 'PIN must be 4-6 digits');
       return;
     }
 
@@ -166,7 +167,7 @@ export default function SolanaSetupScreen() {
       // Get auth token from SecureStore
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
-        Alert.alert('Error', 'Please log in first');
+        showAlert('Error', 'Please log in first');
         setIsLoading(false);
         return;
       }
@@ -178,17 +179,17 @@ export default function SolanaSetupScreen() {
 
       if (result.success) {
         showSuccessToast('Wallet imported!');
-        Alert.alert('✅ Wallet Imported', 'Wallet imported and linked successfully!', [
+        showAlert('✅ Wallet Imported', 'Wallet imported and linked successfully!', [
           { text: 'OK', onPress: () => router.back() }
         ]);
       } else {
         showErrorToast(result.error || 'Import failed');
-        Alert.alert('Error', result.error || 'Failed to import wallet');
+        showAlert('Error', result.error || 'Failed to import wallet');
       }
     } catch (error: any) {
       setIsLoading(false);
       showErrorToast('Invalid private key');
-      Alert.alert('Error', 'Invalid private key. Please check and try again.');
+      showAlert('Error', 'Invalid private key. Please check and try again.');
 
     }
   };
@@ -197,14 +198,14 @@ export default function SolanaSetupScreen() {
     if (generatedWallet && generatedWallet.secretKey) {
       const privateKeyString = bs58.encode(generatedWallet.secretKey);
       await Clipboard.setStringAsync(privateKeyString);
-      Alert.alert('Copied!', 'Private key copied to clipboard');
+      showAlert('Copied!', 'Private key copied to clipboard');
     } else {
-      Alert.alert('Error', 'Private key not available');
+      showAlert('Error', 'Private key not available');
     }
   };
 
   const handleFinishSetup = () => {
-    Alert.alert(
+    showAlert(
       'Wallet Created!',
       'Your Solana wallet has been created successfully. Make sure to save your private key in a secure location.',
       [{ text: 'OK', onPress: () => router.back() }]

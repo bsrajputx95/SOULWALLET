@@ -6,8 +6,8 @@ import {
     TouchableOpacity,
     Modal,
     useWindowDimensions,
-    Alert,
     Share,
+    ScrollView,
 } from 'react-native';
 import { X, Copy, Share2, Check } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -15,6 +15,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { getLocalPublicKey } from '../services/wallet';
+import { useAlert } from '../contexts/AlertContext';
 
 interface ReceiveModalProps {
     visible: boolean;
@@ -25,8 +26,9 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
     visible,
     onClose,
 }) => {
+    const { showAlert } = useAlert();
     const { height } = useWindowDimensions();
-    const modalHeight = height * 0.65;
+    const modalHeight = height * 0.80;
 
     const [publicKey, setPublicKey] = useState<string>('');
     const [copied, setCopied] = useState(false);
@@ -60,7 +62,7 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
                 title: 'My Wallet Address',
             });
         } catch (error) {
-            Alert.alert('Error', 'Failed to share address');
+            showAlert('Error', 'Failed to share address');
         }
     };
 
@@ -81,76 +83,78 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
                 <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
 
                 <View style={[styles.modalContainer, { maxHeight: modalHeight }]}>
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <Text style={styles.title}>Receive</Text>
-                        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                            <X size={24} color={COLORS.textSecondary} />
-                        </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.content}>
-                        {/* QR Code */}
-                        <View style={styles.qrCard}>
-                            <View style={styles.qrContainer}>
-                                {walletAddress ? (
-                                    <QRCode
-                                        value={walletAddress}
-                                        size={180}
-                                        backgroundColor={COLORS.background}
-                                        color={COLORS.textPrimary}
-                                    />
-                                ) : (
-                                    <Text style={styles.noWalletText}>No wallet connected</Text>
-                                )}
-                            </View>
-                            <Text style={styles.qrHint}>
-                                Scan this QR code to receive tokens
-                            </Text>
+                    <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={styles.scrollContent}>
+                        {/* Header */}
+                        <View style={styles.header}>
+                            <Text style={styles.title}>Receive</Text>
+                            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                                <X size={24} color={COLORS.textSecondary} />
+                            </TouchableOpacity>
                         </View>
 
-                        {/* Wallet Address */}
-                        <View style={styles.addressCard}>
-                            <Text style={styles.addressLabel}>Your Wallet Address</Text>
-                            <Text style={styles.addressFull} selectable>
-                                {walletAddress || '--'}
-                            </Text>
-                            <Text style={styles.addressShort}>
-                                {formatAddress(walletAddress)}
-                            </Text>
-                        </View>
-
-                        {/* Action Buttons */}
-                        <View style={styles.buttonRow}>
-                            <TouchableOpacity
-                                style={[styles.actionButton, copied && styles.actionButtonSuccess]}
-                                onPress={handleCopyAddress}
-                            >
-                                {copied ? (
-                                    <Check size={20} color={COLORS.success} />
-                                ) : (
-                                    <Copy size={20} color={COLORS.textPrimary} />
-                                )}
-                                <Text style={[styles.actionButtonText, copied && styles.actionButtonTextSuccess]}>
-                                    {copied ? 'Copied!' : 'Copy'}
+                        <View style={styles.content}>
+                            {/* QR Code */}
+                            <View style={styles.qrCard}>
+                                <View style={styles.qrContainer}>
+                                    {walletAddress ? (
+                                        <QRCode
+                                            value={walletAddress}
+                                            size={180}
+                                            backgroundColor={COLORS.background}
+                                            color={COLORS.textPrimary}
+                                        />
+                                    ) : (
+                                        <Text style={styles.noWalletText}>No wallet connected</Text>
+                                    )}
+                                </View>
+                                <Text style={styles.qrHint}>
+                                    Scan this QR code to receive tokens
                                 </Text>
-                            </TouchableOpacity>
+                            </View>
 
-                            <TouchableOpacity
-                                style={styles.actionButton}
-                                onPress={handleShareAddress}
-                            >
-                                <Share2 size={20} color={COLORS.textPrimary} />
-                                <Text style={styles.actionButtonText}>Share</Text>
-                            </TouchableOpacity>
-                        </View>
+                            {/* Wallet Address */}
+                            <View style={styles.addressCard}>
+                                <Text style={styles.addressLabel}>Your Wallet Address</Text>
+                                <Text style={styles.addressFull} selectable>
+                                    {walletAddress || '--'}
+                                </Text>
+                                <Text style={styles.addressShort}>
+                                    {formatAddress(walletAddress)}
+                                </Text>
+                            </View>
 
-                        {/* Network Info */}
-                        <View style={styles.networkInfo}>
-                            <Text style={styles.networkLabel}>Network</Text>
-                            <Text style={styles.networkValue}>Solana Mainnet</Text>
+                            {/* Action Buttons */}
+                            <View style={styles.buttonRow}>
+                                <TouchableOpacity
+                                    style={[styles.actionButton, copied && styles.actionButtonSuccess]}
+                                    onPress={handleCopyAddress}
+                                >
+                                    {copied ? (
+                                        <Check size={20} color={COLORS.success} />
+                                    ) : (
+                                        <Copy size={20} color={COLORS.textPrimary} />
+                                    )}
+                                    <Text style={[styles.actionButtonText, copied && styles.actionButtonTextSuccess]}>
+                                        {copied ? 'Copied!' : 'Copy'}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={styles.actionButton}
+                                    onPress={handleShareAddress}
+                                >
+                                    <Share2 size={20} color={COLORS.textPrimary} />
+                                    <Text style={styles.actionButtonText}>Share</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Network Info */}
+                            <View style={styles.networkInfo}>
+                                <Text style={styles.networkLabel}>Network</Text>
+                                <Text style={styles.networkValue}>Solana Mainnet</Text>
+                            </View>
                         </View>
-                    </View>
+                    </ScrollView>
                 </View>
             </View>
         </Modal>
@@ -175,9 +179,12 @@ const styles = StyleSheet.create({
     modalContainer: {
         backgroundColor: COLORS.background,
         borderRadius: BORDER_RADIUS.large,
-        paddingBottom: 30,
         width: '100%',
         maxWidth: 400,
+        overflow: 'hidden',
+    },
+    scrollContent: {
+        paddingBottom: 20,
     },
     header: {
         flexDirection: 'row',
@@ -196,14 +203,16 @@ const styles = StyleSheet.create({
         padding: SPACING.xs,
     },
     content: {
-        padding: SPACING.m,
+        paddingHorizontal: SPACING.m,
+        paddingTop: SPACING.s,
+        paddingBottom: SPACING.s,
         alignItems: 'center',
     },
     qrCard: {
         alignItems: 'center',
-        padding: SPACING.l,
+        padding: SPACING.s,
         width: '100%',
-        marginBottom: SPACING.m,
+        marginBottom: SPACING.s,
     },
     qrContainer: {
         padding: SPACING.m,
@@ -225,8 +234,8 @@ const styles = StyleSheet.create({
     },
     addressCard: {
         width: '100%',
-        padding: SPACING.m,
-        marginBottom: SPACING.m,
+        padding: SPACING.s,
+        marginBottom: SPACING.s,
     },
     addressLabel: {
         ...FONTS.phantomMedium,
@@ -249,7 +258,9 @@ const styles = StyleSheet.create({
     buttonRow: {
         flexDirection: 'row',
         gap: SPACING.m,
-        marginBottom: SPACING.m,
+        marginBottom: SPACING.s,
+        width: '100%',
+        justifyContent: 'center',
     },
     actionButton: {
         flexDirection: 'row',

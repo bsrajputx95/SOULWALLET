@@ -7,7 +7,6 @@ import {
     TouchableOpacity,
     Platform,
     Image,
-    Alert,
     StatusBar,
     Keyboard,
     ScrollView,
@@ -23,12 +22,14 @@ import { COLORS } from '@/constants';
 import { NeonButton, NeonDivider, SocialButton, GlowingText } from '@/components';
 import { api } from '@/services';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAlert } from '@/contexts/AlertContext';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
 
 export default function LoginNewScreen() {
     const router = useRouter();
     const { setToken } = useAuth();
+    const { showAlert } = useAlert();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -89,7 +90,7 @@ export default function LoginNewScreen() {
         if (Platform.OS !== 'web') {
             void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         }
-        Alert.alert(
+        showAlert(
             'Coming Soon',
             `${provider} login will be available in a future update.`,
             [{ text: 'OK' }]

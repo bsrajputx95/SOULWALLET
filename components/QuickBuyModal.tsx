@@ -7,10 +7,10 @@ import {
     TextInput,
     Pressable,
     ActivityIndicator,
-    Alert,
     ScrollView,
     Image,
     TouchableOpacity,
+    Linking,
 } from 'react-native';
 import { X, Search, AlertCircle, ShoppingCart, Shield, ExternalLink } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,9 +18,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { getQuote, executeSwap, getTokenList, JupiterToken } from '../services/swap';
-import { API_URL } from '../services/api';
+import { api } from '../services/api';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
-import TokenDetails from './TokenDetails';
+import { useAlert } from '../contexts/AlertContext';
 
 interface QuickBuyModalProps {
     visible: boolean;
@@ -43,6 +43,7 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const SOL_DECIMALS = 9;
 
 export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, onSuccess }) => {
+    const { showAlert } = useAlert();
     const [tokenAddress, setTokenAddress] = useState('');
     const [solAmount, setSolAmount] = useState('');
     const [slippage, setSlippage] = useState('1');
@@ -55,12 +56,10 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
     const [showPinInput, setShowPinInput] = useState(false);
     const [pin, setPin] = useState('');
     const [jupiterTokens, setJupiterTokens] = useState<JupiterToken[]>([]);
-    const [showTokenDetails, setShowTokenDetails] = useState(false);
-    const [tokenMetadata, setTokenMetadata] = useState<any>(null);
 
     // Load Jupiter token list on mount
     useEffect(() => {
-        getTokenList().then(setJupiterTokens).catch(() => {});
+        getTokenList().then(setJupiterTokens).catch(() => { });
     }, []);
 
     // Reset state when modal opens
@@ -89,14 +88,14 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
             try {
                 const amountInLamports = Math.floor(parseFloat(solAmount) * Math.pow(10, SOL_DECIMALS));
                 const slippageBps = Math.round(parseFloat(slippage || '1') * 100);
-                
+
                 const quoteResult = await getQuote(
                     SOL_MINT,
                     tokenInfo.address,
                     amountInLamports,
                     slippageBps
                 );
-                
+
                 setQuote(quoteResult);
             } catch (err: any) {
                 setQuote(null);
@@ -118,44 +117,36 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
     const fetchTokenFromJupiter = async (addr: string): Promise<TokenInfo | null> => {
         try {
             console.log(`[QuickBuy] Fetching token info for: ${addr}`);
-            
+
             // Try Jupiter Tokens V2 API
-            const response = await fetch(`${API_URL}/tokens/search?query=${addr}`);
-            console.log(`[QuickBuy] API response status: ${response.status}`);
-            
-            if (!response.ok) {
-                console.log('[QuickBuy] API response not OK');
-                return null;
-            }
-            
-            const data = await response.json();
+            const data = await api.get<{ tokens: any[] }>(`/tokens/search?query=${addr}`);
             console.log(`[QuickBuy] API data:`, JSON.stringify(data).substring(0, 500));
-            
+
             if (!data.tokens || data.tokens.length === 0) {
                 console.log('[QuickBuy] No tokens found');
                 return null;
             }
-            
+
             // Find exact match - Jupiter uses 'id' for address
             const token = data.tokens.find((t: any) => t.id === addr || t.address === addr);
             console.log(`[QuickBuy] Found token:`, token ? JSON.stringify(token).substring(0, 300) : 'null');
-            
+
             if (!token) return null;
-            
-            // Store full metadata for TokenDetails
-            setTokenMetadata(token);
-            
-            // Jupiter API uses 'id' for address and 'icon' for logo
+
+            // Token metadata stored for display
+
+            // Backend maps Jupiter's icon to logoURI, also check image field
+            const logoUrl = token.logoURI || token.icon || token.image;
             const tokenInfo = {
                 address: token.id || token.address,
                 symbol: token.symbol,
                 name: token.name,
                 decimals: token.decimals || 9,
-                logoURI: token.icon || token.logoURI,
+                logoURI: logoUrl,
                 verified: token.verified || false,
                 source: 'jupiter' as const,
             };
-            
+
             console.log(`[QuickBuy] Returning token info:`, tokenInfo);
             return tokenInfo;
         } catch (err: any) {
@@ -164,50 +155,14 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
         }
     };
 
-    // Open token details modal
+    // Open DexScreener for this token
     const handleTokenPress = () => {
-        if (tokenInfo) {
-            setShowTokenDetails(true);
+        if (tokenInfo?.address) {
+            const dexScreenerUrl = `https://dexscreener.com/solana/${tokenInfo.address}`;
+            Linking.openURL(dexScreenerUrl).catch(() => {
+                showErrorToast('Could not open DexScreener');
+            });
         }
-    };
-
-    // Get token details data for modal
-    const getTokenDetailsData = () => {
-        if (!tokenInfo) return undefined;
-        
-        // Use metadata from Jupiter API if available
-        if (tokenMetadata) {
-            return {
-                symbol: tokenMetadata.symbol || tokenInfo.symbol,
-                name: tokenMetadata.name || tokenInfo.name,
-                price: tokenMetadata.usdPrice || tokenMetadata.price || 0,
-                change24h: tokenMetadata.priceChange24h || 0,
-                changePercent24h: tokenMetadata.priceChange24h || 0,
-                balance: 0,
-                value: 0,
-                marketCap: tokenMetadata.marketCap || tokenMetadata.mcap || tokenMetadata.fdv || 0,
-                volume24h: tokenMetadata.volume24h || 0,
-                supply: tokenMetadata.circSupply || tokenMetadata.totalSupply || 0,
-                address: tokenInfo.address,
-                logoURI: tokenMetadata.icon || tokenInfo.logoURI,
-            };
-        }
-        
-        // Fallback to basic info
-        return {
-            symbol: tokenInfo.symbol,
-            name: tokenInfo.name,
-            price: 0,
-            change24h: 0,
-            changePercent24h: 0,
-            balance: 0,
-            value: 0,
-            marketCap: 0,
-            volume24h: 0,
-            supply: 0,
-            address: tokenInfo.address,
-            logoURI: tokenInfo.logoURI,
-        };
     };
 
     // Verify token - check local list first, then Jupiter API
@@ -242,7 +197,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                 setIsVerifying(false);
                 return;
             }
-            
+
             // Tier 2: Fetch from Jupiter API
             const jupiterToken = await fetchTokenFromJupiter(addr);
             if (jupiterToken) {
@@ -250,7 +205,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                 setIsVerifying(false);
                 return;
             }
-            
+
             // Tier 3: Unknown token - still allow but with warning
             setTokenInfo({
                 address: addr,
@@ -323,8 +278,8 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                 setShowPinInput(false);
                 onClose();
                 onSuccess?.();
-                
-                Alert.alert(
+
+                showAlert(
                     'Swap Successful!',
                     `You swapped ${solAmount} SOL for ${tokenInfo?.symbol}`,
                     [
@@ -410,7 +365,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
 
                         {/* Token Info Card - Tappable */}
                         {tokenInfo && (
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 style={[
                                     styles.tokenCard,
                                     !tokenInfo.verified && styles.tokenCardUnverified
@@ -420,8 +375,8 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                             >
                                 <View style={styles.tokenInfo}>
                                     {tokenInfo.logoURI ? (
-                                        <Image 
-                                            source={{ uri: tokenInfo.logoURI }} 
+                                        <Image
+                                            source={{ uri: tokenInfo.logoURI }}
                                             style={styles.tokenLogo}
                                             resizeMode="cover"
                                         />
@@ -627,19 +582,6 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                     </ScrollView>
                 </View>
             </View>
-
-            {/* Token Details - Inside Modal but separate overlay */}
-            {showTokenDetails && tokenInfo && (
-                <TokenDetails
-                    token={getTokenDetailsData()!}
-                    visible={showTokenDetails}
-                    onClose={() => setShowTokenDetails(false)}
-                    onBuy={() => {
-                        setShowTokenDetails(false);
-                        // Already in buy flow
-                    }}
-                />
-            )}
         </Modal>
     );
 };

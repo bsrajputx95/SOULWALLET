@@ -8,6 +8,7 @@ import { View, StyleSheet, Platform } from "react-native";
 import { COLORS } from "@/constants";
 import { ErrorBoundary, WebPreviewBanner } from "@/components";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { AlertProvider } from "@/contexts/AlertContext";
 import { performanceMonitor, trackBundleSize } from "@/utils";
 import { registerBackgroundTasks } from "@/services";
 
@@ -102,13 +103,15 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <View style={styles.container}>
-            {/* Web Preview Banner - shows only on web platform */}
-            <WebPreviewBanner />
-            <RootLayoutNav />
-          </View>
-        </GestureHandlerRootView>
+        <AlertProvider>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <View style={styles.container}>
+              {/* Web Preview Banner - shows only on web platform */}
+              <WebPreviewBanner />
+              <RootLayoutNav />
+            </View>
+          </GestureHandlerRootView>
+        </AlertProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

@@ -29,6 +29,7 @@ export default function MarketScreen() {
   const [tokens, setTokens] = useState<MarketToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [usingMockData, setUsingMockData] = useState(false);
 
   // Responsive padding logic like Home screen
   const isSmallScreen = width < 375;
@@ -42,21 +43,150 @@ export default function MarketScreen() {
   // Loading state for skeleton - only show on initial cold start
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
+  // Mock tokens for development fallback when backend is unavailable
+  const mockTokens: MarketToken[] = [
+    {
+      address: 'So11111111111111111111111111111111111111112',
+      symbol: 'SOL',
+      name: 'Solana',
+      price: 162.34,
+      priceChange24h: 2.15,
+      volume24h: 3200000000,
+      marketCap: 72000000000,
+      liquidity: 1800000000,
+      logo: 'https://cryptologos.cc/logos/solana-sol-logo.png',
+      banner: '',
+    },
+    {
+      address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      price: 1.00,
+      priceChange24h: 0.01,
+      volume24h: 4500000000,
+      marketCap: 42000000000,
+      liquidity: 2500000000,
+      logo: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
+      banner: '',
+    },
+    {
+      address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+      symbol: 'BONK',
+      name: 'Bonk',
+      price: 0.00001234,
+      priceChange24h: 15.5,
+      volume24h: 85000000,
+      marketCap: 750000000,
+      liquidity: 12000000,
+      logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
+      banner: '',
+    },
+    {
+      address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
+      symbol: 'WIF',
+      name: 'dogwifhat',
+      price: 0.85,
+      priceChange24h: -5.2,
+      volume24h: 45000000,
+      marketCap: 850000000,
+      liquidity: 8000000,
+      logo: 'https://bafkreifryvyui4gshimmxl26uec3ol3kummjnuljb34vt7gl7cgml3hnrq.ipfs.nftstorage.link',
+      banner: '',
+    },
+    {
+      address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
+      symbol: 'JUP',
+      name: 'Jupiter',
+      price: 0.92,
+      priceChange24h: 8.4,
+      volume24h: 25000000,
+      marketCap: 1200000000,
+      liquidity: 15000000,
+      logo: 'https://static.jup.ag/jup/icon.png',
+      banner: '',
+    },
+    {
+      address: '6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN',
+      symbol: 'TRUMP',
+      name: 'Official Trump',
+      price: 18.50,
+      priceChange24h: 25.3,
+      volume24h: 120000000,
+      marketCap: 3500000000,
+      liquidity: 45000000,
+      logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN.png',
+      banner: '',
+    },
+    {
+      address: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
+      symbol: 'POPCAT',
+      name: 'Popcat',
+      price: 0.42,
+      priceChange24h: -2.8,
+      volume24h: 15000000,
+      marketCap: 420000000,
+      liquidity: 5000000,
+      logo: 'https://bafkreidvnhdzuq3pvhnzq26hjydmhrr2xw2flkxkflg7swmrxnx7c7xvey.ipfs.nftstorage.link',
+      banner: '',
+    },
+    {
+      address: 'GJtJuWD9qYXG9QDwVcYiXR4eBrwyUPleTwJm9fF21M1u',
+      symbol: 'FWOG',
+      name: 'Fwog',
+      price: 0.035,
+      priceChange24h: 45.2,
+      volume24h: 8500000,
+      marketCap: 35000000,
+      liquidity: 1200000,
+      logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/GJtJuWD9qYXG9QDwVcYiXR4eBrwyUPleTwJm9fF21M1u.png',
+      banner: '',
+    },
+    {
+      address: '3psH1Mj1f7yUfaD5gh6Zj7epE8hhrMkMETgv5TshQA4o',
+      symbol: 'MOODENG',
+      name: 'Moo Deng',
+      price: 0.18,
+      priceChange24h: 12.5,
+      volume24h: 12000000,
+      marketCap: 180000000,
+      liquidity: 3500000,
+      logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/3psH1Mj1f7yUfaD5gh6Zj7epE8hhrMkMETgv5TshQA4o.png',
+      banner: '',
+    },
+    {
+      address: 'J3NKxxXZcnNiMjKw9hYb2K4LUxmgB8mGaSWt8BYTtC9d',
+      symbol: 'ZEREBRO',
+      name: 'Zerebro',
+      price: 0.065,
+      priceChange24h: -8.4,
+      volume24h: 5500000,
+      marketCap: 65000000,
+      liquidity: 1800000,
+      logo: 'https://dd.dexscreener.com/ds-data/tokens/solana/J3NKxxXZcnNiMjKw9hYb2K4LUxmgB8mGaSWt8BYTtC9d.png',
+      banner: '',
+    },
+  ];
+
   // Fetch tokens from API
   const loadTokens = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
+      setUsingMockData(false);
       const response = await fetchMarketTokens();
       if (response.success) {
         setTokens(response.tokens);
       } else {
-        setError('Failed to load tokens');
-        showErrorToast('Failed to load market tokens');
+        console.warn('[Market] API returned unsuccessful response, using mock data');
+        setTokens(mockTokens);
+        setUsingMockData(true);
       }
     } catch (err) {
-      setError('Network error');
-      showErrorToast('Network error while fetching tokens');
+      console.error('[Market] Failed to fetch tokens:', err);
+      // Use mock data as fallback when backend is unavailable
+      setTokens(mockTokens);
+      setUsingMockData(true);
+      setError(null); // Clear error so mock data displays
     } finally {
       setIsLoading(false);
       setIsInitialLoad(false);
@@ -132,6 +262,13 @@ export default function MarketScreen() {
         )}
 
 
+
+        {/* Mock Data Indicator */}
+        {usingMockData && (
+          <View style={styles.mockDataBanner}>
+            <Text style={styles.mockDataText}>📡 Using demo data (backend offline)</Text>
+          </View>
+        )}
 
         {/* Skeleton during initial load */}
         {isInitialLoad && tokens.length === 0 ? (
@@ -704,5 +841,22 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  // Mock data indicator
+  mockDataBanner: {
+    backgroundColor: COLORS.warning + '30',
+    borderRadius: BORDER_RADIUS.medium,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.m,
+    marginBottom: SPACING.s,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.warning + '50',
+  },
+  mockDataText: {
+    ...FONTS.sfProMedium,
+    color: COLORS.warning,
+    fontSize: 12,
+    textAlign: 'center',
   },
 });

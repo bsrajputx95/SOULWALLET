@@ -684,7 +684,7 @@ const TOKEN_METADATA: Record<string, { symbol: string; name: string; logo: strin
 app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         console.log(`[Balances] Fetching for user: ${req.userId}`);
-        
+
         // Get user's wallet
         const wallet = await prisma.wallet.findUnique({ where: { userId: req.userId! } });
         if (!wallet) {
@@ -692,7 +692,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
             res.status(404).json({ error: 'No wallet linked' });
             return;
         }
-        
+
         console.log(`[Balances] Found wallet: ${wallet.publicKey}`);
 
         const pubKey = new PublicKey(wallet.publicKey);
@@ -771,7 +771,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
                     timeout: 10000
                 });
                 const pairs = Array.isArray(dsPriceResponse.data) ? dsPriceResponse.data : [];
-                
+
                 // Build token -> best price map (highest liquidity pair)
                 const tokenPriceMap = new Map();
                 for (const pair of pairs) {
@@ -780,7 +780,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
                         tokenPriceMap.set(addr, pair);
                     }
                 }
-                
+
                 // Use DexScreener prices for tokens that have 0 or missing price from Jupiter
                 for (const [addr, pair] of tokenPriceMap.entries()) {
                     const dsPrice = parseFloat(pair.priceUsd) || 0;
@@ -802,15 +802,15 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
             for (let i = 0; i < tokenAddresses.length; i += batchSize) {
                 const batch = tokenAddresses.slice(i, i + batchSize);
                 const addresses = batch.join(',');
-                
+
                 try {
                     const dsResponse = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${addresses}`, {
                         timeout: 10000
                     });
-                    
+
                     // API returns array of pairs
                     const pairs = Array.isArray(dsResponse.data) ? dsResponse.data : [];
-                    
+
                     // Build token -> best pair map (highest liquidity)
                     const tokenPairMap = new Map();
                     for (const pair of pairs) {
@@ -819,7 +819,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
                             tokenPairMap.set(addr, pair);
                         }
                     }
-                    
+
                     // Extract 24h change for each token
                     for (const [addr, pair] of tokenPairMap.entries()) {
                         priceChanges[addr] = parseFloat(pair.priceChange?.h24) || 0;
@@ -871,7 +871,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
 
         // Log token accounts for debugging
         console.log(`[Balances] Found ${tokenAccounts.value.length} token accounts for ${wallet.publicKey}`);
-        
+
         // Add SPL Tokens
         for (const token of tokenAccounts.value) {
             const info = token.account.data.parsed.info;
@@ -879,7 +879,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
             const amount = Number(info.tokenAmount.amount) / Math.pow(10, info.tokenAmount.decimals);
 
             console.log(`[Balances] Token ${mint}: amount=${amount}`);
-            
+
             if (amount <= 0) continue;
 
             const price = prices[mint] || 0;
@@ -897,7 +897,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
                 symbol = mint.slice(0, 6) + '...';
                 name = 'Unknown Token';
             }
-            
+
             // Ensure we always have a logo URL (even if it might not load)
             if (!logo) {
                 // Try multiple logo sources
@@ -918,7 +918,7 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
         }
 
         console.log(`[Balances] Returning ${holdings.length} holdings for ${wallet.publicKey}:`, holdings.map(h => h.symbol));
-        
+
         res.json({
             success: true,
             publicKey: wallet.publicKey,
@@ -940,28 +940,28 @@ const JUPITER_TOKENS_API = 'https://lite-api.jup.ag/tokens/v2';
 app.get('/tokens/search', authMiddleware, async (req: Request, res: Response): Promise<void> => {
     try {
         const { query } = req.query;
-        
+
         if (!query || typeof query !== 'string') {
             res.status(400).json({ error: 'Query parameter required' });
             return;
         }
-        
+
         console.log(`[Tokens] Searching for: ${query}`);
-        
+
         // Check if it's a mint address (32-44 base58 chars) or a symbol search
         const isMintAddress = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(query);
-        
+
         let tokens = [];
-        
+
         try {
             // Use Jupiter Tokens V2 API
             const url = `${JUPITER_TOKENS_API}/search?query=${encodeURIComponent(query)}`;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 10000);
-            
+
             const response = await fetch(url, { signal: controller.signal });
             clearTimeout(timeout);
-            
+
             if (response.ok) {
                 const data = await response.json();
                 // Map Jupiter fields to our format
@@ -980,7 +980,7 @@ app.get('/tokens/search', authMiddleware, async (req: Request, res: Response): P
         } catch (apiErr: any) {
             console.warn('[Tokens] Jupiter API failed:', apiErr.message);
         }
-        
+
         // Fallback to hardcoded list if Jupiter fails and it's a known token
         if (tokens.length === 0 && isMintAddress) {
             const knownTokens: Record<string, any> = {
@@ -1009,12 +1009,12 @@ app.get('/tokens/search', authMiddleware, async (req: Request, res: Response): P
                     verified: true,
                 },
             };
-            
+
             if (knownTokens[query]) {
                 tokens = [knownTokens[query]];
             }
         }
-        
+
         res.json({ success: true, tokens });
     } catch (error: any) {
         console.error('[Tokens] Search error:', error.message);
@@ -1026,61 +1026,61 @@ app.get('/tokens/search', authMiddleware, async (req: Request, res: Response): P
 app.get('/swap/quote', authMiddleware, async (req: Request, res: Response): Promise<void> => {
     try {
         const { inputMint, outputMint, amount, slippageBps } = req.query;
-        
+
         if (!inputMint || !outputMint || !amount) {
             res.status(400).json({ error: 'Missing required parameters: inputMint, outputMint, amount' });
             return;
         }
-        
+
         console.log(`[SwapQuote] Proxying quote: ${inputMint} -> ${outputMint}, amount: ${amount}`);
-        
+
         // Use Jupiter Ultra API (lite-api.jup.ag)
         const params = new URLSearchParams({
             inputMint: inputMint as string,
             outputMint: outputMint as string,
             amount: amount as string,
         });
-        
+
         // Add slippage if provided (Ultra API uses slippageBps)
         if (slippageBps) {
             params.append('slippageBps', slippageBps as string);
         }
-        
+
         const url = `${JUPITER_ULTRA_API}/order?${params}`;
         console.log(`[SwapQuote] Fetching from: ${url}`);
-        
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15000);
-        
+
         const response = await fetch(url, {
             signal: controller.signal,
         });
-        
+
         clearTimeout(timeout);
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`[SwapQuote] Jupiter returned ${response.status}:`, errorText.substring(0, 500));
-            res.status(response.status).json({ 
-                error: 'Jupiter API error', 
-                details: errorText 
+            res.status(response.status).json({
+                error: 'Jupiter API error',
+                details: errorText
             });
             return;
         }
-        
+
         const data = await response.json();
-        
+
         // Check for Ultra API error response
         if (data.errorCode) {
             console.error(`[SwapQuote] Jupiter error: ${data.errorCode} - ${data.errorMessage}`);
-            res.status(400).json({ 
-                error: data.errorMessage || data.errorCode 
+            res.status(400).json({
+                error: data.errorMessage || data.errorCode
             });
             return;
         }
-        
+
         console.log(`[SwapQuote] Success: ${data.outAmount} out`);
-        
+
         // Transform Ultra API response to match v6 format expected by frontend
         const transformedData = {
             inputMint: data.inputMint,
@@ -1104,14 +1104,14 @@ app.get('/swap/quote', authMiddleware, async (req: Request, res: Response): Prom
             outUsdValue: data.outUsdValue,
             swapUsdValue: data.swapUsdValue,
         };
-        
+
         res.json(transformedData);
-        
+
     } catch (error: any) {
         console.error('[SwapQuote] Error:', error.message);
-        res.status(500).json({ 
-            error: 'Failed to fetch swap quote', 
-            details: error.message 
+        res.status(500).json({
+            error: 'Failed to fetch swap quote',
+            details: error.message
         });
     }
 });
@@ -1120,14 +1120,14 @@ app.get('/swap/quote', authMiddleware, async (req: Request, res: Response): Prom
 app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response): Promise<void> => {
     try {
         const { inputMint, outputMint, amount, userPublicKey, slippageBps } = req.body;
-        
+
         if (!inputMint || !outputMint || !amount || !userPublicKey) {
             res.status(400).json({ error: 'Missing required parameters: inputMint, outputMint, amount, userPublicKey' });
             return;
         }
-        
+
         console.log(`[SwapTx] Getting swap transaction for: ${userPublicKey}`);
-        
+
         // Use Jupiter Ultra API - add taker to get transaction
         const params = new URLSearchParams({
             inputMint,
@@ -1135,58 +1135,58 @@ app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response
             amount: amount.toString(),
             taker: userPublicKey,
         });
-        
+
         if (slippageBps) {
             params.append('slippageBps', slippageBps.toString());
         }
-        
+
         const url = `${JUPITER_ULTRA_API}/order?${params}`;
         console.log(`[SwapTx] Fetching from: ${url}`);
-        
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15000);
-        
+
         const response = await fetch(url, {
             signal: controller.signal,
         });
-        
+
         clearTimeout(timeout);
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`[SwapTx] Jupiter returned ${response.status}:`, errorText.substring(0, 500));
-            res.status(response.status).json({ 
-                error: 'Jupiter API error', 
-                details: errorText 
+            res.status(response.status).json({
+                error: 'Jupiter API error',
+                details: errorText
             });
             return;
         }
-        
+
         const data = await response.json();
-        
+
         // Check for Ultra API error response
         if (data.errorCode) {
             console.error(`[SwapTx] Jupiter error: ${data.errorCode} - ${data.errorMessage}`);
-            res.status(400).json({ 
-                error: data.errorMessage || data.errorCode 
+            res.status(400).json({
+                error: data.errorMessage || data.errorCode
             });
             return;
         }
-        
+
         console.log(`[SwapTx] Success, transaction returned`);
-        
+
         // Return in format expected by frontend
         res.json({
             swapTransaction: data.transaction,
             requestId: data.requestId,
             order: data,
         });
-        
+
     } catch (error: any) {
         console.error('[SwapTx] Error:', error.message);
-        res.status(500).json({ 
-            error: 'Failed to build swap transaction', 
-            details: error.message 
+        res.status(500).json({
+            error: 'Failed to build swap transaction',
+            details: error.message
         });
     }
 });
@@ -1195,48 +1195,48 @@ app.post('/swap/transaction', authMiddleware, async (req: Request, res: Response
 app.post('/swap/execute', authMiddleware, async (req: Request, res: Response): Promise<void> => {
     try {
         const { signedTransaction, requestId } = req.body;
-        
+
         if (!signedTransaction || !requestId) {
             res.status(400).json({ error: 'Missing required parameters: signedTransaction, requestId' });
             return;
         }
-        
+
         console.log(`[SwapExecute] Executing swap for request: ${requestId}`);
-        
+
         const url = `${JUPITER_ULTRA_API}/execute`;
-        
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000);
-        
+
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ signedTransaction, requestId }),
             signal: controller.signal,
         });
-        
+
         clearTimeout(timeout);
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`[SwapExecute] Jupiter returned ${response.status}:`, errorText.substring(0, 500));
-            res.status(response.status).json({ 
-                error: 'Jupiter execute error', 
-                details: errorText 
+            res.status(response.status).json({
+                error: 'Jupiter execute error',
+                details: errorText
             });
             return;
         }
-        
+
         const data = await response.json();
         console.log(`[SwapExecute] Success: ${data.status}`);
-        
+
         res.json(data);
-        
+
     } catch (error: any) {
         console.error('[SwapExecute] Error:', error.message);
-        res.status(500).json({ 
-            error: 'Failed to execute swap', 
-            details: error.message 
+        res.status(500).json({
+            error: 'Failed to execute swap',
+            details: error.message
         });
     }
 });
@@ -2341,9 +2341,9 @@ app.post('/posts', authMiddleware, async (req: AuthRequest, res: Response): Prom
                     }
                 }
             } catch {
-                tokenData = { 
-                    address: tokenAddress, 
-                    symbol: tokenSymbol || 'Unknown', 
+                tokenData = {
+                    address: tokenAddress,
+                    symbol: tokenSymbol || 'Unknown',
                     name: tokenName || 'Unknown Token',
                     verified: false,
                     price: 0
@@ -2871,25 +2871,59 @@ app.post('/ibuy/prepare', authMiddleware, async (req: AuthRequest, res: Response
             return;
         }
 
-        // Get Jupiter quote (95% of amount goes to swap, 5% creator fee)
+        // Get Jupiter Ultra API quote (95% of amount goes to swap, 5% creator fee)
         const swapAmount = amount * 0.95;
         const creatorFee = amount * 0.05;
         const amountLamports = Math.floor(swapAmount * 1e9);
 
-        const quoteRes = await axios.get('https://quote-api.jup.ag/v6/quote', {
-            params: {
-                inputMint: SOL_MINT,
-                outputMint: post.tokenAddress,
-                amount: amountLamports,
-                slippageBps: 50,
-                onlyDirectRoutes: 'false'
-            },
-            timeout: 10000
+        const quoteParams = new URLSearchParams({
+            inputMint: SOL_MINT,
+            outputMint: post.tokenAddress,
+            amount: amountLamports.toString(),
+            slippageBps: '50',
         });
+
+        const quoteUrl = `${JUPITER_ULTRA_API}/order?${quoteParams}`;
+        console.log(`[IBUY] Fetching quote from: ${quoteUrl}`);
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+
+        const quoteResponse = await fetch(quoteUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!quoteResponse.ok) {
+            const errorText = await quoteResponse.text();
+            console.error(`[IBUY] Jupiter returned ${quoteResponse.status}:`, errorText.substring(0, 500));
+            res.status(400).json({ error: `Jupiter quote failed: ${errorText.substring(0, 200)}` });
+            return;
+        }
+
+        const quoteData = await quoteResponse.json();
+
+        if (quoteData.errorCode) {
+            console.error(`[IBUY] Jupiter error: ${quoteData.errorCode} - ${quoteData.errorMessage}`);
+            res.status(400).json({ error: quoteData.errorMessage || quoteData.errorCode });
+            return;
+        }
+
+        // Transform to match expected format
+        const quote = {
+            inputMint: quoteData.inputMint || SOL_MINT,
+            outputMint: quoteData.outputMint || post.tokenAddress,
+            inAmount: quoteData.inAmount || amountLamports.toString(),
+            outAmount: quoteData.outAmount,
+            otherAmountThreshold: quoteData.otherAmountThreshold || quoteData.outAmount,
+            swapMode: 'ExactIn',
+            slippageBps: 50,
+            priceImpactPct: quoteData.priceImpactPct || '0',
+            routePlan: quoteData.routePlan || [],
+            swapTransaction: quoteData.transaction || quoteData.swapTransaction,
+        };
 
         res.json({
             success: true,
-            quote: quoteRes.data,
+            quote,
             postId,
             tokenAddress: post.tokenAddress,
             tokenSymbol: post.tokenSymbol || 'Unknown',
@@ -2899,7 +2933,7 @@ app.post('/ibuy/prepare', authMiddleware, async (req: AuthRequest, res: Response
         });
     } catch (err: any) {
         console.error('IBUY prepare error:', err?.response?.data || err.message);
-        res.status(500).json({ error: 'Failed to prepare IBUY' });
+        res.status(500).json({ error: err.message || 'Failed to prepare IBUY' });
     }
 });
 
@@ -3312,6 +3346,154 @@ app.get('/ibuy/creator-earnings', authMiddleware, async (req: AuthRequest, res: 
         });
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch earnings' });
+    }
+});
+
+// ============================================
+// TRIGGER/LIMIT ORDER ENDPOINTS (Jupiter)
+// ============================================
+
+const JUPITER_TRIGGER_API = 'https://api.jup.ag/trigger/v1';
+
+// POST /trigger/createOrder - Create a limit order
+app.post('/trigger/createOrder', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { inputMint, outputMint, maker, payer, makingAmount, takingAmount, slippageBps } = req.body;
+
+        if (!inputMint || !outputMint || !maker || !payer || !makingAmount || !takingAmount) {
+            res.status(400).json({ error: 'Missing required parameters' });
+            return;
+        }
+
+        console.log(`[Trigger] Creating order: ${inputMint} -> ${outputMint}, maker: ${maker}`);
+
+        const response = await axios.post(`${JUPITER_TRIGGER_API}/createOrder`, {
+            inputMint,
+            outputMint,
+            maker,
+            payer,
+            makingAmount: makingAmount.toString(),
+            takingAmount: takingAmount.toString(),
+            slippageBps: slippageBps || 0,
+        }, {
+            timeout: 15000,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        res.json({
+            orderId: response.data.orderId,
+            transaction: response.data.transaction
+        });
+    } catch (error: any) {
+        console.error('[Trigger] Create order failed:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'Failed to create limit order',
+            details: error.response?.data?.error || error.message
+        });
+    }
+});
+
+// POST /trigger/execute - Execute a signed limit order
+app.post('/trigger/execute', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { signedTransaction, orderId } = req.body;
+
+        if (!signedTransaction || !orderId) {
+            res.status(400).json({ error: 'Missing signedTransaction or orderId' });
+            return;
+        }
+
+        console.log(`[Trigger] Executing order: ${orderId}`);
+
+        const response = await axios.post(`${JUPITER_TRIGGER_API}/execute`, {
+            signedTransaction,
+            orderId
+        }, {
+            timeout: 30000,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        res.json({
+            status: response.data.status,
+            signature: response.data.signature
+        });
+    } catch (error: any) {
+        console.error('[Trigger] Execute order failed:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'Failed to execute limit order',
+            details: error.response?.data?.error || error.message
+        });
+    }
+});
+
+// POST /trigger/cancelOrder - Cancel a limit order
+app.post('/trigger/cancelOrder', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { orderId } = req.body;
+
+        if (!orderId) {
+            res.status(400).json({ error: 'Missing orderId' });
+            return;
+        }
+
+        console.log(`[Trigger] Cancelling order: ${orderId}`);
+
+        const response = await axios.post(`${JUPITER_TRIGGER_API}/cancelOrder`, {
+            orderId
+        }, {
+            timeout: 15000,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        res.json({
+            transaction: response.data.transaction
+        });
+    } catch (error: any) {
+        console.error('[Trigger] Cancel order failed:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'Failed to cancel limit order',
+            details: error.response?.data?.error || error.message
+        });
+    }
+});
+
+// GET /trigger/orders - Get user's trigger orders
+app.get('/trigger/orders', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { user, orderStatus } = req.query;
+
+        if (!user) {
+            res.status(400).json({ error: 'Missing user parameter' });
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.append('user', user as string);
+        if (orderStatus) {
+            params.append('orderStatus', orderStatus as string);
+        }
+
+        console.log(`[Trigger] Fetching orders for: ${user}`);
+
+        const response = await axios.get(`${JUPITER_TRIGGER_API}/getTriggerOrders?${params}`, {
+            timeout: 10000
+        });
+
+        res.json({
+            orders: response.data.orders || []
+        });
+    } catch (error: any) {
+        console.error('[Trigger] Get orders failed:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'Failed to fetch orders',
+            details: error.response?.data?.error || error.message
+        });
     }
 });
 

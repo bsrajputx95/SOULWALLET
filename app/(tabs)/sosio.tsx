@@ -11,25 +11,27 @@ import {
   useWindowDimensions,
   Animated,
   Easing,
-  Alert,
   Image,
   ScrollView,
   PanResponder,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Settings, Search, X, Plus, Link, ShoppingBag, Zap } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
-import { SocialPost, NeonButton, TokenBagModal, CopyTradingModal, SocialPostSkeleton } from '@/components';
+import { SocialPost, NeonButton, IBuyBagModal, CopyTradingModal, SocialPostSkeleton } from '@/components';
 import { useRouter } from 'expo-router';
 import { fetchFeed, createPost, toggleLike, Post, TokenMetadata } from '@/services/social';
 import { executeIBuy, getIBuySettings, verifyTokenForPost } from '@/services/ibuy';
+import { useAlert } from '@/contexts/AlertContext';
 
 type FeedTab = 'forYou' | 'following';
 
 export default function SosioScreen() {
   const router = useRouter();
+  const { showAlert } = useAlert();
 
   // Real posts from API
   const [posts, setPosts] = useState<Post[]>([]);
@@ -289,7 +291,7 @@ export default function SosioScreen() {
 
     // Validate token address if mentionToken is true
     if (mentionToken && !tokenAddress.trim()) {
-      Alert.alert('Token Address Required', 'Please enter the token contract address when mentioning a token.');
+      showAlert('Token Address Required', 'Please enter the token contract address when mentioning a token.');
       return;
     }
 
@@ -322,7 +324,7 @@ export default function SosioScreen() {
       setShowNewPostModal(false);
       await loadFeed();
     } else {
-      Alert.alert('Error', result.error || 'Failed to create post');
+      showAlert('Error', result.error || 'Failed to create post');
     }
   };
 
@@ -380,7 +382,7 @@ export default function SosioScreen() {
         setShowPinModal(false);
         setPin('');
         setPendingBuyPost(null);
-        Alert.alert('Success!', `Bought ${pendingBuyPost.tokenSymbol || 'token'}`);
+        showAlert('Success!', `Bought ${pendingBuyPost.tokenSymbol || 'token'}`);
         loadFeed();
       } else {
         setPinError(result.error || 'Buy failed');
@@ -561,10 +563,10 @@ export default function SosioScreen() {
                 onBuyPress={async () => {
                   const tokenMint = post.tokenAddress;
                   if (!tokenMint) return;
-                  
+
                   // Get settings for default amount
                   const settings = await getIBuySettings();
-                  
+
                   // Open PIN modal instead of Alert.prompt
                   setPendingBuyPost(post);
                   setPendingBuyAmount(settings.ibuyDefaultSol);
@@ -709,21 +711,6 @@ export default function SosioScreen() {
               {mentionToken && (
                 <View style={styles.tokenInputsContainer}>
                   <View style={styles.tokenInputWrapper}>
-                    <Text style={styles.tokenInputLabel}>Token Name</Text>
-                    <View style={styles.tokenInputField}>
-                      <TextInput
-                        style={styles.tokenTextInput}
-                        placeholder="e.g. SOL, ETH, BONK"
-                        placeholderTextColor={COLORS.textSecondary}
-                        value={tokenName}
-                        onChangeText={setTokenName}
-                        autoCorrect={false}
-                        autoCapitalize="none"
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.tokenInputWrapper}>
                     <Text style={styles.tokenInputLabel}>Token Address *</Text>
                     <View style={styles.tokenInputField}>
                       <TextInput
@@ -744,13 +731,28 @@ export default function SosioScreen() {
                       )}
                       {!tokenVerifyLoading && tokenVerified && (
                         <Text style={styles.tokenVerifySuccess}>
-                          ✓ {tokenName || 'Verified'}
+                          ✓ Verified
                           {verifiedTokenPrice > 0 && ` ($${verifiedTokenPrice.toFixed(4)})`}
                         </Text>
                       )}
                       {!tokenVerifyLoading && tokenVerifyError && (
                         <Text style={styles.tokenVerifyError}>✗ {tokenVerifyError}</Text>
                       )}
+                    </View>
+                  </View>
+
+                  <View style={styles.tokenInputWrapper}>
+                    <Text style={styles.tokenInputLabel}>Token Name (auto-fetched)</Text>
+                    <View style={[styles.tokenInputField, { opacity: tokenVerified ? 1 : 0.5 }]}>
+                      <TextInput
+                        style={[styles.tokenTextInput, { color: COLORS.textPrimary }]}
+                        placeholder={tokenVerifyLoading ? 'Fetching...' : 'Will auto-load from address'}
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={tokenName}
+                        editable={false}
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                      />
                     </View>
                   </View>
                 </View>
@@ -818,7 +820,7 @@ export default function SosioScreen() {
         </View>
       </Modal>
 
-      <TokenBagModal
+      <IBuyBagModal
         visible={showTokenBagModal}
         onClose={() => setShowTokenBagModal(false)}
       />
