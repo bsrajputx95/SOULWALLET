@@ -532,27 +532,38 @@ export default function SosioScreen() {
                   if (!tokenMint) return;
                   if (isBuying) return;
 
-                  const storedPin = await getStoredPin();
-                  if (!storedPin) {
-                    showAlert('Error', 'No PIN found. Please re-login.');
-                    return;
-                  }
-
                   const settings = await getIBuySettings();
-                  setIsBuying(true);
-                  try {
-                    const result = await executeIBuy(post.id, settings.ibuyDefaultSol, storedPin);
-                    if (result.success) {
-                      showAlert('Success!', `Bought ${post.tokenSymbol || 'token'}`);
-                      loadFeed();
-                    } else {
-                      showAlert('Buy Failed', result.error || 'IBUY failed');
-                    }
-                  } catch (e: any) {
-                    showAlert('Buy Failed', e.message || 'IBUY failed');
-                  } finally {
-                    setIsBuying(false);
-                  }
+                  showAlert(
+                    'Confirm IBUY',
+                    `Buy ${post.tokenSymbol || 'token'} for ${settings.ibuyDefaultSol} SOL?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Buy',
+                        onPress: async () => {
+                          const storedPin = await getStoredPin();
+                          if (!storedPin) {
+                            showAlert('Error', 'No PIN found. Please re-login.');
+                            return;
+                          }
+                          setIsBuying(true);
+                          try {
+                            const result = await executeIBuy(post.id, settings.ibuyDefaultSol, storedPin);
+                            if (result.success) {
+                              showAlert('Success!', `Bought ${post.tokenSymbol || 'token'}`);
+                              loadFeed();
+                            } else {
+                              showAlert('Buy Failed', result.error || 'IBUY failed');
+                            }
+                          } catch (e: any) {
+                            showAlert('Buy Failed', e.message || 'IBUY failed');
+                          } finally {
+                            setIsBuying(false);
+                          }
+                        },
+                      },
+                    ]
+                  );
                 }}
               />
             );

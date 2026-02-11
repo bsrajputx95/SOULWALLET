@@ -11,8 +11,9 @@ import {
     Platform,
     TextInput,
     ActivityIndicator,
+    Image,
 } from 'react-native';
-import { X, ShoppingBag, Settings } from 'lucide-react-native';
+import { X, ShoppingBag, Settings, Plus } from 'lucide-react-native';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
@@ -27,6 +28,7 @@ import {
     IBuySettings,
 } from '../services/ibuy';
 import { getStoredPin } from '../services/wallet';
+import { executeIBuy } from '../services/ibuy';
 import { useAlert } from '../contexts/AlertContext';
 
 interface IBuyBagModalProps {
@@ -47,6 +49,8 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     const [positions, setPositions] = useState<IBuyPosition[]>([]);
     const [loading, setLoading] = useState(false);
     const [selling, setSelling] = useState<string | null>(null);
+    const [buyingMore, setBuyingMore] = useState<string | null>(null);
+    const [tokenImages, setTokenImages] = useState<Record<string, string>>({});
     const [showSettings, setShowSettings] = useState(false);
     const [settings, setSettings] = useState<IBuySettings>({
         ibuySlippage: 50,
@@ -60,6 +64,18 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
 
 
 
+    // Fetch token image from Jupiter
+    const fetchTokenImage = useCallback(async (mint: string) => {
+        if (tokenImages[mint]) return;
+        try {
+            const res = await fetch(`https://api.jup.ag/tokens/v1/token/${mint}`);
+            const data = await res.json();
+            if (data.logoURI) {
+                setTokenImages(prev => ({ ...prev, [mint]: data.logoURI }));
+            }
+        } catch { /* ignore */ }
+    }, [tokenImages]);
+
     // Load positions when modal opens
     const loadPositions = useCallback(async () => {
         setLoading(true);
@@ -67,11 +83,13 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
             const result = await getMyIBuyBag();
             if (result.success && result.positions) {
                 setPositions(result.positions);
+                // Fetch images for all tokens
+                result.positions.forEach(p => fetchTokenImage(p.tokenAddress));
             }
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [fetchTokenImage]);
 
     // Load settings when modal opens
     const loadSettings = useCallback(async () => {
@@ -89,7 +107,6 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     }, [visible, loadPositions, loadSettings]);
 
     const handleSell = async (position: IBuyPosition, percentage: number) => {
-        // Use stored PIN directly — no prompt needed
         const pin = await getStoredPin();
         if (!pin) {
             showAlert('Error', 'No PIN found. Please re-login.');
@@ -113,6 +130,40 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
         } finally {
             setSelling(null);
         }
+    };
+
+    const handleBuyMore = async (position: IBuyPosition) => {
+        const pin = await getStoredPin();
+        if (!pin) {
+            showAlert('Error', 'No PIN found. Please re-login.');
+            return;
+        }
+
+        showAlert(
+            'Buy More',
+            `Buy more ${position.tokenSymbol} for ${settings.ibuyDefaultSol} SOL?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Buy',
+                    onPress: async () => {
+                        setBuyingMore(position.id);
+                        try {
+                            const result = await executeIBuy(position.postId, settings.ibuyDefaultSol, pin);
+                            if (result.success) {
+                                showAlert('Success!', `Bought more ${position.tokenSymbol}`);
+                                loadPositions();
+                                onRefresh?.();
+                            } else {
+                                showAlert('Error', result.error || 'Buy failed');
+                            }
+                        } finally {
+                            setBuyingMore(null);
+                        }
+                    },
+                },
+            ]
+        );
     };
 
     const handleSaveSettings = async () => {
@@ -243,11 +294,25 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
                                         intensity="medium"
                                     >
                                         <View style={styles.positionHeader}>
-                                            <View>
-                                                <Text style={styles.tokenSymbol}>{position.tokenSymbol}</Text>
-                                                <Text style={styles.tokenAmount}>
-                                                    {formatNumber(position.remainingAmount)} tokens
-                                                </Text>
+                                            <View style={styles.tokenInfoRow}>
+                                                {tokenImages[position.tokenAddress] ? (
+                                                    <Image
+                                                        source={{ uri: tokenImages[position.tokenAddress] }}
+                                                        style={styles.tokenImage}
+                                                    />
+                                                ) : (
+                                                    <View style={styles.tokenImagePlaceholder}>
+                                                        <Text style={styles.tokenImageLetter}>
+                                                            {position.tokenSymbol?.charAt(0) || '?'}
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                                <View>
+                                                    <Text style={styles.tokenSymbol}>{position.tokenSymbol}</Text>
+                                                    <Text style={styles.tokenAmount}>
+                                                        {formatNumber(position.remainingAmount)} tokens
+                                                    </Text>
+                                                </View>
                                             </View>
                                             <View style={styles.valueContainer}>
                                                 {position.currentValue !== undefined ? (
@@ -299,6 +364,22 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
                                                     />
                                                 ))}
                                             </View>
+
+                                            {/* Buy More */}
+                                            <Pressable
+                                                style={styles.buyMoreButton}
+                                                onPress={() => handleBuyMore(position)}
+                                                disabled={buyingMore === position.id}
+                                            >
+                                                {buyingMore === position.id ? (
+                                                    <ActivityIndicator size="small" color={COLORS.success} />
+                                                ) : (
+                                                    <>
+                                                        <Plus size={12} color={COLORS.success} />
+                                                        <Text style={styles.buyMoreText}>Buy More</Text>
+                                                    </>
+                                                )}
+                                            </Pressable>
                                         </View>
                                     </NeonCard>
                                 ))
@@ -526,6 +607,47 @@ const styles = StyleSheet.create({
     },
     sellButton: {
         flex: 1,
+    },
+    tokenInfoRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    tokenImage: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        marginRight: SPACING.s,
+    },
+    tokenImagePlaceholder: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        marginRight: SPACING.s,
+        backgroundColor: COLORS.cardBackground,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    tokenImageLetter: {
+        ...FONTS.phantomBold,
+        color: COLORS.textPrimary,
+        fontSize: 16,
+    },
+    buyMoreButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: SPACING.s,
+        paddingVertical: 6,
+        borderRadius: BORDER_RADIUS.small,
+        borderWidth: 1,
+        borderColor: COLORS.success + '60',
+        backgroundColor: COLORS.success + '10',
+    },
+    buyMoreText: {
+        ...FONTS.phantomSemiBold,
+        color: COLORS.success,
+        fontSize: 12,
+        marginLeft: 4,
     },
 });
 
