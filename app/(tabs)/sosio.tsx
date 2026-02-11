@@ -25,6 +25,7 @@ import { SocialPost, NeonButton, IBuyBagModal, CopyTradingModal, SocialPostSkele
 import { useRouter } from 'expo-router';
 import { fetchFeed, createPost, toggleLike, Post, TokenMetadata } from '@/services/social';
 import { executeIBuy, getIBuySettings, verifyTokenForPost } from '@/services/ibuy';
+import { getStoredPin } from '@/services/wallet';
 import { useAlert } from '@/contexts/AlertContext';
 
 type FeedTab = 'forYou' | 'following';
@@ -178,12 +179,7 @@ export default function SosioScreen() {
     profileImage?: string;
   } | null>(null);
 
-  // IBUY PIN modal state
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pin, setPin] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [pendingBuyPost, setPendingBuyPost] = useState<Post | null>(null);
-  const [pendingBuyAmount, setPendingBuyAmount] = useState(0);
+  // IBUY state
   const [isBuying, setIsBuying] = useState(false);
 
   // Fade indicator for swipe navigation
@@ -363,36 +359,7 @@ export default function SosioScreen() {
     // Feed will be reloaded via useEffect when activeTab changes
   };
 
-  const handleConfirmBuy = async () => {
-    // PIN validation
-    if (!/^\d+$/.test(pin)) {
-      setPinError('PIN must contain only digits');
-      return;
-    }
-    if (pin.length < 4) {
-      setPinError('PIN must be at least 4 digits');
-      return;
-    }
-    if (!pendingBuyPost) return;
 
-    setIsBuying(true);
-    try {
-      const result = await executeIBuy(pendingBuyPost.id, pendingBuyAmount, pin);
-      if (result.success) {
-        setShowPinModal(false);
-        setPin('');
-        setPendingBuyPost(null);
-        showAlert('Success!', `Bought ${pendingBuyPost.tokenSymbol || 'token'}`);
-        loadFeed();
-      } else {
-        setPinError(result.error || 'Buy failed');
-      }
-    } catch (e: any) {
-      setPinError(e.message || 'Buy failed');
-    } finally {
-      setIsBuying(false);
-    }
-  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -563,16 +530,29 @@ export default function SosioScreen() {
                 onBuyPress={async () => {
                   const tokenMint = post.tokenAddress;
                   if (!tokenMint) return;
+                  if (isBuying) return;
 
-                  // Get settings for default amount
+                  const storedPin = await getStoredPin();
+                  if (!storedPin) {
+                    showAlert('Error', 'No PIN found. Please re-login.');
+                    return;
+                  }
+
                   const settings = await getIBuySettings();
-
-                  // Open PIN modal instead of Alert.prompt
-                  setPendingBuyPost(post);
-                  setPendingBuyAmount(settings.ibuyDefaultSol);
-                  setPin('');
-                  setPinError('');
-                  setShowPinModal(true);
+                  setIsBuying(true);
+                  try {
+                    const result = await executeIBuy(post.id, settings.ibuyDefaultSol, storedPin);
+                    if (result.success) {
+                      showAlert('Success!', `Bought ${post.tokenSymbol || 'token'}`);
+                      loadFeed();
+                    } else {
+                      showAlert('Buy Failed', result.error || 'IBUY failed');
+                    }
+                  } catch (e: any) {
+                    showAlert('Buy Failed', e.message || 'IBUY failed');
+                  } finally {
+                    setIsBuying(false);
+                  }
                 }}
               />
             );
@@ -834,75 +814,7 @@ export default function SosioScreen() {
         trader={selectedTrader}
       />
 
-      {/* PIN Input Modal for IBUY */}
-      <Modal
-        visible={showPinModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!isBuying) {
-            setShowPinModal(false);
-            setPin('');
-            setPinError('');
-          }
-        }}
-      >
-        <View style={pinStyles.overlay}>
-          <View style={pinStyles.container}>
-            <View style={pinStyles.header}>
-              <Text style={pinStyles.title}>Confirm IBUY</Text>
-              <Pressable
-                onPress={() => {
-                  if (!isBuying) {
-                    setShowPinModal(false);
-                    setPin('');
-                    setPinError('');
-                  }
-                }}
-              >
-                <X size={24} color={COLORS.textPrimary} />
-              </Pressable>
-            </View>
 
-            <Text style={pinStyles.label}>
-              Buy {pendingBuyPost?.tokenSymbol || 'token'} for {pendingBuyAmount} SOL
-            </Text>
-
-            <TextInput
-              style={[pinStyles.input, pinError ? pinStyles.inputError : null]}
-              value={pin}
-              onChangeText={(text) => {
-                setPin(text.replace(/[^0-9]/g, ''));
-                setPinError('');
-              }}
-              placeholder="Enter PIN"
-              placeholderTextColor={COLORS.textSecondary}
-              keyboardType="numeric"
-              secureTextEntry
-              maxLength={6}
-              autoFocus
-              editable={!isBuying}
-            />
-
-            {pinError ? <Text style={pinStyles.errorText}>{pinError}</Text> : null}
-
-            <Pressable
-              style={[
-                pinStyles.confirmButton,
-                (pin.length < 4 || isBuying) && pinStyles.confirmButtonDisabled,
-              ]}
-              onPress={handleConfirmBuy}
-              disabled={pin.length < 4 || isBuying}
-            >
-              {isBuying ? (
-                <ActivityIndicator color={COLORS.textPrimary} />
-              ) : (
-                <Text style={pinStyles.confirmButtonText}>Confirm Buy</Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -1477,78 +1389,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: COLORS.solana + '50',
-  },
-});
-
-// PIN Modal styles
-const pinStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.l,
-  },
-  container: {
-    backgroundColor: COLORS.background,
-    borderRadius: BORDER_RADIUS.large,
-    padding: SPACING.l,
-    width: '100%',
-    maxWidth: 360,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.m,
-  },
-  title: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 18,
-  },
-  label: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    marginBottom: SPACING.m,
-    textAlign: 'center',
-  },
-  input: {
-    ...FONTS.phantomRegular,
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    fontSize: 24,
-    color: COLORS.textPrimary,
-    textAlign: 'center',
-    letterSpacing: 8,
-    marginBottom: SPACING.s,
-  },
-  inputError: {
-    borderWidth: 1,
-    borderColor: COLORS.error,
-  },
-  errorText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.error,
-    fontSize: 12,
-    textAlign: 'center',
-    marginBottom: SPACING.m,
-  },
-  confirmButton: {
-    backgroundColor: COLORS.success,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    alignItems: 'center',
-  },
-  confirmButtonDisabled: {
-    backgroundColor: COLORS.textSecondary + '50',
-  },
-  confirmButtonText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
   },
 });
 

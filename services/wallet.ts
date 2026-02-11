@@ -136,6 +136,20 @@ export const getLocalPublicKey = async (): Promise<string | null> => {
 };
 
 /**
+ * Get the stored PIN (always available after wallet creation/import).
+ * The PIN is stored as btoa(pin) under wallet_pin_hash.
+ */
+export const getStoredPin = async (): Promise<string | null> => {
+    try {
+        const hash = await SecureStore.getItemAsync('wallet_pin_hash');
+        if (!hash) return null;
+        return atob(hash);
+    } catch {
+        return null;
+    }
+};
+
+/**
  * Get the keypair for signing (requires PIN)
  */
 export const getKeypairForSigning = async (userPin: string): Promise<Keypair | null> => {
@@ -189,9 +203,9 @@ export const getCachedPin = async (): Promise<string | null> => {
     try {
         const pin = await SecureStore.getItemAsync('cached_pin');
         const expiryStr = await SecureStore.getItemAsync('cached_pin_expiry');
-        
+
         if (!pin || !expiryStr) return null;
-        
+
         const expiry = parseInt(expiryStr, 10);
         if (Date.now() > expiry) {
             // PIN expired, clear it
@@ -199,7 +213,7 @@ export const getCachedPin = async (): Promise<string | null> => {
             await SecureStore.deleteItemAsync('cached_pin_expiry');
             return null;
         }
-        
+
         return pin;
     } catch {
         return null;
@@ -270,7 +284,7 @@ export const importWallet = async (
             await SecureStore.deleteItemAsync('wallet_pubkey');
             await SecureStore.deleteItemAsync('wallet_pin_hash');
         }
-        
+
         // Provide specific error messages
         let errorMessage = 'Failed to import wallet';
         if (error instanceof Error) {
@@ -371,7 +385,7 @@ export const sendTransaction = async (
 
         // 6. Broadcast signed transaction (uses centralized api client with retry)
         let broadcastData: { signature: string; explorerUrl: string };
-        
+
         try {
             broadcastData = await retryWithBackoff(async () => {
                 return await api.post<{ signature: string; explorerUrl: string }>('/transactions/broadcast', {

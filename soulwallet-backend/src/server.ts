@@ -3119,19 +3119,51 @@ app.post('/ibuy/sell/prepare', authMiddleware, async (req: AuthRequest, res: Res
         const decimals = await getIBuyTokenDecimals(position.tokenAddress);
         const rawAmount = Math.floor(sellAmount * Math.pow(10, decimals));
 
-        // Get Jupiter quote
-        const quoteRes = await axios.get('https://quote-api.jup.ag/v6/quote', {
-            params: {
-                inputMint: position.tokenAddress,
-                outputMint: SOL_MINT,
-                amount: rawAmount,
-                slippageBps: 50,
-                onlyDirectRoutes: 'false'
-            },
-            timeout: 10000
+        // Get Jupiter Ultra API quote
+        const quoteParams = new URLSearchParams({
+            inputMint: position.tokenAddress,
+            outputMint: SOL_MINT,
+            amount: rawAmount.toString(),
+            slippageBps: '50',
         });
 
-        const quote = quoteRes.data;
+        const quoteUrl = `${JUPITER_ULTRA_API}/order?${quoteParams}`;
+        console.log(`[IBUY Sell] Fetching quote from: ${quoteUrl}`);
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+
+        const quoteResponse = await fetch(quoteUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!quoteResponse.ok) {
+            const errorText = await quoteResponse.text();
+            console.error(`[IBUY Sell] Jupiter returned ${quoteResponse.status}:`, errorText.substring(0, 500));
+            res.status(400).json({ error: `Jupiter quote failed: ${errorText.substring(0, 200)}` });
+            return;
+        }
+
+        const quoteData = await quoteResponse.json();
+
+        if (quoteData.errorCode) {
+            console.error(`[IBUY Sell] Jupiter error: ${quoteData.errorCode} - ${quoteData.errorMessage}`);
+            res.status(400).json({ error: quoteData.errorMessage || quoteData.errorCode });
+            return;
+        }
+
+        // Transform to match expected format
+        const quote = {
+            inputMint: quoteData.inputMint || position.tokenAddress,
+            outputMint: quoteData.outputMint || SOL_MINT,
+            inAmount: quoteData.inAmount || rawAmount.toString(),
+            outAmount: quoteData.outAmount,
+            otherAmountThreshold: quoteData.otherAmountThreshold || quoteData.outAmount,
+            swapMode: 'ExactIn',
+            slippageBps: 50,
+            priceImpactPct: quoteData.priceImpactPct || '0',
+            routePlan: quoteData.routePlan || [],
+            swapTransaction: quoteData.transaction || quoteData.swapTransaction,
+        };
 
         // Store pending sell data (expires in 5 minutes)
         const pendingId = `${req.userId!}_${positionId}_${Date.now()}`;
@@ -3158,7 +3190,7 @@ app.post('/ibuy/sell/prepare', authMiddleware, async (req: AuthRequest, res: Res
         });
     } catch (err: any) {
         console.error('IBUY sell prepare error:', err?.response?.data || err.message);
-        res.status(500).json({ error: 'Failed to prepare sell' });
+        res.status(500).json({ error: err.message || 'Failed to prepare sell' });
     }
 });
 

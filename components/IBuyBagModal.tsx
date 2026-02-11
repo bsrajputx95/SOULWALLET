@@ -26,6 +26,7 @@ import {
     IBuyPosition,
     IBuySettings,
 } from '../services/ibuy';
+import { getStoredPin } from '../services/wallet';
 import { useAlert } from '../contexts/AlertContext';
 
 interface IBuyBagModalProps {
@@ -57,12 +58,7 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     const [slippageText, setSlippageText] = useState(String(settings.ibuySlippage / 100));
     const [solAmountText, setSolAmountText] = useState(String(settings.ibuyDefaultSol));
 
-    // PIN modal state
-    const [showPinModal, setShowPinModal] = useState(false);
-    const [pin, setPin] = useState('');
-    const [pinError, setPinError] = useState('');
-    const [pendingSellPosition, setPendingSellPosition] = useState<IBuyPosition | null>(null);
-    const [pendingSellPercentage, setPendingSellPercentage] = useState(0);
+
 
     // Load positions when modal opens
     const loadPositions = useCallback(async () => {
@@ -93,30 +89,16 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     }, [visible, loadPositions, loadSettings]);
 
     const handleSell = async (position: IBuyPosition, percentage: number) => {
-        // Open PIN modal instead of Alert.prompt
-        setPendingSellPosition(position);
-        setPendingSellPercentage(percentage);
-        setPin('');
-        setPinError('');
-        setShowPinModal(true);
-    };
-
-    const handleConfirmSell = async () => {
-        // PIN validation
-        if (!/^\d+$/.test(pin)) {
-            setPinError('PIN must contain only digits');
+        // Use stored PIN directly — no prompt needed
+        const pin = await getStoredPin();
+        if (!pin) {
+            showAlert('Error', 'No PIN found. Please re-login.');
             return;
         }
-        if (pin.length < 4) {
-            setPinError('PIN must be at least 4 digits');
-            return;
-        }
-        if (!pendingSellPosition) return;
 
-        setSelling(pendingSellPosition.id);
-        setShowPinModal(false);
+        setSelling(position.id);
         try {
-            const result = await sellIBuyPosition(pendingSellPosition.id, pendingSellPercentage, pin);
+            const result = await sellIBuyPosition(position.id, percentage, pin);
             if (result.success) {
                 showAlert(
                     'Sold!',
@@ -130,8 +112,6 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
             }
         } finally {
             setSelling(null);
-            setPin('');
-            setPendingSellPosition(null);
         }
     };
 
@@ -326,75 +306,6 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
                         </ScrollView>
                     </KeyboardAvoidingView>
 
-                    {/* PIN Input Modal */}
-                    <Modal
-                        visible={showPinModal}
-                        transparent
-                        animationType="fade"
-                        onRequestClose={() => {
-                            if (!selling) {
-                                setShowPinModal(false);
-                                setPin('');
-                                setPinError('');
-                            }
-                        }}
-                    >
-                        <View style={pinStyles.overlay}>
-                            <View style={pinStyles.container}>
-                                <View style={pinStyles.header}>
-                                    <Text style={pinStyles.title}>Confirm Sell</Text>
-                                    <Pressable
-                                        onPress={() => {
-                                            if (!selling) {
-                                                setShowPinModal(false);
-                                                setPin('');
-                                                setPinError('');
-                                            }
-                                        }}
-                                    >
-                                        <X size={24} color={COLORS.textPrimary} />
-                                    </Pressable>
-                                </View>
-
-                                <Text style={pinStyles.label}>
-                                    Sell {pendingSellPercentage}% of {pendingSellPosition?.tokenSymbol}
-                                </Text>
-
-                                <TextInput
-                                    style={[pinStyles.input, pinError ? pinStyles.inputError : null]}
-                                    value={pin}
-                                    onChangeText={(text) => {
-                                        setPin(text.replace(/[^0-9]/g, ''));
-                                        setPinError('');
-                                    }}
-                                    placeholder="Enter PIN"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                    keyboardType="numeric"
-                                    secureTextEntry
-                                    maxLength={6}
-                                    autoFocus
-                                    editable={!selling}
-                                />
-
-                                {pinError ? <Text style={pinStyles.errorText}>{pinError}</Text> : null}
-
-                                <Pressable
-                                    style={[
-                                        pinStyles.confirmButton,
-                                        (pin.length < 4 || selling) && pinStyles.confirmButtonDisabled,
-                                    ]}
-                                    onPress={handleConfirmSell}
-                                    disabled={pin.length < 4 || !!selling}
-                                >
-                                    {selling ? (
-                                        <ActivityIndicator color={COLORS.textPrimary} />
-                                    ) : (
-                                        <Text style={pinStyles.confirmButtonText}>Confirm Sell</Text>
-                                    )}
-                                </Pressable>
-                            </View>
-                        </View>
-                    </Modal>
                 </View>
             </View>
         </Modal>
@@ -618,74 +529,3 @@ const styles = StyleSheet.create({
     },
 });
 
-// PIN Modal styles
-const pinStyles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: SPACING.l,
-    },
-    container: {
-        backgroundColor: COLORS.background,
-        borderRadius: BORDER_RADIUS.large,
-        padding: SPACING.l,
-        width: '100%',
-        maxWidth: 360,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: SPACING.m,
-    },
-    title: {
-        ...FONTS.phantomBold,
-        color: COLORS.textPrimary,
-        fontSize: 18,
-    },
-    label: {
-        ...FONTS.phantomRegular,
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        marginBottom: SPACING.m,
-        textAlign: 'center',
-    },
-    input: {
-        ...FONTS.phantomRegular,
-        backgroundColor: COLORS.cardBackground,
-        borderRadius: BORDER_RADIUS.medium,
-        padding: SPACING.m,
-        fontSize: 24,
-        color: COLORS.textPrimary,
-        textAlign: 'center',
-        letterSpacing: 8,
-        marginBottom: SPACING.s,
-    },
-    inputError: {
-        borderWidth: 1,
-        borderColor: COLORS.error,
-    },
-    errorText: {
-        ...FONTS.phantomRegular,
-        color: COLORS.error,
-        fontSize: 12,
-        textAlign: 'center',
-        marginBottom: SPACING.m,
-    },
-    confirmButton: {
-        backgroundColor: COLORS.success,
-        borderRadius: BORDER_RADIUS.medium,
-        padding: SPACING.m,
-        alignItems: 'center',
-    },
-    confirmButtonDisabled: {
-        backgroundColor: COLORS.textSecondary + '50',
-    },
-    confirmButtonText: {
-        ...FONTS.phantomBold,
-        color: COLORS.textPrimary,
-        fontSize: 16,
-    },
-});
