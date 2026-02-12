@@ -10,7 +10,9 @@ import {
   Modal,
   Image,
   useWindowDimensions,
-  Linking
+  Linking,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Settings, ChevronRight, X, TrendingUp } from 'lucide-react-native';
@@ -894,114 +896,131 @@ export default function PortfolioScreen() {
       {/* Edit Copied Wallet Modal */}
       <Modal
         visible={selectedWallet !== null}
-        animationType="fade"
+        animationType="slide"
         transparent={true}
         onRequestClose={() => setSelectedWallet(null)}
       >
-        <View style={[styles.modalOverlay, { justifyContent: 'center' }]}>
-          <View style={[
-            styles.modalContainer,
-            {
-              borderTopLeftRadius: 0,
-              borderTopRightRadius: 0,
-              borderRadius: BORDER_RADIUS.large,
-              alignSelf: 'center',
-              width: Math.min(width * 0.9, 560),
-              maxHeight: '66%'
-            }
-          ]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit Copy Trading</Text>
-              <Pressable onPress={() => setSelectedWallet(null)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </Pressable>
-            </View>
-
-            <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={true}>
-              <Text style={styles.editWalletTitle}>@{selectedWallet?.username}</Text>
-
-              <NeonInput
-                label="Total Amount (USDC)"
-                placeholder="1000"
-                value={editAmount}
-                onChangeText={setEditAmount}
-                keyboardType="numeric"
-              />
-
-              <NeonInput
-                label="Amount per Trade (USDC)"
-                placeholder="100"
-                value={editAmountPerTrade}
-                onChangeText={setEditAmountPerTrade}
-                keyboardType="numeric"
-              />
-
-              <NeonInput
-                label="Stop Loss (%)"
-                placeholder="10"
-                value={editSL}
-                onChangeText={setEditSL}
-                keyboardType="numeric"
-              />
-
-              <NeonInput
-                label="Take Profit (%)"
-                placeholder="30"
-                value={editTP}
-                onChangeText={setEditTP}
-                keyboardType="numeric"
-              />
-
-              <NeonInput
-                label="Slippage (%)"
-                placeholder="1"
-                value={editSlippage}
-                onChangeText={setEditSlippage}
-                keyboardType="numeric"
-              />
-
-
-
-              <View style={styles.editActions}>
-                <NeonButton
-                  title="Stop Copying"
-                  onPress={async () => {
-                    await handleStopCopying();
-                  }}
-                  style={[styles.editActionButton, { backgroundColor: COLORS.error + '20' }]}
-                />
-
-                <NeonButton
-                  title={isUpdatingCopyTrade ? "Saving..." : "Save Changes"}
-                  disabled={isUpdatingCopyTrade}
-                  onPress={async () => {
-                    if (selectedWallet) {
-                      const updates: Partial<CopiedWallet> = {};
-                      const totalAmountVal = parseFloat(editAmount);
-                      const amountPerTradeVal = parseFloat(editAmountPerTrade);
-                      const stopLossVal = parseFloat(editSL);
-                      const takeProfitVal = parseFloat(editTP);
-                      const slippageVal = parseFloat(editSlippage);
-
-                      if (!isNaN(totalAmountVal)) updates.totalAmount = totalAmountVal;
-                      if (!isNaN(amountPerTradeVal)) updates.amountPerTrade = amountPerTradeVal;
-                      if (!isNaN(stopLossVal)) updates.stopLoss = stopLossVal;
-                      if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
-                      if (!isNaN(slippageVal)) updates.slippage = slippageVal;
-
-                      const success = await updateCopiedWallet(selectedWallet.id, updates);
-                      if (success) {
-                        showAlert('Success', 'Copy trade settings updated');
-                        setSelectedWallet(null);
-                      }
-                    }
-                  }}
-                  style={[styles.editActionButton, isUpdatingCopyTrade && { opacity: 0.6 }]}
-                />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <Pressable
+            style={[styles.modalOverlay, { justifyContent: 'flex-end' }]}
+            onPress={() => setSelectedWallet(null)}
+          >
+            <Pressable
+              style={[
+                styles.modalContainer,
+                {
+                  borderTopLeftRadius: BORDER_RADIUS.large,
+                  borderTopRightRadius: BORDER_RADIUS.large,
+                  borderBottomLeftRadius: 0,
+                  borderBottomRightRadius: 0,
+                  width: '100%',
+                  maxHeight: '80%'
+                }
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit Copy Trading</Text>
+                <Pressable onPress={() => setSelectedWallet(null)}>
+                  <X size={24} color={COLORS.textPrimary} />
+                </Pressable>
               </View>
-            </ScrollView>
-          </View>
-        </View>
+
+              <ScrollView
+                style={styles.modalContent}
+                contentContainerStyle={styles.modalScrollContent}
+                showsVerticalScrollIndicator={true}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="none"
+              >
+                <Text style={styles.editWalletTitle}>@{selectedWallet?.username}</Text>
+
+                <NeonInput
+                  label="Total Amount (USDC)"
+                  placeholder="1000"
+                  value={editAmount}
+                  onChangeText={setEditAmount}
+                  keyboardType="numeric"
+                />
+
+                <NeonInput
+                  label="Amount per Trade (USDC)"
+                  placeholder="100"
+                  value={editAmountPerTrade}
+                  onChangeText={setEditAmountPerTrade}
+                  keyboardType="numeric"
+                />
+
+                <NeonInput
+                  label="Stop Loss (%)"
+                  placeholder="10"
+                  value={editSL}
+                  onChangeText={setEditSL}
+                  keyboardType="numeric"
+                />
+
+                <NeonInput
+                  label="Take Profit (%)"
+                  placeholder="30"
+                  value={editTP}
+                  onChangeText={setEditTP}
+                  keyboardType="numeric"
+                />
+
+                <NeonInput
+                  label="Slippage (%)"
+                  placeholder="1"
+                  value={editSlippage}
+                  onChangeText={setEditSlippage}
+                  keyboardType="numeric"
+                />
+
+
+
+                <View style={styles.editActions}>
+                  <NeonButton
+                    title="Stop Copying"
+                    onPress={async () => {
+                      await handleStopCopying();
+                    }}
+                    style={[styles.editActionButton, { backgroundColor: COLORS.error + '20' }]}
+                  />
+
+                  <NeonButton
+                    title={isUpdatingCopyTrade ? "Saving..." : "Save Changes"}
+                    disabled={isUpdatingCopyTrade}
+                    onPress={async () => {
+                      if (selectedWallet) {
+                        const updates: Partial<CopiedWallet> = {};
+                        const totalAmountVal = parseFloat(editAmount);
+                        const amountPerTradeVal = parseFloat(editAmountPerTrade);
+                        const stopLossVal = parseFloat(editSL);
+                        const takeProfitVal = parseFloat(editTP);
+                        const slippageVal = parseFloat(editSlippage);
+
+                        if (!isNaN(totalAmountVal)) updates.totalAmount = totalAmountVal;
+                        if (!isNaN(amountPerTradeVal)) updates.amountPerTrade = amountPerTradeVal;
+                        if (!isNaN(stopLossVal)) updates.stopLoss = stopLossVal;
+                        if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
+                        if (!isNaN(slippageVal)) updates.slippage = slippageVal;
+
+                        const success = await updateCopiedWallet(selectedWallet.id, updates);
+                        if (success) {
+                          showAlert('Success', 'Copy trade settings updated');
+                          setSelectedWallet(null);
+                        }
+                      }
+                    }}
+                    style={[styles.editActionButton, isUpdatingCopyTrade && { opacity: 0.6 }]}
+                  />
+                </View>
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Wallet creation/import is handled by /solana-setup page */}
