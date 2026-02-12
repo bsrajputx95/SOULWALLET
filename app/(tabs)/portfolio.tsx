@@ -675,9 +675,18 @@ export default function PortfolioScreen() {
                             </Pressable>
                             <Pressable
                               style={[styles.editButton, { backgroundColor: COLORS.error + '20' }]}
-                              onPress={handleStopCopying}
+                              onPress={() => {
+                                showAlert(
+                                  'Delete Copy Trade',
+                                  'Are you sure you want to permanently remove this copy trade setup?',
+                                  [
+                                    { text: 'Cancel', style: 'cancel' },
+                                    { text: 'Delete', style: 'destructive', onPress: () => handleStopCopying() },
+                                  ]
+                                );
+                              }}
                             >
-                              <Text style={[styles.editButtonText, { color: COLORS.error }]}>Stop</Text>
+                              <Text style={[styles.editButtonText, { color: COLORS.error }]}>Delete</Text>
                             </Pressable>
                           </View>
                         </View>
@@ -685,11 +694,11 @@ export default function PortfolioScreen() {
                         <View style={styles.walletStats}>
                           <View style={styles.walletStat}>
                             <Text style={styles.walletStatLabel}>Budget</Text>
-                            <Text style={styles.walletStatValue}>◎{wallet.totalAmount?.toFixed(1) || '0'}</Text>
+                            <Text style={[styles.walletStatValue, { color: COLORS.textPrimary }]}>◎{wallet.totalAmount?.toFixed(1) || '0'}</Text>
                           </View>
                           <View style={styles.walletStat}>
                             <Text style={styles.walletStatLabel}>Per Trade</Text>
-                            <Text style={styles.walletStatValue}>◎{wallet.amountPerTrade?.toFixed(2) || '0'}</Text>
+                            <Text style={[styles.walletStatValue, { color: COLORS.textPrimary }]}>◎{wallet.amountPerTrade?.toFixed(2) || '0'}</Text>
                           </View>
                           <View style={styles.walletStat}>
                             <Text style={styles.walletStatLabel}>SL</Text>
