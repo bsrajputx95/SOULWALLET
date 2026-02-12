@@ -897,7 +897,7 @@ export default function PortfolioScreen() {
       {/* Edit Copied Wallet Modal */}
       <Modal
         visible={selectedWallet !== null}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setSelectedWallet(null)}
       >
@@ -905,10 +905,10 @@ export default function PortfolioScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{ flex: 1 }}
         >
-          <View style={[styles.modalOverlay, { justifyContent: 'flex-end' }]}>
+          <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
             {/* Tappable backdrop area to dismiss */}
             <Pressable
-              style={{ flex: 1 }}
+              style={StyleSheet.absoluteFill}
               onPress={() => setSelectedWallet(null)}
             />
             {/* Modal content — regular View so it doesn't steal touches from TextInput */}
@@ -916,12 +916,9 @@ export default function PortfolioScreen() {
               style={[
                 styles.modalContainer,
                 {
-                  borderTopLeftRadius: BORDER_RADIUS.large,
-                  borderTopRightRadius: BORDER_RADIUS.large,
-                  borderBottomLeftRadius: 0,
-                  borderBottomRightRadius: 0,
-                  width: '100%',
-                  maxHeight: '80%'
+                  borderRadius: BORDER_RADIUS.large,
+                  width: '90%',
+                  height: '75%'
                 }
               ]}
             >
