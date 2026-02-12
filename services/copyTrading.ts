@@ -8,6 +8,7 @@ import { api } from './api';
 // Types
 export interface CopyTradingConfig {
     id: string;
+    name?: string;
     traderAddress: string;
     totalInvestment: number;
     perTradeAmount: number;
@@ -59,6 +60,7 @@ export interface CopyPosition {
 }
 
 interface CreateConfigParams {
+    name?: string;
     traderAddress: string;
     totalInvestment: number;
     perTradeAmount: number;
@@ -122,10 +124,10 @@ export async function executeCopyTrade(
     queueItem: CopyTradeQueueItem,
     pin: string,
     authToken: string
-): Promise<{ 
-    success: boolean; 
-    signature?: string; 
-    slOrderId?: string; 
+): Promise<{
+    success: boolean;
+    signature?: string;
+    slOrderId?: string;
     tpOrderId?: string;
     error?: string;
 }> {
@@ -159,8 +161,8 @@ export async function executeCopyTrade(
         // quote.outAmount is the actual amount received in smallest units
         const inputTokenDecimals = await getTokenDecimals(queueItem.inputMint);
         const actualOutputAmount = parseFloat(quote.outAmount) / Math.pow(10, inputTokenDecimals);
-        const actualEntryPrice = actualOutputAmount > 0 
-            ? queueItem.outputAmount / actualOutputAmount 
+        const actualEntryPrice = actualOutputAmount > 0
+            ? queueItem.outputAmount / actualOutputAmount
             : queueItem.entryPrice;
 
         // Get keypair for signing limit orders
@@ -196,7 +198,7 @@ export async function executeCopyTrade(
                     inAmount: quote.outAmount,         // Amount of tokens to sell (raw)
                     outAmount: slOutAmountRaw.toString(),
                 });
-                
+
                 if (slOrder?.transaction) {
                     // Sign and submit the limit order transaction
                     const slResult = await signAndSubmitLimitOrder(slOrder.transaction, keypair, connection);
@@ -220,7 +222,7 @@ export async function executeCopyTrade(
                     inAmount: quote.outAmount,         // Amount of tokens to sell (raw)
                     outAmount: tpOutAmountRaw.toString(),
                 });
-                
+
                 if (tpOrder?.transaction) {
                     // Sign and submit the limit order transaction
                     const tpResult = await signAndSubmitLimitOrder(tpOrder.transaction, keypair, connection);
@@ -272,9 +274,9 @@ export async function executeCopyTradeSell(
     queueItem: CopyTradeQueueItem,
     pin: string,
     authToken: string
-): Promise<{ 
-    success: boolean; 
-    signature?: string; 
+): Promise<{
+    success: boolean;
+    signature?: string;
     cancelSignatures?: string[];
     error?: string;
 }> {
@@ -410,7 +412,7 @@ export async function closeCopyPosition(
                         const txBuffer = Buffer.from(cancel.transaction, 'base64');
                         const transaction = VersionedTransaction.deserialize(txBuffer);
                         transaction.sign([keypair]);
-                        
+
                         await connection.sendRawTransaction(transaction.serialize(), {
                             skipPreflight: false,
                             preflightCommitment: 'confirmed'
@@ -486,8 +488,8 @@ export async function stopCopyTrading(
 ): Promise<StopCopyTradingResult> {
     try {
         const data = await api.delete<{ success: boolean; message: string; cancelTransactions: CancelTransaction[]; pendingPositions: { id: string; status: string }[] }>('/copy-trade/config');
-        return { 
-            success: true, 
+        return {
+            success: true,
             message: data.message,
             cancelTransactions: data.cancelTransactions,
             pendingPositions: data.pendingPositions
@@ -504,9 +506,9 @@ export async function stopCopyTrading(
 export async function submitCancelTransactions(
     cancelTransactions: CancelTransaction[],
     pin: string
-): Promise<{ 
-    success: boolean; 
-    signatures?: string[]; 
+): Promise<{
+    success: boolean;
+    signatures?: string[];
     failed?: { orderId: string; error: string }[];
     error?: string;
 }> {
@@ -547,8 +549,8 @@ export async function submitCancelTransactions(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         keypair = null as unknown as Keypair;
 
-        return { 
-            success: failed.length === 0, 
+        return {
+            success: failed.length === 0,
             signatures,
             failed: failed.length > 0 ? failed : undefined
         };

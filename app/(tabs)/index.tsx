@@ -319,27 +319,31 @@ export default function HomeScreen() {
   const refetchCustodialWallet = async () => ({});
   const setupCustodialWalletMutation = { mutateAsync: async (): Promise<any> => ({ publicKey: 'mock-public-key' }) };
 
-  // Mock copy trading data - coming soon
-  const myCopyTradesData: any[] = [];
-  const copyStatsData: any = null;
+  // Copy Trading State
+  const [copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
+  const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
+  const [copyConfig, setCopyConfig] = React.useState<any>(null);
+  const [isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
+  const [showExecutionModal, setShowExecutionModal] = React.useState(false);
+  const [selectedQueueItem, setSelectedQueueItem] = React.useState<CopyTradeQueueItem | null>(null);
 
-  const copyTradeSettings = myCopyTradesData || [];
+  // Copy trading data is now loaded from the backend via loadCopyTradingData
+  // copyConfig, copyPositions, and copyQueue are populated from real API calls
+  const copyTradeSettings = copyConfig ? [copyConfig] : [];
 
-  // Mock positions data - using local token balances
-  const positionsData: any = { positions: [] };
-
-  const copyTrades = positionsData?.positions || [];
+  // Copy positions from backend
+  const copyTrades = copyPositions || [];
 
   const getStats = () => {
-    if (!copyStatsData) {
+    if (!copyConfig) {
       return { activeCopies: 0, totalTrades: 0, profitLoss: 0, profitLossPercentage: 0 };
     }
     // Map stats to frontend format
     return {
       activeCopies: copyTradeSettings.filter((ct: any) => ct.isActive).length,
-      totalTrades: copyStatsData.totalTrades || 0,
-      profitLoss: copyStatsData.netProfit || 0,
-      profitLossPercentage: copyStatsData.winRate || 0,
+      totalTrades: copyPositions.length,
+      profitLoss: 0,
+      profitLossPercentage: 0,
     };
   };
 
@@ -383,13 +387,7 @@ export default function HomeScreen() {
     }
   };
 
-  // Copy Trading State (must be declared before loadCopyTradingData)
-  const [_copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
-  const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
-  const [_copyConfig, setCopyConfig] = React.useState<any>(null);
-  const [_isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
-  const [showExecutionModal, setShowExecutionModal] = React.useState(false);
-  const [selectedQueueItem, setSelectedQueueItem] = React.useState<CopyTradeQueueItem | null>(null);
+
 
   // Load copy trading data (positions, queue, config)
   const loadCopyTradingData = useCallback(async () => {
@@ -760,9 +758,9 @@ export default function HomeScreen() {
                       <View key={setting.id} style={styles.activeCopyItem}>
                         <View style={styles.activeCopyInfo}>
                           <Text style={styles.activeCopyWallet}>
-                            {setting.trader?.username || `${setting.trader?.walletAddress.slice(0, 8)}...${setting.trader?.walletAddress.slice(-8)}`}
+                            {setting.name || setting.trader?.username || `${setting.traderAddress?.slice(0, 8)}...${setting.traderAddress?.slice(-8)}`}
                           </Text>
-                          <Text style={styles.activeCopyAmount}>${setting.amountPerTrade}/trade</Text>
+                          <Text style={styles.activeCopyAmount}>◎{setting.perTradeAmount}/trade</Text>
                         </View>
                         <TouchableOpacity
                           style={styles.stopCopyButton}

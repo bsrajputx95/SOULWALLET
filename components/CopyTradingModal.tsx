@@ -37,6 +37,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [maxSlippage, setMaxSlippage] = useState('0.5');
     const [exitWithTrader, setExitWithTrader] = useState(false);
     const [isPending, setIsPending] = useState(false);
+    const [copyName, setCopyName] = useState('');
     // Manual wallet address input (for manual setup when no trader address)
     const [manualWalletAddress, setManualWalletAddress] = useState('');
 
@@ -68,6 +69,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
             }
 
             const result = await createCopyConfig({
+                ...(copyName.trim() ? { name: copyName.trim() } : {}),
                 traderAddress: effectiveWalletAddress!,
                 totalInvestment: totalBudget,
                 perTradeAmount: perTrade,
@@ -122,10 +124,25 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                     <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
                         <Text style={styles.modalDescription}>
                             {isManualSetup
-                                ? 'Enter the wallet address you want to copy trade'
+                                ? 'Enter a name and wallet address to start copy trading'
                                 : `Set up copy trading parameters for @${trader.username}`
                             }
                         </Text>
+
+                        {/* Copy trade name input */}
+                        <View style={styles.inputSection}>
+                            <Text style={styles.inputLabel}>Copy Trade Name</Text>
+                            <View style={styles.inputContainer}>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="e.g. ELON's wallet"
+                                    placeholderTextColor={COLORS.textSecondary}
+                                    value={copyName}
+                                    onChangeText={setCopyName}
+                                    maxLength={50}
+                                />
+                            </View>
+                        </View>
 
                         {/* Wallet address input for manual setup */}
                         {isManualSetup && (

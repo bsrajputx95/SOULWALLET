@@ -1465,6 +1465,7 @@ import { ensureTraderWebhook, deleteTraderWebhook } from './services/heliusWebho
 
 // Validation schemas for copy trading
 const copyConfigSchema = z.object({
+    name: z.string().max(50).optional(),
     traderAddress: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address'),
     totalInvestment: z.number().positive().max(10000, 'Max $10,000 allowed'),
     perTradeAmount: z.number().positive(),
@@ -1492,6 +1493,7 @@ app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Res
         const config = await prisma.copyTradingConfig.upsert({
             where: { userId },
             update: {
+                name: data.name || undefined,
                 traderAddress: data.traderAddress,
                 totalInvestment: data.totalInvestment,
                 perTradeAmount: data.perTradeAmount,
@@ -1502,6 +1504,7 @@ app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Res
             },
             create: {
                 userId,
+                name: data.name || undefined,
                 traderAddress: data.traderAddress,
                 totalInvestment: data.totalInvestment,
                 perTradeAmount: data.perTradeAmount,

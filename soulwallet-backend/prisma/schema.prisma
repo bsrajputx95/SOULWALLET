@@ -99,6 +99,7 @@ model Transaction {
 model CopyTradingConfig {
   id                  String   @id @default(cuid())
   userId              String   @unique
+  name                String?  // User-defined label (e.g. "ELON's wallet")
   traderAddress       String   // The wallet address being copied
   totalInvestment     Float    // Max total budget (e.g., 1000 USDC)
   perTradeAmount      Float    // Amount per copy trade (e.g., 100 USDC)
