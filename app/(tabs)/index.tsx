@@ -157,9 +157,14 @@ export default function HomeScreen() {
         if (__DEV__) console.log('[Home] No portfolio data');
         showErrorToast('Failed to load balances');
       }
-    } catch (error) {
-      if (__DEV__) console.error('[Home] Error loading wallet:', error);
-      showErrorToast('Failed to load wallet data');
+    } catch (error: any) {
+      // "No wallet linked" is expected when wallet exists locally but isn't linked to backend yet
+      if (error?.message?.includes('No wallet linked')) {
+        if (__DEV__) console.log('[Home] Wallet not linked to backend yet — skipping balance fetch');
+      } else {
+        if (__DEV__) console.error('[Home] Error loading wallet:', error);
+        showErrorToast('Failed to load wallet data');
+      }
     } finally {
       setIsLoadingWallet(false);
     }
