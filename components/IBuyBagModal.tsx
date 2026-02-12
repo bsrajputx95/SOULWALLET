@@ -97,6 +97,7 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
         setSettings(s);
         setTempSettings(s);
         setSlippageText(String(s.ibuySlippage / 100));
+        setSolAmountText(String(s.ibuyDefaultSol));
     }, []);
 
     useEffect(() => {
@@ -167,17 +168,20 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     };
 
     const handleSaveSettings = async () => {
-        // Apply slippage text to tempSettings before saving
+        // Apply text inputs to tempSettings before saving
         const slippageNum = parseFloat(slippageText);
+        const solAmountNum = parseFloat(solAmountText);
         const finalSettings = {
             ...tempSettings,
             ibuySlippage: !isNaN(slippageNum) && slippageNum > 0 ? Math.round(slippageNum * 100) : tempSettings.ibuySlippage,
+            ibuyDefaultSol: !isNaN(solAmountNum) && solAmountNum > 0 ? solAmountNum : tempSettings.ibuyDefaultSol,
         };
         const result = await updateIBuySettings(finalSettings);
         if (result.success) {
             setSettings(finalSettings);
             setTempSettings(finalSettings);
             setSlippageText(String(finalSettings.ibuySlippage / 100));
+            setSolAmountText(String(finalSettings.ibuyDefaultSol));
             setShowSettings(false);
         } else {
             showAlert('Error', result.error || 'Failed to save settings');

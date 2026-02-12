@@ -405,17 +405,17 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.s,
+    marginBottom: SPACING.xs,
   },
   profileContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   avatar: {
-    width: 40,
-    height: 40,
+    width: 30,
+    height: 30,
     borderRadius: BORDER_RADIUS.full,
-    marginRight: SPACING.s,
+    marginRight: SPACING.xs,
   },
   defaultAvatar: {
     backgroundColor: COLORS.solana + '50',
@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
   avatarText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
-    fontSize: 16,
+    fontSize: 12,
   },
   userInfo: {
     flex: 1,
@@ -433,12 +433,12 @@ const styles = StyleSheet.create({
   username: {
     ...FONTS.phantomSemiBold,
     color: COLORS.textPrimary,
-    fontSize: 14,
+    fontSize: 11,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
     fontWeight: '600',
-    flexShrink: 0, // Prevent username from being hidden
+    flexShrink: 0,
   },
   verified: {
     fontSize: 14,
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
   timestamp: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 12,
+    fontSize: 10,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
