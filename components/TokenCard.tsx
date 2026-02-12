@@ -96,7 +96,7 @@ export const TokenCard: React.FC<TokenCardProps> = ({
                 {/* Removed name/bio display - just show ticker */}
               </View>
             </View>
-            <Text style={styles.price}>${formatPrice(price)}</Text>
+            <Text style={styles.price}>{formatPrice(price)}</Text>
           </View>
 
           <View style={styles.rightContent}>

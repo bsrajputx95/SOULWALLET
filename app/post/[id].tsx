@@ -87,27 +87,43 @@ export default function PostDetailScreen() {
 
   const fetchTokenInfo = async (mint: string) => {
     try {
-      const res = await fetch(`https://api.jup.ag/tokens/v1/token/${mint}`);
-      const data = await res.json();
-      // Also try to get price from DexScreener
+      let symbol = '';
+      let name = '';
+      let logo = '';
       let price = 0;
       let change24h = 0;
+
+      // Try Jupiter API for metadata
+      try {
+        const res = await fetch(`https://api.jup.ag/tokens/v1/token/${mint}`);
+        if (res.ok) {
+          const data = await res.json();
+          symbol = data.symbol || '';
+          name = data.name || '';
+          logo = data.logoURI || '';
+        }
+      } catch { /* ignore */ }
+
+      // Get price + fallback metadata from DexScreener
       try {
         const priceRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
         const priceData = await priceRes.json();
         if (priceData.pairs && priceData.pairs.length > 0) {
-          price = parseFloat(priceData.pairs[0].priceUsd || '0');
-          change24h = priceData.pairs[0].priceChange?.h24 || 0;
+          const pair = priceData.pairs[0];
+          price = parseFloat(pair.priceUsd || '0');
+          change24h = pair.priceChange?.h24 || 0;
+          // Use DexScreener data as fallback for missing fields
+          if (!symbol) symbol = pair.baseToken?.symbol || '';
+          if (!name) name = pair.baseToken?.name || '';
+          if (!logo && pair.info?.imageUrl) logo = pair.info.imageUrl;
         }
-      } catch { /* ignore price fetch errors */ }
+      } catch { /* ignore */ }
 
-      setTokenInfo({
-        symbol: data.symbol || '',
-        name: data.name || '',
-        price,
-        change24h,
-        logo: data.logoURI,
-      });
+      // Last resort: use post's tokenSymbol
+      if (!symbol && post?.tokenSymbol) symbol = post.tokenSymbol;
+      if (!name) name = symbol;
+
+      setTokenInfo({ symbol, name, price, change24h, logo });
     } catch { /* ignore */ }
   };
 
