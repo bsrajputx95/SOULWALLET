@@ -95,7 +95,11 @@ export default function SosioScreen() {
       if (reset) {
         setPosts(result.posts);
       } else {
-        setPosts(prev => [...prev, ...(result.posts || [])]);
+        setPosts(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const newPosts = (result.posts || []).filter(p => !existingIds.has(p.id));
+          return [...prev, ...newPosts];
+        });
       }
       setNextCursor(result.nextCursor || null);
     }
@@ -107,7 +111,11 @@ export default function SosioScreen() {
     const mode = activeTab === 'following' ? 'following' : undefined;
     const result = await fetchFeed(nextCursor, mode);
     if (result.success && result.posts && result.posts.length > 0) {
-      setPosts(prev => [...prev, ...(result.posts ?? [])]);
+      setPosts(prev => {
+        const existingIds = new Set(prev.map(p => p.id));
+        const newPosts = (result.posts ?? []).filter(p => !existingIds.has(p.id));
+        return [...prev, ...newPosts];
+      });
       setNextCursor(result.nextCursor || null);
     }
   };
@@ -441,7 +449,7 @@ export default function SosioScreen() {
             }
           ]}
           data={filteredPosts}
-          keyExtractor={(item: any) => item.id}
+          keyExtractor={(item: any, index: number) => item.id ? `${item.id}` : `post-${index}`}
           ListHeaderComponent={
             // User Search Results - shown when searching
             searchQuery.length >= 2 && userSearchQuery.data && userSearchQuery.data.length > 0 ? (
