@@ -599,7 +599,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: SPACING.s, // Reduced for edge-to-edge layout
+    paddingHorizontal: SPACING.xs,
   },
   loadingContainer: {
     flex: 1,
@@ -617,8 +617,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   postContainer: {
-    marginTop: SPACING.m,
-    marginBottom: SPACING.m,
+    marginTop: SPACING.s,
+    marginBottom: SPACING.s,
   },
   postHeader: {
     marginTop: -SPACING.m,
@@ -675,7 +675,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   postContent: {
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.s,
   },
   postText: {
     ...FONTS.phantomRegular,
@@ -699,7 +699,7 @@ const styles = StyleSheet.create({
   postActions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingTop: SPACING.m,
+    paddingTop: SPACING.s,
     borderTopWidth: 1,
     borderTopColor: COLORS.cardBackground,
   },
@@ -722,11 +722,11 @@ const styles = StyleSheet.create({
     color: COLORS.success,
   },
   commentInputContainer: {
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.s,
   },
   indexCard: {
-    marginTop: SPACING.m,
-    marginBottom: SPACING.m,
+    marginTop: SPACING.s,
+    marginBottom: SPACING.s,
   },
   indexHeaderRow: {
     flexDirection: 'row',
