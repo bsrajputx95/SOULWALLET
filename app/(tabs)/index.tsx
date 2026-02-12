@@ -8,15 +8,11 @@ import {
   RefreshControl,
   Image,
   useWindowDimensions,
-  Modal,
-  TextInput,
   Linking,
-  Pressable
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Globe, Zap, ArrowUp, ArrowDown, RefreshCw, CreditCard, X, Search } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Globe, ArrowUp, ArrowDown, RefreshCw, CreditCard } from 'lucide-react-native';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import {
@@ -33,7 +29,7 @@ import {
   QueueStatusBanner,
 } from '@/components';
 import * as SecureStore from 'expo-secure-store';
-import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, createCopyConfig, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api, API_URL } from '@/services';
+import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api } from '@/services';
 import { fetchTrendingTokens } from '@/services/market';
 import { showErrorToast, validateSession } from '@/utils';
 import { useAlert } from '@/contexts/AlertContext';
@@ -91,8 +87,8 @@ export default function HomeScreen() {
 
   // Real user profile state
   const [user, setUser] = useState<any>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const isAuthenticated = !!user;
+  const [_authLoading, setAuthLoading] = useState(true);
+  const _isAuthenticated = !!user;
   const dailyPnl = 0; // Will be calculated from holdings
 
   // Fetch user profile from backend
@@ -222,9 +218,9 @@ export default function HomeScreen() {
   void handleCreateWallet; // Used in Phase 2.2 Create Wallet modal
 
   // Static wallet data fallback for UI display
-  const solanaWallet = { publicKey: walletAddress || DUMMY_WALLET.publicKey };
+  const _solanaWallet = { publicKey: walletAddress || DUMMY_WALLET.publicKey };
   const solanaPublicKey = walletAddress || DUMMY_WALLET.publicKey;
-  const getAvailableTokens = () => holdings.length > 0 ? holdings.map(h => ({
+  const _getAvailableTokens = () => holdings.length > 0 ? holdings.map(h => ({
     symbol: h.symbol,
     name: h.name,
     balance: h.balance,
@@ -233,7 +229,7 @@ export default function HomeScreen() {
     decimals: h.decimals,
     logo: WELL_KNOWN_TOKEN_LOGOS[h.symbol] || undefined
   })) : DUMMY_WALLET.tokens;
-  const executeSwap = async (_params?: any) => ({ success: true, signature: 'demo_signature_' + Date.now(), outputAmount: 0 });
+  const _executeSwap = async (_params?: any) => ({ success: true, signature: 'demo_signature_' + Date.now(), outputAmount: 0 });
 
   // Mock profile query - use local user data
   const profileQuery = { data: { profileImage: null }, isLoading: false };
@@ -241,7 +237,7 @@ export default function HomeScreen() {
   // Real trending tokens from API (refreshes daily at 15:00 UTC)
   const [trendingTokens, setTrendingTokens] = useState<any[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(true);
-  const [lastTrendingUpdate, setLastTrendingUpdate] = useState<string | null>(null);
+  const [_lastTrendingUpdate, setLastTrendingUpdate] = useState<string | null>(null);
 
   // Fetch trending tokens on mount
   useEffect(() => {
@@ -351,7 +347,7 @@ export default function HomeScreen() {
   const createCopyTradeMutation = { mutateAsync: async (_p: any): Promise<any> => { throw new Error('Feature not available'); }, isPending: false };
   const stopCopyTradeMutation = { mutateAsync: async (_p: any): Promise<any> => { throw new Error('Feature not available'); }, isPending: false };
 
-  const createCopyTrade = async (params: any) => {
+  const _createCopyTrade = async (params: any) => {
     try {
       // Check if user has custodial wallet
       if (!custodialWalletData?.hasWallet) {
@@ -388,10 +384,10 @@ export default function HomeScreen() {
   };
 
   // Copy Trading State (must be declared before loadCopyTradingData)
-  const [copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
+  const [_copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
   const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
-  const [copyConfig, setCopyConfig] = React.useState<any>(null);
-  const [isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
+  const [_copyConfig, setCopyConfig] = React.useState<any>(null);
+  const [_isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
   const [showExecutionModal, setShowExecutionModal] = React.useState(false);
   const [selectedQueueItem, setSelectedQueueItem] = React.useState<CopyTradeQueueItem | null>(null);
 
@@ -454,15 +450,15 @@ export default function HomeScreen() {
     }
   };
 
-  const isCreating = createCopyTradeMutation.isPending || false;
+  const _isCreating = createCopyTradeMutation.isPending || false;
 
   const [activeTab, setActiveTab] = React.useState<'coins' | 'traders' | 'copy'>('coins');
   const [pnlPeriod, setPnlPeriod] = React.useState<'1d' | '7d' | '30d' | '1y'>('1d');
 
   // Search and filter states
-  const [coinsSearchQuery, setCoinsSearchQuery] = React.useState('');
-  const [tradersSearchQuery, setTradersSearchQuery] = React.useState('');
-  const [debouncedTradersSearch, setDebouncedTradersSearch] = React.useState('');
+  const [coinsSearchQuery, _setCoinsSearchQuery] = React.useState('');
+  const [tradersSearchQuery, _setTradersSearchQuery] = React.useState('');
+  const [_debouncedTradersSearch, setDebouncedTradersSearch] = React.useState('');
 
   // ✅ Debounced search for real-time market search
   const [debouncedCoinsSearch, setDebouncedCoinsSearch] = React.useState('');
@@ -504,8 +500,8 @@ export default function HomeScreen() {
   }, [searchData]);
 
   // Determine which coins to display
-  const displayCoins = debouncedCoinsSearch.length >= 2 ? searchCoins : topCoins;
-  const isLoadingCoins = debouncedCoinsSearch.length >= 2 ? searchLoading : trendingLoading;
+  const _displayCoins = debouncedCoinsSearch.length >= 2 ? searchCoins : topCoins;
+  const _isLoadingCoins = debouncedCoinsSearch.length >= 2 ? searchLoading : trendingLoading;
 
   // Real top traders with wallet addresses from birdeye.md
   const tradersLoading = false;
@@ -542,20 +538,20 @@ export default function HomeScreen() {
   }, [tradersSearchQuery]);
 
   // Mock trader search - coming soon
-  const searchedTradersData: any = { data: [] };
-  const searchedTradersLoading = false;
+  const _searchedTradersData: any = { data: [] };
+  const _searchedTradersLoading = false;
 
   // New Copy Trading State (state declarations moved to before loadCopyTradingData)
   const [showCopyModal, setShowCopyModal] = React.useState(false);
   const [selectedTrader, setSelectedTrader] = React.useState<{ username: string; walletAddress: string } | null>(null);
 
   // Legacy state (to be removed after migration)
-  const [selectedTraderWallet, setSelectedTraderWallet] = React.useState<string | null>(null);
-  const [copyAmount, setCopyAmount] = React.useState('1000');
-  const [amountPerTrade, setAmountPerTrade] = React.useState('100');
-  const [stopLoss, setStopLoss] = React.useState('10');
-  const [takeProfit, setTakeProfit] = React.useState('30');
-  const [maxSlippage, setMaxSlippage] = React.useState('0.5');
+  const [selectedTraderWallet, _setSelectedTraderWallet] = React.useState<string | null>(null);
+  const [copyAmount, _setCopyAmount] = React.useState('1000');
+  const [amountPerTrade, _setAmountPerTrade] = React.useState('100');
+  const [stopLoss, _setStopLoss] = React.useState('10');
+  const [takeProfit, _setTakeProfit] = React.useState('30');
+  const [maxSlippage, _setMaxSlippage] = React.useState('0.5');
 
   // Wallet action modals
   const [showSendModal, setShowSendModal] = React.useState(false);
@@ -576,7 +572,7 @@ export default function HomeScreen() {
   };
 
   // Validate copy trade form
-  const validateCopyTradeForm = (): boolean => {
+  const _validateCopyTradeForm = (): boolean => {
     const amount = parseFloat(copyAmount);
     const perTrade = parseFloat(amountPerTrade);
     const sl = stopLoss ? parseFloat(stopLoss) : undefined;

@@ -39,7 +39,7 @@ export {
 export { TabBar } from './TabBar';
 export { WebPreviewBanner } from './WebPreviewBanner';
 export { SafeHtml, SafeHtmlText } from './SafeHtml';
-export { NotificationBadge } from './NotificationBadge';
+export { NotificationTabBadge } from './NotificationBadge';
 
 // Chart Components
 export { SimpleCandlestickChart } from './SimpleCandlestickChart';
