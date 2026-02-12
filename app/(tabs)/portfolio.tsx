@@ -12,7 +12,8 @@ import {
   useWindowDimensions,
   Linking,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Settings, ChevronRight, X, TrendingUp } from 'lucide-react-native';
@@ -21,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
-import { NeonCard, NeonButton, NeonInput, QueueStatusBanner, PortfolioSkeleton, ErrorBoundary } from '@/components';
+import { NeonCard, NeonButton, QueueStatusBanner, PortfolioSkeleton, ErrorBoundary } from '@/components';
 import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, api } from '@/services';
 import { fetchCopyConfig, createCopyConfig, stopCopyTrading } from '@/services/copyTrading';
 import { validateSession } from '@/utils';
@@ -938,47 +939,77 @@ export default function PortfolioScreen() {
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="none"
               >
-                <Text style={styles.editWalletTitle}>@{selectedWallet?.username}</Text>
+                <Text style={styles.editWalletTitle}>{selectedWallet?.name || selectedWallet?.username}</Text>
 
-                <NeonInput
-                  label="Total Amount (USDC)"
-                  placeholder="1000"
-                  value={editAmount}
-                  onChangeText={setEditAmount}
-                  keyboardType="numeric"
-                />
+                <View style={styles.editInputSection}>
+                  <Text style={styles.editInputLabel}>Total Amount (SOL)</Text>
+                  <View style={styles.editInputContainer}>
+                    <TextInput
+                      style={styles.editInput}
+                      placeholder="1000"
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={editAmount}
+                      onChangeText={setEditAmount}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
 
-                <NeonInput
-                  label="Amount per Trade (USDC)"
-                  placeholder="100"
-                  value={editAmountPerTrade}
-                  onChangeText={setEditAmountPerTrade}
-                  keyboardType="numeric"
-                />
+                <View style={styles.editInputSection}>
+                  <Text style={styles.editInputLabel}>Amount per Trade (SOL)</Text>
+                  <View style={styles.editInputContainer}>
+                    <TextInput
+                      style={styles.editInput}
+                      placeholder="100"
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={editAmountPerTrade}
+                      onChangeText={setEditAmountPerTrade}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
 
-                <NeonInput
-                  label="Stop Loss (%)"
-                  placeholder="10"
-                  value={editSL}
-                  onChangeText={setEditSL}
-                  keyboardType="numeric"
-                />
+                <View style={styles.editInputSection}>
+                  <Text style={styles.editInputLabel}>Stop Loss (%)</Text>
+                  <View style={styles.editInputContainer}>
+                    <TextInput
+                      style={styles.editInput}
+                      placeholder="10"
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={editSL}
+                      onChangeText={setEditSL}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
 
-                <NeonInput
-                  label="Take Profit (%)"
-                  placeholder="30"
-                  value={editTP}
-                  onChangeText={setEditTP}
-                  keyboardType="numeric"
-                />
+                <View style={styles.editInputSection}>
+                  <Text style={styles.editInputLabel}>Take Profit (%)</Text>
+                  <View style={styles.editInputContainer}>
+                    <TextInput
+                      style={styles.editInput}
+                      placeholder="30"
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={editTP}
+                      onChangeText={setEditTP}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
 
-                <NeonInput
-                  label="Slippage (%)"
-                  placeholder="1"
-                  value={editSlippage}
-                  onChangeText={setEditSlippage}
-                  keyboardType="numeric"
-                />
+                <View style={styles.editInputSection}>
+                  <Text style={styles.editInputLabel}>Slippage (%)</Text>
+                  <View style={styles.editInputContainer}>
+                    <TextInput
+                      style={styles.editInput}
+                      placeholder="1"
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={editSlippage}
+                      onChangeText={setEditSlippage}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
 
 
 
@@ -1739,6 +1770,29 @@ const styles = StyleSheet.create({
   },
   createConfirmButtonTextDisabled: {
     color: COLORS.textSecondary
+  },
+  editInputSection: {
+    marginBottom: SPACING.m,
+  },
+  editInputLabel: {
+    ...FONTS.sfProMedium,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginBottom: SPACING.xs,
+  },
+  editInputContainer: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.medium,
+    paddingHorizontal: SPACING.m,
+    height: 48,
+  },
+  editInput: {
+    ...FONTS.sfProRegular,
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: 16,
   }
 });
 
