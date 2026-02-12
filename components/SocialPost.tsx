@@ -400,7 +400,7 @@ SocialPost.displayName = 'SocialPost';
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.s,
   },
   header: {
     flexDirection: 'row',

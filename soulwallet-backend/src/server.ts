@@ -2723,7 +2723,7 @@ app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: 
         const visibility = req.query.visibility as string | undefined;
         const user = await prisma.user.findUnique({
             where: { username: username },
-            select: { id: true }
+            select: { id: true, profileImage: true }
         });
 
         if (!user) {
@@ -2784,7 +2784,7 @@ app.get('/users/:username/posts', authMiddleware, async (req: AuthRequest, res: 
             likesCount: post._count.likes,
             commentsCount: post._count.comments,
             createdAt: post.createdAt,
-            user: { username: username, profileImage: null },
+            user: { username: username, profileImage: user.profileImage || null },
             isLiked: post.likes.length > 0
         }));
 

@@ -621,17 +621,21 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.m,
   },
   postHeader: {
-    marginBottom: SPACING.m,
+    marginTop: -SPACING.m,
+    marginLeft: -SPACING.m,
+    marginBottom: SPACING.xs,
+    paddingTop: SPACING.xs,
+    paddingLeft: SPACING.xs,
   },
   profileContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   avatar: {
-    width: 50,
-    height: 50,
+    width: 33,
+    height: 33,
     borderRadius: BORDER_RADIUS.full,
-    marginRight: SPACING.m,
+    marginRight: SPACING.xs,
   },
   defaultAvatar: {
     backgroundColor: COLORS.solana + '50',
@@ -641,7 +645,7 @@ const styles = StyleSheet.create({
   avatarText: {
     ...FONTS.phantomBold,
     color: COLORS.textPrimary,
-    fontSize: 20,
+    fontSize: 12,
   },
   userInfo: {
     flex: 1,
@@ -658,7 +662,7 @@ const styles = StyleSheet.create({
   username: {
     ...FONTS.phantomSemiBold,
     color: COLORS.textPrimary,
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '600',
   },
   verified: {
@@ -667,8 +671,8 @@ const styles = StyleSheet.create({
   timestamp: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 14,
-    marginTop: 2,
+    fontSize: 11,
+    marginTop: 1,
   },
   postContent: {
     marginBottom: SPACING.m,
