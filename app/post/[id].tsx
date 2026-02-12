@@ -29,6 +29,8 @@ interface PostData {
   isLiked?: boolean;
   tokenSymbol?: string;
   tokenAddress?: string;
+  profileImage?: string;
+  username?: string;
   user: {
     username: string;
     profileImage?: string;
@@ -295,7 +297,7 @@ export default function PostDetailScreen() {
   }
 
   // Use vote data from state
-  const { agreeCount, disagreeCount, agreePercent, disagreePercent } = voteData;
+  const { agreePercent, disagreePercent } = voteData;
   const hasVotes = voteData.agreeCount + voteData.disagreeCount > 0;
 
 

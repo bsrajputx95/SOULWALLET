@@ -10,14 +10,12 @@ import {
   Modal,
   useWindowDimensions,
   Animated,
-  Easing,
   Image,
   ScrollView,
   PanResponder,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Settings, Search, X, Plus, Link, ShoppingBag, Zap } from 'lucide-react-native';
+import { Settings, Search, X, Plus, Link, ShoppingBag } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
@@ -38,7 +36,6 @@ export default function SosioScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [followingList, setFollowingList] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<FeedTab>('forYou');
   const activeTabRef = useRef<FeedTab>('forYou'); // Ref for PanResponder to avoid stale closure
 
@@ -304,10 +301,10 @@ export default function SosioScreen() {
     if (mentionToken && tokenAddress.trim()) {
       tokenMetadata = {
         tokenAddress: tokenAddress.trim(),
-        tokenSymbol: tokenName.trim() || undefined,
-        tokenName: tokenName.trim() || undefined,
+        tokenSymbol: tokenName.trim() || '',
+        tokenName: tokenName.trim() || '',
         tokenVerified: tokenVerified,
-        tokenPrice: verifiedTokenPrice || undefined,
+        tokenPrice: verifiedTokenPrice || 0,
       };
     }
 
