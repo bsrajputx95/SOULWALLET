@@ -1785,10 +1785,9 @@ app.delete('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: R
             data: { status: 'cancelled' }
         });
 
-        // Mark config as inactive ONLY after preparing cancel transactions
-        await prisma.copyTradingConfig.update({
-            where: { userId: req.userId! },
-            data: { isActive: false }
+        // Actually delete the config (not just soft-delete)
+        await prisma.copyTradingConfig.delete({
+            where: { userId: req.userId! }
         });
 
         // Remove webhook if no other followers (non-blocking)
