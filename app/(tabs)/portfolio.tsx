@@ -904,11 +904,14 @@ export default function PortfolioScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{ flex: 1 }}
         >
-          <Pressable
-            style={[styles.modalOverlay, { justifyContent: 'flex-end' }]}
-            onPress={() => setSelectedWallet(null)}
-          >
+          <View style={[styles.modalOverlay, { justifyContent: 'flex-end' }]}>
+            {/* Tappable backdrop area to dismiss */}
             <Pressable
+              style={{ flex: 1 }}
+              onPress={() => setSelectedWallet(null)}
+            />
+            {/* Modal content — regular View so it doesn't steal touches from TextInput */}
+            <View
               style={[
                 styles.modalContainer,
                 {
@@ -920,7 +923,6 @@ export default function PortfolioScreen() {
                   maxHeight: '80%'
                 }
               ]}
-              onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Edit Copy Trading</Text>
@@ -1018,8 +1020,8 @@ export default function PortfolioScreen() {
                   />
                 </View>
               </ScrollView>
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </KeyboardAvoidingView>
       </Modal>
 
