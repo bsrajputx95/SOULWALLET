@@ -24,32 +24,63 @@ export async function verifyToken(address: string): Promise<TokenVerificationRes
             return { valid: false, error: 'Invalid Solana address format' };
         }
 
-        // Step 2: Check Jupiter Price API (indicates liquid token)
+        let tokenSymbol: string | undefined;
+        let tokenName: string | undefined;
+        let tokenPrice: number | undefined;
+        let tokenSource: TokenVerificationResult['source'];
+        let tokenVerified = false;
+
+        // Step 2: Try Jupiter Token API for metadata (most reliable for name/symbol)
+        try {
+            const response = await axios.get(`https://tokens.jup.ag/token/${address}`, {
+                timeout: 5000
+            });
+            if (response.data && response.data.symbol) {
+                tokenSymbol = response.data.symbol;
+                tokenName = response.data.name || response.data.symbol;
+                tokenSource = 'jupiter';
+                tokenVerified = true;
+            }
+        } catch {
+            // Continue to next source
+        }
+
+        // Step 3: Try Jupiter Price API for price
         try {
             const response = await axios.get(`${JUPITER_PRICE_API}?ids=${address}`, {
                 timeout: 5000
             });
             const data = response.data.data?.[address];
             if (data && data.price) {
-                return {
-                    valid: true,
-                    source: 'jupiter',
-                    symbol: data.mintSymbol,
-                    name: data.mintSymbol,
-                    price: data.price,
-                    verified: true
-                };
+                tokenPrice = data.price;
+                if (!tokenSymbol && data.mintSymbol) {
+                    tokenSymbol = data.mintSymbol;
+                    tokenName = data.mintSymbol;
+                    tokenSource = 'jupiter';
+                }
             }
         } catch {
-            // Continue to next source
+            // Continue
         }
 
-        // Step 3: Check Pump.fun API for new tokens
+        // If we have symbol from Jupiter, return early
+        if (tokenSymbol) {
+            return {
+                valid: true,
+                source: tokenSource || 'jupiter',
+                symbol: tokenSymbol,
+                name: tokenName || tokenSymbol,
+                price: tokenPrice || 0,
+                verified: tokenVerified
+            };
+        }
+
+        // Step 4: Check Pump.fun API for new tokens
         try {
             const response = await axios.get(`${PUMP_FUN_API}/${address}`, {
                 timeout: 5000
             });
-            if (response.data) {
+            if (response.data && response.data.symbol) {
                 const { symbol, name, marketCap, totalSupply } = response.data;
                 const price = totalSupply > 0 ? marketCap / totalSupply : 0;
                 return {
@@ -62,10 +93,10 @@ export async function verifyToken(address: string): Promise<TokenVerificationRes
                 };
             }
         } catch {
-            // Continue to next source
+            // Continue
         }
 
-        // Step 4: Check BirdEye API
+        // Step 5: Check BirdEye API
         const birdeyeKey = process.env.BIRDEYE_API_KEY;
         if (birdeyeKey) {
             try {
@@ -74,7 +105,7 @@ export async function verifyToken(address: string): Promise<TokenVerificationRes
                     timeout: 5000
                 });
                 const data = response.data.data;
-                if (data) {
+                if (data && data.symbol) {
                     return {
                         valid: true,
                         source: 'birdeye',
@@ -85,15 +116,38 @@ export async function verifyToken(address: string): Promise<TokenVerificationRes
                     };
                 }
             } catch {
-                // Continue to fallback
+                // Continue
             }
         }
 
-        // Step 5: Valid address but no price data found
+        // Step 6: Try DexScreener API as last resort
+        try {
+            const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+                timeout: 5000
+            });
+            const pairs = response.data?.pairs;
+            if (pairs && pairs.length > 0) {
+                const token = pairs[0].baseToken.address.toLowerCase() === address.toLowerCase()
+                    ? pairs[0].baseToken
+                    : pairs[0].quoteToken;
+                return {
+                    valid: true,
+                    source: 'unknown',
+                    symbol: token.symbol,
+                    name: token.name,
+                    price: parseFloat(pairs[0].priceUsd) || 0,
+                    verified: false
+                };
+            }
+        } catch {
+            // Continue
+        }
+
+        // Step 7: Valid address but no data found anywhere
         return {
             valid: true,
             source: 'unknown',
-            symbol: 'Unknown',
+            symbol: address.slice(0, 6) + '...',
             name: 'Unknown Token',
             price: 0,
             verified: false

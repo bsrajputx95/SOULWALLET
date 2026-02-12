@@ -892,7 +892,20 @@ app.get('/wallet/balances', authMiddleware, async (req: AuthRequest, res: Respon
             let name = metadata?.name;
             let logo = metadata?.logo;
 
-            // Fallback for unknown tokens
+            // Fallback for unknown tokens — fetch metadata from Jupiter
+            if (!symbol) {
+                try {
+                    const jupTokenRes = await axios.get(`https://tokens.jup.ag/token/${mint}`, { timeout: 3000 });
+                    if (jupTokenRes.data && jupTokenRes.data.symbol) {
+                        symbol = jupTokenRes.data.symbol;
+                        name = jupTokenRes.data.name || jupTokenRes.data.symbol;
+                        logo = jupTokenRes.data.logoURI || '';
+                    }
+                } catch {
+                    // Ignore — will use truncated address
+                }
+            }
+
             if (!symbol) {
                 symbol = mint.slice(0, 6) + '...';
                 name = 'Unknown Token';
