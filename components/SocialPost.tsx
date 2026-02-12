@@ -405,15 +405,19 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: -SPACING.m,
+    marginLeft: -SPACING.m,
     marginBottom: SPACING.xs,
+    paddingTop: SPACING.xs,
+    paddingLeft: SPACING.xs,
   },
   profileContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   avatar: {
-    width: 30,
-    height: 30,
+    width: 33,
+    height: 33,
     borderRadius: BORDER_RADIUS.full,
     marginRight: SPACING.xs,
   },
@@ -433,7 +437,7 @@ const styles = StyleSheet.create({
   username: {
     ...FONTS.phantomSemiBold,
     color: COLORS.textPrimary,
-    fontSize: 11,
+    fontSize: 12,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -446,7 +450,7 @@ const styles = StyleSheet.create({
   timestamp: {
     ...FONTS.phantomRegular,
     color: COLORS.textSecondary,
-    fontSize: 10,
+    fontSize: 11,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
