@@ -243,13 +243,23 @@ export default function PortfolioScreen() {
     loadData();
   }, [fetchUserProfile, fetchWalletData]);
 
+  // Edit modal state — declared before useFocusEffect so we can skip refresh when modal is open
+  const [selectedWallet, setSelectedWallet] = useState<CopiedWallet | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editAmountPerTrade, setEditAmountPerTrade] = useState('');
+  const [editSL, setEditSL] = useState('');
+  const [editTP, setEditTP] = useState('');
+  const [editSlippage, setEditSlippage] = useState('');
+
   // Refresh when tab becomes focused
   useFocusEffect(
     useCallback(() => {
+      // Skip refresh when edit modal is open to prevent input flickering
+      if (selectedWallet) return;
       // Refresh wallet data when portfolio tab is focused
       fetchWalletData();
       loadCopyConfig();
-    }, [fetchWalletData])
+    }, [fetchWalletData, selectedWallet])
   );
 
   const [isUpdatingCopyTrade, setIsUpdatingCopyTrade] = useState(false);
@@ -348,12 +358,6 @@ export default function PortfolioScreen() {
   }>>([]);
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('24h');
   const [chartType, setChartType] = useState<ChartType>('line');
-  const [selectedWallet, setSelectedWallet] = useState<CopiedWallet | null>(null);
-  const [editAmount, setEditAmount] = useState('');
-  const [editAmountPerTrade, setEditAmountPerTrade] = useState('');
-  const [editSL, setEditSL] = useState('');
-  const [editTP, setEditTP] = useState('');
-  const [editSlippage, setEditSlippage] = useState('');
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1d' | '7d' | '30d' | '1y'>('1d');
 
   // Wallet creation/import is handled by /solana-setup page
