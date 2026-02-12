@@ -230,55 +230,23 @@ export default function AccountScreen() {
     }
   }, [profile]);
 
-  // Image picker handler
+  // Image picker handler — directly opens gallery
   const handlePickImage = async () => {
-    showAlert(
-      'Change Profile Picture',
-      'Choose an option',
-      [
-        {
-          text: 'Take Photo',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              showAlert('Permission Required', 'Please grant camera access in Settings');
-              return;
-            }
-            const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaType.Images,
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 1,
-              base64: false,
-            });
-            if (!result.canceled && result.assets[0]) {
-              await uploadImageFromAsset(result.assets[0]);
-            }
-          },
-        },
-        {
-          text: 'Choose from Library',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              showAlert('Permission Required', 'Please grant photo library access in Settings');
-              return;
-            }
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaType.Images,
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 1,
-              base64: false,
-            });
-            if (!result.canceled && result.assets[0]) {
-              await uploadImageFromAsset(result.assets[0]);
-            }
-          },
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      showAlert('Permission Required', 'Please grant photo library access in Settings');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+      base64: false,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await uploadImageFromAsset(result.assets[0]);
+    }
   };
 
   const uploadImageFromAsset = async (asset: ImagePicker.ImagePickerAsset) => {
