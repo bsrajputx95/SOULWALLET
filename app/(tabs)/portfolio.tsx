@@ -21,6 +21,7 @@ import * as SecureStore from 'expo-secure-store';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, NeonButton, NeonInput, QueueStatusBanner, PortfolioSkeleton, ErrorBoundary } from '@/components';
 import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, api } from '@/services';
+import { fetchCopyConfig, createCopyConfig, stopCopyTrading } from '@/services/copyTrading';
 import { validateSession } from '@/utils';
 import { useAlert } from '@/contexts/AlertContext';
 
@@ -86,7 +87,41 @@ export default function PortfolioScreen() {
   const [user, setUser] = useState<any>(null);
   const [solanaPublicKey, setSolanaPublicKey] = useState<string | null>(null);
   const [tokens, setTokens] = useState<Token[]>([]);
-  const [copiedWallets] = useState<CopiedWallet[]>([]);
+  const [copiedWallets, setCopiedWallets] = useState<CopiedWallet[]>([]);
+  const [isCopyLoading, setIsCopyLoading] = useState(false);
+
+  // Fetch copy trading config from backend
+  const loadCopyConfig = useCallback(async () => {
+    try {
+      setIsCopyLoading(true);
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) return;
+      const result = await fetchCopyConfig(token);
+      if (result.success && result.config) {
+        const cfg = result.config;
+        setCopiedWallets([{
+          id: cfg.id,
+          address: cfg.traderAddress,
+          name: (cfg as any).name || `Copy Trade`,
+          isActive: cfg.isActive,
+          pnl: 0,
+          username: (cfg as any).name || `${cfg.traderAddress.slice(0, 6)}...${cfg.traderAddress.slice(-4)}`,
+          walletAddress: cfg.traderAddress,
+          totalAmount: cfg.totalInvestment,
+          amountPerTrade: cfg.perTradeAmount,
+          stopLoss: cfg.stopLossPercent,
+          takeProfit: cfg.takeProfitPercent,
+          roi: 0,
+        }]);
+      } else {
+        setCopiedWallets([]);
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('Failed to load copy config', e);
+    } finally {
+      setIsCopyLoading(false);
+    }
+  }, []);
   const [totalBalance, setTotalBalance] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -202,7 +237,7 @@ export default function PortfolioScreen() {
     void validateSession();
     const loadData = async () => {
       setIsLoading(true);
-      await Promise.all([fetchUserProfile(), fetchWalletData()]);
+      await Promise.all([fetchUserProfile(), fetchWalletData(), loadCopyConfig()]);
       setIsLoading(false);
     };
     loadData();
@@ -213,14 +248,64 @@ export default function PortfolioScreen() {
     useCallback(() => {
       // Refresh wallet data when portfolio tab is focused
       fetchWalletData();
+      loadCopyConfig();
     }, [fetchWalletData])
   );
 
-  const updateCopiedWallet = async (_id: string, _updates: any, _totp: string) => {
-    showAlert('🚧 Demo Mode', 'Copy trade update is simulated.');
-    return true;
+  const [isUpdatingCopyTrade, setIsUpdatingCopyTrade] = useState(false);
+
+  const updateCopiedWallet = async (_id: string, updates: any) => {
+    try {
+      setIsUpdatingCopyTrade(true);
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) return false;
+
+      // Find the current wallet to get current values
+      const wallet = copiedWallets.find(w => w.id === _id);
+      if (!wallet) return false;
+
+      const result = await createCopyConfig({
+        ...(wallet.name ? { name: wallet.name } : {}),
+        traderAddress: wallet.address,
+        totalInvestment: updates.totalAmount ?? wallet.totalAmount ?? 1000,
+        perTradeAmount: updates.amountPerTrade ?? wallet.amountPerTrade ?? 100,
+        stopLossPercent: updates.stopLoss ?? wallet.stopLoss ?? 10,
+        takeProfitPercent: updates.takeProfit ?? wallet.takeProfit ?? 30,
+        exitWithTrader: true,
+      }, token);
+
+      if (result.success) {
+        await loadCopyConfig();
+        return true;
+      } else {
+        showAlert('Error', result.error || 'Failed to update copy trade');
+        return false;
+      }
+    } catch (e: any) {
+      showAlert('Error', e.message || 'Failed to update');
+      return false;
+    } finally {
+      setIsUpdatingCopyTrade(false);
+    }
   };
-  const isUpdatingCopyTrade = false;
+
+  const handleStopCopying = async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) return;
+      const result = await stopCopyTrading(token);
+      if (result.success) {
+        showAlert('Stopped', 'Copy trading has been stopped');
+        setCopiedWallets([]);
+        setSelectedWallet(null);
+        await loadCopyConfig();
+      } else {
+        showAlert('Error', result.error || 'Failed to stop copy trading');
+      }
+    } catch (e: any) {
+      showAlert('Error', e.message || 'Failed to stop');
+    }
+  };
 
   // Mock open positions query - coming soon
   const openPositionsQuery = { data: [] as any[], isLoading: false, refetch: async () => ({}) };
@@ -318,6 +403,7 @@ export default function PortfolioScreen() {
     await refetch();
     await openPositionsQuery.refetch();
     await loadWatchlist();
+    await loadCopyConfig();
     setRefreshing(false);
   }, [refetch, loadWatchlist]);
 
@@ -549,52 +635,81 @@ export default function PortfolioScreen() {
 
               {activeTab === 'copied' && (
                 <View style={styles.walletsContainer}>
-                  {copiedWallets.map(wallet => (
-                    <NeonCard key={wallet.id} style={styles.walletCard}>
-                      <View style={styles.walletHeader}>
-                        <View style={styles.walletInfo}>
-                          <Text style={styles.walletUsername}>@{wallet.username}</Text>
-                          <Text style={styles.copiedWalletAddress}>{wallet.walletAddress}</Text>
+                  {isCopyLoading ? (
+                    <View style={{ padding: SPACING.m, alignItems: 'center' }}>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14 }}>Loading copy trades...</Text>
+                    </View>
+                  ) : copiedWallets.length === 0 ? (
+                    <View style={{ padding: SPACING.m, alignItems: 'center' }}>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14, textAlign: 'center' }}>
+                        No active copy trades.
+                      </Text>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 12, marginTop: SPACING.s, textAlign: 'center' }}>
+                        Go to Home → Copy Trade to set up copy trading.
+                      </Text>
+                    </View>
+                  ) : (
+                    copiedWallets.map(wallet => (
+                      <NeonCard key={wallet.id} style={styles.walletCard}>
+                        <View style={styles.walletHeader}>
+                          <View style={styles.walletInfo}>
+                            <Text style={styles.walletUsername}>{wallet.name}</Text>
+                            <Text style={styles.copiedWalletAddress}>
+                              {wallet.walletAddress ? `${wallet.walletAddress.slice(0, 8)}...${wallet.walletAddress.slice(-6)}` : wallet.address}
+                            </Text>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <Pressable
+                              style={styles.editButton}
+                              onPress={() => {
+                                setSelectedWallet(wallet);
+                                setEditAmount(wallet.totalAmount?.toString() || '1000');
+                                setEditAmountPerTrade(wallet.amountPerTrade?.toString() || '100');
+                                setEditSL(wallet.stopLoss ? Math.abs(wallet.stopLoss).toString() : '10');
+                                setEditTP(wallet.takeProfit?.toString() || '30');
+                                setEditSlippage(wallet.slippage?.toString() || '1');
+                              }}
+                            >
+                              <Text style={styles.editButtonText}>Edit</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[styles.editButton, { backgroundColor: COLORS.error + '20' }]}
+                              onPress={handleStopCopying}
+                            >
+                              <Text style={[styles.editButtonText, { color: COLORS.error }]}>Stop</Text>
+                            </Pressable>
+                          </View>
                         </View>
 
-                        <Pressable
-                          style={styles.editButton}
-                          onPress={() => {
-                            setSelectedWallet(wallet);
-                            setEditAmount(wallet.totalAmount?.toString() || '1000');
-                            setEditAmountPerTrade(wallet.amountPerTrade?.toString() || '100');
-                            setEditSL(wallet.stopLoss ? Math.abs(wallet.stopLoss).toString() : '10');
-                            setEditTP(wallet.takeProfit?.toString() || '30');
-                            setEditSlippage(wallet.slippage?.toString() || '1');
-                          }}
-                        >
-                          <Text style={styles.editButtonText}>Edit</Text>
-                        </Pressable>
-                      </View>
+                        <View style={styles.walletStats}>
+                          <View style={styles.walletStat}>
+                            <Text style={styles.walletStatLabel}>Budget</Text>
+                            <Text style={styles.walletStatValue}>◎{wallet.totalAmount?.toFixed(1) || '0'}</Text>
+                          </View>
+                          <View style={styles.walletStat}>
+                            <Text style={styles.walletStatLabel}>Per Trade</Text>
+                            <Text style={styles.walletStatValue}>◎{wallet.amountPerTrade?.toFixed(2) || '0'}</Text>
+                          </View>
+                          <View style={styles.walletStat}>
+                            <Text style={styles.walletStatLabel}>SL</Text>
+                            <Text style={[styles.walletStatValue, { color: COLORS.error }]}>{wallet.stopLoss}%</Text>
+                          </View>
+                          <View style={styles.walletStat}>
+                            <Text style={styles.walletStatLabel}>TP</Text>
+                            <Text style={[styles.walletStatValue, { color: COLORS.success }]}>{wallet.takeProfit}%</Text>
+                          </View>
+                        </View>
 
-                      <View style={styles.walletStats}>
-                        <View style={styles.walletStat}>
-                          <Text style={styles.walletStatLabel}>ROI</Text>
-                          <Text style={[
-                            styles.walletStatValue,
-                            { color: wallet.roi >= 0 ? COLORS.success : COLORS.error }
-                          ]}>
-                            {wallet.roi >= 0 ? '+' : ''}{wallet.roi.toFixed(1)}%
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: SPACING.xs, gap: 6 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: wallet.isActive ? COLORS.success : COLORS.error }} />
+                          <Text style={{ ...FONTS.sfProRegular, color: wallet.isActive ? COLORS.success : COLORS.error, fontSize: 12 }}>
+                            {wallet.isActive ? 'Active' : 'Paused'}
                           </Text>
                         </View>
-
-                        <View style={styles.walletStat}>
-                          <Text style={styles.walletStatLabel}>PnL</Text>
-                          <Text style={[
-                            styles.walletStatValue,
-                            { color: wallet.pnl >= 0 ? COLORS.success : COLORS.error }
-                          ]}>
-                            ${wallet.pnl.toLocaleString()}
-                          </Text>
-                        </View>
-                      </View>
-                    </NeonCard>
-                  ))}
+                      </NeonCard>
+                    ))
+                  )}
                 </View>
               )}
 
@@ -837,8 +952,8 @@ export default function PortfolioScreen() {
               <View style={styles.editActions}>
                 <NeonButton
                   title="Stop Copying"
-                  onPress={() => {
-                    setSelectedWallet(null);
+                  onPress={async () => {
+                    await handleStopCopying();
                   }}
                   style={[styles.editActionButton, { backgroundColor: COLORS.error + '20' }]}
                 />
@@ -861,7 +976,7 @@ export default function PortfolioScreen() {
                       if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
                       if (!isNaN(slippageVal)) updates.slippage = slippageVal;
 
-                      const success = await updateCopiedWallet(selectedWallet.id, updates, '');
+                      const success = await updateCopiedWallet(selectedWallet.id, updates);
                       if (success) {
                         showAlert('Success', 'Copy trade settings updated');
                         setSelectedWallet(null);

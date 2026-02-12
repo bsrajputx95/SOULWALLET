@@ -437,7 +437,7 @@ export default function HomeScreen() {
     setSelectedQueueItem(null);
   }, [loadCopyTradingData]);
 
-  const stopCopyTrade = async (copyTradingId: string) => {
+  const _stopCopyTrade = async (copyTradingId: string) => {
     try {
       await stopCopyTradeMutation.mutateAsync({ copyTradingId });
       showAlert('Success', 'Stopped copy trading');
@@ -750,26 +750,12 @@ export default function HomeScreen() {
                   </View>
                 </View>
 
-                {/* Active Copy Settings */}
+                {/* Note about Portfolio */}
                 {copyTradeSettings.length > 0 && (
-                  <View style={styles.activeCopiesContainer}>
-                    <Text style={styles.activeCopiesTitle}>Active Copy Trades</Text>
-                    {copyTradeSettings.map((setting: any) => (
-                      <View key={setting.id} style={styles.activeCopyItem}>
-                        <View style={styles.activeCopyInfo}>
-                          <Text style={styles.activeCopyWallet}>
-                            {setting.name || setting.trader?.username || `${setting.traderAddress?.slice(0, 8)}...${setting.traderAddress?.slice(-8)}`}
-                          </Text>
-                          <Text style={styles.activeCopyAmount}>◎{setting.perTradeAmount}/trade</Text>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.stopCopyButton}
-                          onPress={() => stopCopyTrade(setting.id)}
-                        >
-                          <Text style={styles.stopCopyText}>Stop</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
+                  <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+                    <Text style={{ color: COLORS.success, fontSize: 13, fontFamily: 'System' }}>
+                      ✓ You have an active copy trade. Manage it in Portfolio → Copied tab.
+                    </Text>
                   </View>
                 )}
 
