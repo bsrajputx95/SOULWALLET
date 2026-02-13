@@ -9,14 +9,10 @@ import { COLORS } from "@/constants";
 import { ErrorBoundary, WebPreviewBanner } from "@/components";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AlertProvider } from "@/contexts/AlertContext";
-import { performanceMonitor, trackBundleSize } from "@/utils";
+
 import { registerBackgroundTasks } from "@/services";
 
-// Initialize performance monitoring
-if (__DEV__) {
-  performanceMonitor.startTiming('app-startup');
-  trackBundleSize();
-}
+
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 void SplashScreen.preventAutoHideAsync();
@@ -62,10 +58,6 @@ export default function RootLayout() {
     if (appIsReady) {
       SplashScreen.hideAsync()
         .then(() => {
-          if (__DEV__) {
-            performanceMonitor.endTiming('app-startup');
-            performanceMonitor.logSummary();
-          }
         })
         .catch(() => {
           // Silently ignore splash screen errors

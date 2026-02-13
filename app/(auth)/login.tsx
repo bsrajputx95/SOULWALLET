@@ -17,19 +17,17 @@ import { Mail, Lock, LogIn, Eye, EyeOff } from 'lucide-react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '@/constants';
-import { NeonButton, NeonDivider, SocialButton, GlowingText } from '@/components';
+import { NeonButton, GlowingText } from '@/components';
 import { api } from '@/services';
 import { useAuth } from '@/contexts/AuthContext';
-import { useAlert } from '@/contexts/AlertContext';
+import { persistAuthSession } from '@/utils/session';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
 
 export default function LoginNewScreen() {
     const router = useRouter();
     const { setToken } = useAuth();
-    const { showAlert } = useAlert();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -39,10 +37,30 @@ export default function LoginNewScreen() {
 
     const passwordInputRef = useRef<TextInput>(null);
 
-    const handleLogin = async () => {
-        Keyboard.dismiss();
+    const getLoginErrorMessage = (error: unknown): string => {
+        if (!(error instanceof Error)) {
+            return 'Something went wrong. Please try again.';
+        }
 
-        if (!email.trim()) {
+        if (error.message.includes('Network request failed')) {
+            return 'Network error. Please check your connection.';
+        }
+
+        if (error.message.includes('Too many authentication attempts')) {
+            return 'Too many attempts. Please wait a bit and try again.';
+        }
+
+        return error.message || 'Login failed. Please try again.';
+    };
+
+    const handleLogin = async () => {
+        if (isLoading) {
+            return;
+        }
+        Keyboard.dismiss();
+        const emailOrUsername = email.trim();
+
+        if (!emailOrUsername) {
             setErrorMessage('Email or username is required');
             return;
         }
@@ -64,38 +82,26 @@ export default function LoginNewScreen() {
                 user: unknown;
                 error?: string;
             }>('/login', {
-                emailOrUsername: email.trim(),
+                emailOrUsername,
                 password,
             });
 
-            // Store JWT token securely
-            if (data.token) {
-                await SecureStore.setItemAsync('token', data.token);
-                await SecureStore.setItemAsync('user_data', JSON.stringify(data.user));
-                // Update AuthContext with the new token
-                setToken(data.token);
+            if (!data.token) {
+                throw new Error('Login failed. Please try again.');
             }
+            await persistAuthSession(data.token, data.user);
+            setToken(data.token);
 
             // Navigate to main app on success
             router.replace('/(tabs)');
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'Network error. Please check your connection.';
-            setErrorMessage(errorMessage);
+            setErrorMessage(getLoginErrorMessage(error));
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleSocialPress = (provider: string) => {
-        if (Platform.OS !== 'web') {
-            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        }
-        showAlert(
-            'Coming Soon',
-            `${provider} login will be available in a future update.`,
-            [{ text: 'OK' }]
-        );
-    };
+
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -143,7 +149,7 @@ export default function LoginNewScreen() {
                                     onChangeText={setEmail}
                                     autoCapitalize="none"
                                     autoCorrect={false}
-                                    keyboardType="email-address"
+                                    keyboardType="default"
                                     returnKeyType="next"
                                     onSubmitEditing={() => passwordInputRef.current?.focus()}
                                 />
@@ -187,33 +193,20 @@ export default function LoginNewScreen() {
                                 </TouchableOpacity>
                             </Link>
                         </View>
+
+
                         {/* Login Button */}
                         <NeonButton
                             title="Login"
                             icon={<LogIn size={20} color={COLORS.textPrimary} />}
                             onPress={handleLogin}
                             loading={isLoading}
+                            disabled={isLoading}
                             fullWidth
                             style={styles.loginButton}
                         />
 
-                        <NeonDivider text="OR CONTINUE WITH" />
 
-                        {/* Social Buttons */}
-                        <View style={styles.socialButtonsContainer}>
-                            <SocialButton
-                                title="Google"
-                                icon={<Text style={styles.socialIcon}>G</Text>}
-                                style={styles.socialButton}
-                                onPress={() => handleSocialPress('Google')}
-                            />
-                            <SocialButton
-                                title="Apple"
-                                icon={<Text style={styles.socialIcon}>A</Text>}
-                                style={styles.socialButton}
-                                onPress={() => handleSocialPress('Apple')}
-                            />
-                        </View>
 
                         {/* Sign Up Link */}
                         <View style={styles.signupContainer}>
@@ -331,18 +324,6 @@ const styles = StyleSheet.create({
     },
     loginButton: {
         marginBottom: 24,
-    },
-    socialButtonsContainer: {
-        flexDirection: 'row',
-        gap: 12,
-        marginBottom: 24,
-    },
-    socialButton: {
-        flex: 1,
-    },
-    socialIcon: {
-        fontSize: 20,
-        fontWeight: 'bold',
     },
     signupContainer: {
         flexDirection: 'row',

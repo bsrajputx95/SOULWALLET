@@ -11,6 +11,45 @@ export function setAuthLogout(logoutFn: () => Promise<void>) {
   authLogout = logoutFn;
 }
 
+type ApiError = Error & { status?: number };
+
+const getErrorMessage = async (response: Response): Promise<string> => {
+  const fallbackMessage = `HTTP ${response.status}`;
+
+  try {
+    const responseText = await response.text();
+    if (!responseText) {
+      return fallbackMessage;
+    }
+
+    try {
+      const parsed = JSON.parse(responseText) as { error?: string; message?: string };
+      return parsed.error || parsed.message || fallbackMessage;
+    } catch {
+      return responseText;
+    }
+  } catch {
+    return fallbackMessage;
+  }
+};
+
+const parseSuccessResponse = async <T>(response: Response): Promise<T> => {
+  if (response.status === 204) {
+    return {} as T;
+  }
+
+  const responseText = await response.text();
+  if (!responseText) {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(responseText) as T;
+  } catch {
+    return responseText as T;
+  }
+};
+
 class ApiClient {
   private async getAuthToken(): Promise<string | null> {
     return await SecureStore.getItemAsync('token');
@@ -18,13 +57,10 @@ class ApiClient {
 
   async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = await this.getAuthToken();
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
-    
+    const headers = new Headers(options.headers);
+    headers.set('Content-Type', 'application/json');
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      headers.set('Authorization', `Bearer ${token}`);
     }
 
     const response = await fetch(`${API_URL}${endpoint}`, {
@@ -33,25 +69,24 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-      const err = new Error(errorData.error || `HTTP ${response.status}`) as any;
+      const message = await getErrorMessage(response);
+      const err = new Error(message) as ApiError;
       err.status = response.status;
-      
       // Handle 401 Unauthorized - clear session and redirect to login
       if (response.status === 401) {
-        await clearSession(async () => {
-          // Clear in-memory auth state immediately
-          if (authLogout) {
-            await authLogout();
-          }
-        });
+        await clearSession();
+
+        if (authLogout) {
+          await authLogout().catch(() => {
+            // Ignore logout callback errors, session is already cleared.
+          });
+        }
+
         router.replace('/(auth)/login');
       }
-      
       throw err;
     }
-
-    return response.json();
+    return parseSuccessResponse<T>(response);
   }
 
   get<T>(endpoint: string) {
@@ -59,10 +94,16 @@ class ApiClient {
   }
 
   post<T>(endpoint: string, body: unknown) {
+    if (body == null) {
+      return this.request<T>(endpoint, { method: 'POST' });
+    }
     return this.request<T>(endpoint, { method: 'POST', body: JSON.stringify(body) });
   }
 
   put<T>(endpoint: string, body: unknown) {
+    if (body == null) {
+      return this.request<T>(endpoint, { method: 'PUT' });
+    }
     return this.request<T>(endpoint, { method: 'PUT', body: JSON.stringify(body) });
   }
 

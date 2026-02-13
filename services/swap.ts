@@ -65,8 +65,39 @@ export const getTokenList = async (): Promise<JupiterToken[]> => {
         return tokenListCache;
     }
 
-    // Use fallback tokens immediately - API often fails in React Native
-    console.log('[Swap] Using fallback token list (15 tokens)');
+    // Try Jupiter API first, fall back to static list
+    try {
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch('https://api.jup.ag/tokens/v1', {
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data) && data.length > 0) {
+                // Map to our JupiterToken format
+                const tokens: JupiterToken[] = data.slice(0, 200).map((t: any) => ({
+                    symbol: t.symbol || '',
+                    name: t.name || '',
+                    address: t.address || t.mint || '',
+                    decimals: t.decimals ?? 9,
+                    logoURI: t.logoURI || t.logo_uri || undefined,
+                }));
+                tokenListCache = tokens;
+                tokenListCacheTime = now;
+
+                return tokenListCache;
+            }
+        }
+    } catch (err: any) {
+
+    }
+
+    // Fallback to static list
+
     tokenListCache = FALLBACK_TOKENS;
     tokenListCacheTime = now;
     return tokenListCache;
@@ -93,7 +124,7 @@ export const getTokenDecimals = async (mintAddress: string): Promise<number> => 
 
     // Fetch from Jupiter token API
     try {
-        console.log(`[Swap] Fetching decimals for unknown token: ${mintAddress}`);
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
         const response = await fetch(
@@ -106,15 +137,15 @@ export const getTokenDecimals = async (mintAddress: string): Promise<number> => 
             const data = await response.json();
             const decimals = data.decimals ?? 9;
             decimalsCache[mintAddress] = decimals;
-            console.log(`[Swap] Token ${mintAddress} has ${decimals} decimals`);
+
             return decimals;
         }
     } catch (err: any) {
-        console.warn(`[Swap] Failed to fetch decimals for ${mintAddress}:`, err.message);
+
     }
 
     // Default to 9 (most Solana SPL tokens use 9 decimals)
-    console.log(`[Swap] Using default 9 decimals for ${mintAddress}`);
+
     decimalsCache[mintAddress] = 9;
     return 9;
 };
@@ -154,7 +185,7 @@ export const getQuote = async (
     slippageBps: number,
     signal?: AbortSignal
 ): Promise<SwapQuote | null> => {
-    console.log(`[Swap] Getting quote via backend: ${inputMint} -> ${outputMint}, amount: ${amount}`);
+
 
     try {
         const params = new URLSearchParams({
@@ -171,10 +202,10 @@ export const getQuote = async (
 
         const data = await api.request<SwapQuote>(`/swap/quote?${params}`, options);
 
-        console.log(`[Swap] Quote success: ${data.outAmount} out`);
+
         return data;
     } catch (e: any) {
-        console.error(`[Swap] Quote failed:`, e.message || e);
+
         throw new Error(e.message || 'Quote failed. Please try again.');
     }
 };
@@ -190,7 +221,7 @@ export const executeSwap = async (
             return { success: false, error: 'No wallet found. Please create a wallet first.' };
         }
 
-        console.log('[Swap] Getting swap transaction from backend...');
+
 
         // Use Ultra API flow - get transaction with taker
         const swapData = await api.request<{ swapTransaction: string; requestId: string }>('/swap/transaction', {
@@ -204,7 +235,7 @@ export const executeSwap = async (
             }),
         });
 
-        console.log(`[Swap] Got transaction from backend`);
+
 
         const { swapTransaction, requestId } = swapData;
 
@@ -212,17 +243,17 @@ export const executeSwap = async (
             return { success: false, error: 'No transaction returned from Jupiter' };
         }
 
-        console.log('[Swap] Decrypting wallet for signing...');
+
         keypair = await getKeypairForSigning(userPin);
         if (!keypair) {
             return { success: false, error: 'Invalid PIN. Please try again.' };
         }
 
-        console.log('[Swap] Deserializing transaction...');
+
         const transactionBuffer = Buffer.from(swapTransaction, 'base64');
         const transaction = VersionedTransaction.deserialize(transactionBuffer);
 
-        console.log('[Swap] Signing transaction...');
+
         transaction.sign([keypair]);
 
         const signedTx = Buffer.from(transaction.serialize()).toString('base64');
@@ -234,7 +265,7 @@ export const executeSwap = async (
         }
         keypair = null;
 
-        console.log('[Swap] Executing swap via backend...');
+
 
         // Execute via Ultra API
         const result = await api.request<{ status: string; signature: string; error?: string }>('/swap/execute', {
@@ -246,19 +277,19 @@ export const executeSwap = async (
         });
 
         if (result.status === 'Success') {
-            console.log('[Swap] Transaction successful:', result.signature);
+
             return {
                 success: true,
                 signature: result.signature,
                 explorerUrl: `https://solscan.io/tx/${result.signature}`,
             };
         } else {
-            console.error('[Swap] Transaction failed:', result.error);
+
             return { success: false, error: result.error || 'Swap execution failed' };
         }
 
     } catch (error: any) {
-        console.error('[Swap] Error:', error);
+
         const msg = error?.message || '';
         if (msg.includes('insufficient') || msg.includes('balance')) {
             return { success: false, error: 'Insufficient balance for swap and fees' };

@@ -1,4 +1,3 @@
-import * as SecureStore from 'expo-secure-store';
 import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { executeSwap, getQuote, getTokenDecimals } from './swap';
@@ -59,6 +58,12 @@ export interface CopyPosition {
     createdAt: string;
 }
 
+export interface CopyTradingWallet {
+    publicKey: string;
+    balance: number;
+    status: string;
+}
+
 interface CreateConfigParams {
     name?: string;
     traderAddress: string;
@@ -69,12 +74,18 @@ interface CreateConfigParams {
     exitWithTrader: boolean;
 }
 
+interface CopyWalletApiResponse {
+    success: boolean;
+    wallet: CopyTradingWallet | null;
+    error?: string;
+}
+
 /**
  * Create or update copy trading configuration
  */
 export async function createCopyConfig(
     config: CreateConfigParams,
-    authToken: string
+    _authToken: string
 ): Promise<{ success: boolean; config?: CopyTradingConfig; error?: string }> {
     try {
         const data = await api.post<{ success: boolean; config: CopyTradingConfig; error?: string }>('/copy-trade/config', config);
@@ -88,7 +99,7 @@ export async function createCopyConfig(
  * Fetch user's copy trading config
  */
 export async function fetchCopyConfig(
-    authToken: string
+    _authToken: string
 ): Promise<{ success: boolean; config?: CopyTradingConfig; error?: string }> {
     try {
         const data = await api.get<{ success: boolean; config: CopyTradingConfig }>('/copy-trade/config');
@@ -100,10 +111,58 @@ export async function fetchCopyConfig(
 }
 
 /**
+ * Create (or return existing) custodial copy wallet
+ */
+export async function createCopyWallet(
+    _authToken: string
+): Promise<{ success: boolean; wallet?: CopyTradingWallet; error?: string }> {
+    try {
+        const data = await api.post<{ success: boolean; wallet: CopyTradingWallet; error?: string }>('/copy-trade/wallet/create', {});
+        return { success: true, wallet: data.wallet };
+    } catch (error: any) {
+        return { success: false, error: error.message || 'Failed to create copy wallet' };
+    }
+}
+
+/**
+ * Fetch custodial copy wallet details and balance
+ */
+export async function fetchCopyWallet(
+    _authToken: string
+): Promise<{ success: boolean; wallet?: CopyTradingWallet | null; error?: string }> {
+    try {
+        const data = await api.get<CopyWalletApiResponse>('/copy-trade/wallet');
+        return { success: true, wallet: data.wallet };
+    } catch (error: any) {
+        return { success: false, error: error.message || 'Failed to fetch copy wallet' };
+    }
+}
+
+/**
+ * Withdraw SOL from copy wallet to main wallet
+ */
+export async function withdrawCopyWallet(
+    _authToken: string,
+    amount?: number
+): Promise<{ success: boolean; signature?: string; withdrawnAmount?: number; error?: string }> {
+    try {
+        const payload = typeof amount === 'number' && amount > 0 ? { amount } : {};
+        const data = await api.post<{ success: boolean; signature: string; withdrawnAmount: number; error?: string }>('/copy-trade/wallet/withdraw', payload);
+        return {
+            success: true,
+            signature: data.signature,
+            withdrawnAmount: data.withdrawnAmount
+        };
+    } catch (error: any) {
+        return { success: false, error: error.message || 'Failed to withdraw from copy wallet' };
+    }
+}
+
+/**
  * Check for pending copy trade queue items
  */
 export async function checkCopyTradeQueue(
-    authToken: string
+    _authToken: string
 ): Promise<{ success: boolean; queue?: CopyTradeQueueItem[]; error?: string }> {
     try {
         const data = await api.get<{ success: boolean; queue: CopyTradeQueueItem[] }>('/copy-trade/queue');
@@ -123,7 +182,7 @@ export async function checkCopyTradeQueue(
 export async function executeCopyTrade(
     queueItem: CopyTradeQueueItem,
     pin: string,
-    authToken: string
+    _authToken: string
 ): Promise<{
     success: boolean;
     signature?: string;
@@ -254,9 +313,9 @@ export async function executeCopyTrade(
 
         return {
             success: true,
-            signature: swapResult.signature,
-            slOrderId,
-            tpOrderId
+            ...(swapResult.signature ? { signature: swapResult.signature } : {}),
+            ...(slOrderId ? { slOrderId } : {}),
+            ...(tpOrderId ? { tpOrderId } : {})
         };
 
     } catch (error: unknown) {
@@ -273,7 +332,7 @@ export async function executeCopyTrade(
 export async function executeCopyTradeSell(
     queueItem: CopyTradeQueueItem,
     pin: string,
-    authToken: string
+    _authToken: string
 ): Promise<{
     success: boolean;
     signature?: string;
@@ -356,7 +415,7 @@ export async function executeCopyTradeSell(
 
         return {
             success: true,
-            signature: swapResult.signature,
+            ...(swapResult.signature ? { signature: swapResult.signature } : {}),
             cancelSignatures
         };
 
@@ -370,7 +429,7 @@ export async function executeCopyTradeSell(
  * Fetch user's open copy positions
  */
 export async function fetchCopyPositions(
-    authToken: string
+    _authToken: string
 ): Promise<{ success: boolean; positions?: CopyPosition[]; error?: string }> {
     try {
         const data = await api.get<{ success: boolean; positions: CopyPosition[] }>('/copy-trade/positions');
@@ -388,7 +447,7 @@ export async function fetchCopyPositions(
 export async function closeCopyPosition(
     positionId: string,
     pin: string,
-    authToken: string
+    _authToken: string
 ): Promise<{ success: boolean; sellSignature?: string; error?: string }> {
     try {
         // Step 1: Get close transactions from backend
@@ -484,7 +543,7 @@ interface StopCopyTradingResult {
  * Returns cancel transactions that must be signed and broadcast to complete SL/TP cancellation
  */
 export async function stopCopyTrading(
-    authToken: string
+    _authToken: string
 ): Promise<StopCopyTradingResult> {
     try {
         const data = await api.delete<{ success: boolean; message: string; cancelTransactions: CancelTransaction[]; pendingPositions: { id: string; status: string }[] }>('/copy-trade/config');
@@ -552,7 +611,7 @@ export async function submitCancelTransactions(
         return {
             success: failed.length === 0,
             signatures,
-            failed: failed.length > 0 ? failed : undefined
+            ...(failed.length > 0 ? { failed } : {})
         };
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';

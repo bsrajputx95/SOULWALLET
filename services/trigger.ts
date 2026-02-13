@@ -1,4 +1,5 @@
 import { api } from './api';
+import { getLocalPublicKey } from './wallet';
 
 export interface TriggerOrderParams {
     inputMint: string;
@@ -110,8 +111,7 @@ export async function getTriggerOrders(status?: 'open' | 'completed' | 'cancelle
     }
 }
 
-// Helper function - should import from wallet service
-import { getLocalPublicKey } from './wallet';
+
 
 /**
  * Calculate output amount for a limit order based on target price
@@ -128,12 +128,12 @@ export function calculateLimitOutput(
 ): string {
     // Convert input to raw amount
     const inputRaw = inputAmount * Math.pow(10, inputDecimals);
-    
+
     // Calculate expected output at target price
     // targetPrice = outputAmount / inputAmount
     // outputAmount = targetPrice * inputAmount
     const expectedOutputRaw = targetPrice * inputRaw;
-    
+
     // Round down to ensure order can be filled
     return Math.floor(expectedOutputRaw).toString();
 }
@@ -153,12 +153,12 @@ export function calculateLimitInput(
 ): string {
     // Convert output to raw amount
     const outputRaw = outputAmount * Math.pow(10, outputDecimals);
-    
+
     // Calculate required input at target price
     // targetPrice = outputAmount / inputAmount
     // inputAmount = outputAmount / targetPrice
     const requiredInputRaw = outputRaw / targetPrice;
-    
+
     // Round up to ensure we have enough input
     return Math.ceil(requiredInputRaw).toString();
 }

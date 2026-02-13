@@ -1,0 +1,330 @@
+# SOULWALLET AUTH WORK CONTEXT DUMP (FULL HANDOFF)
+## Why this file exists
+This file is a complete context handoff for the recent login/signup/auth work so future sessions can continue without losing intent.
+It captures:
+- What you asked for
+- The exact priorities and constraints
+- What was analyzed
+- What was changed (file by file)
+- What was verified
+- What still remains
+
+---
+
+## 1) Your core directives (non-negotiable)
+You set these priorities clearly:
+1. Android APK focus only (beta stage, no iOS/web scope expansion).
+2. Do not overengineer.
+3. Keep the app fast and simple.
+4. Avoid crashes (stability first).
+5. Keep security practical for beta (no unnecessary heavy systems right now).
+6. For planning: write clear “baby-feeding” level instructions for agents.
+7. You asked that before execution I restate what you want and wait for confirmation.
+
+This drove all decisions below.
+
+---
+
+## 2) Early conversation milestones
+Chronological summary:
+- You asked about model choice: `gpt-5.3 codex xhigh vs opus 4.6 thinking`.
+  - Recommendation: use codex xhigh as default for implementation/debug/refactor; use opus for deep design if needed.
+- You clarified product direction:
+  - APK beta
+  - no unnecessary overengineering/security bloat
+  - speed + no crashes + simplicity
+- You asked for codebase understanding first.
+  - I scanned and identified the stack as Expo React Native frontend + Node/Express backend (`soulwallet-backend`).
+- You commanded creating `XBUILD/ff` folder.
+  - Folder was created.
+- You requested first auth task plan file (`ls.md`) in `XBUILD/ff`, with deep analysis and improved prompt for agents.
+  - Deep analysis was done and a very explicit step-by-step implementation plan was produced in `XBUILD/ff/ls.md`.
+- You asked if this is “industry ready”.
+  - Answer given: not full industry-ready yet, but strong beta direction.
+- You asked for “10k readiness”.
+  - I implemented the auth hardening/simplification work directly in code.
+- You asked for strict re-verification against agreed parameters.
+  - Re-audit + verification commands run again; results documented below.
+
+---
+
+## 3) Codebase areas investigated for auth scope
+Main auth surface reviewed:
+- Frontend:
+  - `app/(auth)/login.tsx`
+  - `app/(auth)/signup.tsx`
+  - `app/(auth)/forgot-password.tsx`
+  - `contexts/AuthContext.tsx`
+  - `services/api.ts`
+  - `utils/session.ts`
+- Backend:
+  - `soulwallet-backend/src/server.ts` (auth endpoints + middleware/limiters)
+  - `soulwallet-backend/package.json`
+  - `soulwallet-backend/prisma/schema.prisma` (relation context)
+
+High-level findings from analysis:
+- Login/signup were functional but had duplication and avoidable friction.
+- Login had Terms gating (unnecessary for repeat login speed).
+- API client had problematic 401 session-clear callback usage.
+- TS/lint ecosystem in repo had existing background issues, so verification needed scoped checks.
+- Backend auth routes were straightforward and already used rate limiting; needed practical tuning.
+
+---
+
+## 4) Planning artifact created
+Created:
+- `XBUILD/ff/ls.md`
+
+That plan contains:
+- Current auth issues list
+- Improved agent prompt
+- Phased implementation
+- Acceptance gates
+- Verification matrix
+- Explicit non-goals (to prevent overengineering)
+
+---
+
+## 5) IMPLEMENTED CHANGES (actual code edits)
+These are the real edits done for auth readiness.
+
+## 5.1 `utils/session.ts`
+What changed:
+- Added centralized session keys list:
+  - `token`
+  - `user_data`
+  - `wallet_secret`
+  - `wallet_pubkey`
+  - `wallet_pin_hash`
+  - `cached_pin`
+  - `cached_pin_expiry`
+- Added helper:
+  - `persistAuthSession(token, user)` to store token + user payload consistently.
+- Updated `clearSession()`:
+  - now clears all listed keys via `Promise.allSettled`.
+  - avoids failing whole logout/session-clear on one storage delete error.
+
+Why:
+- Consistent auth state handling.
+- Less duplication.
+- Better crash safety during session cleanup.
+
+---
+
+## 5.2 `contexts/AuthContext.tsx`
+What changed:
+- `logout()` switched from manual multi-key deletes to `clearSession()` helper.
+- Wrapped with `try/finally` so in-memory token/state still reset even if storage operations have issues.
+
+Why:
+- Single source of truth for session clearing.
+- Idempotent and safer logout behavior.
+
+---
+
+## 5.3 `services/api.ts`
+What changed:
+- Introduced `ApiError` type with optional `status`.
+- Added `getErrorMessage(response)`:
+  - safely handles JSON and non-JSON error bodies.
+- Added `parseSuccessResponse(response)`:
+  - handles `204` and empty responses gracefully.
+- Reworked request header handling:
+  - uses `Headers` object
+  - always sets `Content-Type`
+  - sets `Authorization` only when token exists
+- Fixed 401 flow:
+  - call `clearSession()`
+  - call registered `authLogout()` if available (error-tolerant)
+  - redirect to `/(auth)/login`
+- Updated `post()` / `put()`:
+  - avoid passing `body: undefined` under strict TS option behavior.
+
+Why:
+- Eliminates auth-flow fragility.
+- Prevents parsing-related crashes on unexpected responses.
+- Ensures deterministic unauthorized-session cleanup.
+
+---
+
+## 5.4 `app/(auth)/login.tsx`
+What changed:
+- Removed direct SecureStore writes; now uses `persistAuthSession`.
+- Added `getLoginErrorMessage()` for better user-facing error mapping.
+- Added duplicate-submit guard:
+  - early return if `isLoading` is true.
+- Normalized login identifier once:
+  - `emailOrUsername = email.trim()`.
+- Changed username/email input keyboard type:
+  - `email-address` -> `default` (better for mixed username/email input).
+- Removed login-time Terms checkbox + gating.
+- Login button now disabled only while loading (`disabled={isLoading}`).
+- Kept lightweight haptics and existing UI structure.
+
+Why:
+- Faster login UX (less friction).
+- Better reliability against double taps.
+- Cleaner auth persistence flow.
+
+---
+
+## 5.5 `app/(auth)/signup.tsx`
+What changed:
+- Removed direct SecureStore writes; now uses `persistAuthSession`.
+- Added helper constants:
+  - `USERNAME_REGEX = /^[a-zA-Z0-9_]+$/`
+  - `EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/`
+- Added `getSignupErrorMessage()`.
+- Added duplicate-submit guard (`isLoading` check).
+- Normalized signup values:
+  - username trimmed
+  - email trimmed + lowercased
+- Added frontend validation aligned with backend:
+  - username required, 3–30 chars, allowed chars regex
+  - email required and format check
+  - password min length 6
+  - confirm password match
+  - Terms acceptance required
+- Updated signup request payload to normalized values.
+- Password hint changed from strict/complex wording to:
+  - `Minimum 6 characters` (matches backend reality).
+- Signup button disabled when either:
+  - terms not accepted
+  - loading in progress
+
+Why:
+- Reduces unnecessary server round trips.
+- Keeps frontend behavior consistent with backend policy.
+- Improves stability and clarity for users.
+
+---
+
+## 5.6 `soulwallet-backend/src/server.ts`
+What changed (auth-readiness related):
+- Added:
+  - `app.set('trust proxy', 1)`
+- Updated JSON parser:
+  - `express.json({ limit: '1mb' })`
+- Split auth rate limiting:
+  - `registerLimiter` (stricter, max 8 / 15 min)
+  - `loginLimiter` (max 20 / 15 min, `skipSuccessfulRequests: true`)
+- Applied:
+  - `/register` -> `registerLimiter`
+  - `/login` -> `loginLimiter`
+
+Why:
+- Practical production-ish readiness under proxy.
+- Better anti-abuse behavior without penalizing valid repeated login use.
+- Keeps beta scope reasonable (not enterprise-complex).
+
+---
+
+## 6) Verification and reruns
+## 6.1 Frontend auth TS verification (scoped)
+Command pattern used:
+- `npx tsc --noEmit --pretty false` filtered to touched auth files.
+
+Result:
+- PASS for touched auth/frontend files:
+  - `app/(auth)/login.tsx`
+  - `app/(auth)/signup.tsx`
+  - `services/api.ts`
+  - `utils/session.ts`
+  - `contexts/AuthContext.tsx`
+
+## 6.2 Backend compile verification
+Command:
+- `npm --prefix soulwallet-backend run build`
+
+Result:
+- PASS (`tsc` completed in backend package context).
+
+## 6.3 Lint verification
+Command:
+- `npm run lint -- <touched auth files>`
+
+Result:
+- BLOCKED due missing plugin:
+  - `eslint-plugin-jsdoc` not found in current environment.
+- This is tooling/env config debt, not introduced by these auth changes.
+
+## 6.4 Additional note on global TS
+- Root-wide TS checks still report many pre-existing issues outside this focused auth scope.
+- Those were not expanded/fixed to avoid scope creep and overengineering.
+
+---
+
+## 7) Parameter compliance check (your requested standard)
+Against: “simple, fast, no crash, no overengineering, practical beta security”.
+
+Verdict:
+- No overengineering: PASS
+- Simplicity: PASS
+- Speed UX improvements: PASS
+- Crash/stability hardening: PASS
+- Practical beta security (not heavy enterprise changes): PASS
+
+Remaining not auto-proven in CLI-only checks:
+- Device/manual runtime smoke for end-to-end flows.
+- Real load test metrics.
+
+---
+
+## 8) What was intentionally NOT done (to preserve your strategy)
+- No refresh-token architecture redesign.
+- No OAuth/social auth redesign.
+- No MFA/2FA.
+- No biometric overhaul.
+- No backend route modularization rewrite.
+- No broad repo-wide type/lint cleanup.
+
+Reason:
+- Would violate your anti-overengineering + speed-to-beta constraints.
+
+---
+
+## 9) Runtime QA checklist still recommended
+Manual smoke (to run on device/emulator):
+1. Login success with valid account.
+2. Login invalid password.
+3. Login without network.
+4. Signup success with new account.
+5. Signup invalid username/email/password.
+6. Signup blocked when terms not accepted.
+7. Rapid double tap login/signup submit (must not duplicate request handling).
+8. Force 401 from protected API and confirm redirect + session clear.
+9. Relaunch app with valid token (should stay authenticated).
+10. Relaunch after forced 401 (should open login).
+
+---
+
+## 10) Important context boundaries for next session
+- This auth work is a focused baseline for 10k-readiness style beta behavior, not full enterprise auth maturity.
+- If next phase is investor-demo hardening, best additions are:
+  - load-test evidence (latency + throughput + fail rates),
+  - production observability for auth failures,
+  - completing forgot-password flow.
+
+---
+
+## 11) Files directly touched in this auth implementation batch
+- `app/(auth)/login.tsx`
+- `app/(auth)/signup.tsx`
+- `contexts/AuthContext.tsx`
+- `services/api.ts`
+- `utils/session.ts`
+- `soulwallet-backend/src/server.ts`
+- Planning/context docs also created/updated:
+  - `XBUILD/ff/ls.md`
+  - `XBUILD/ff/fix1` (this file)
+
+---
+
+## 12) Final handoff statement
+This session delivered:
+- deep auth analysis,
+- explicit implementation planning for agents,
+- direct code implementation for core auth hardening and simplification,
+- repeated verification against your exact constraints.
+
+If you share this file in a future session, it should provide enough detailed context to resume immediately without re-discovery.

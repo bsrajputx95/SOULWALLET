@@ -208,14 +208,15 @@ export const verifyToken = async (
   address: string
 ): Promise<{ valid: boolean; symbol?: string; price?: number }> => {
   try {
-    const res = await fetch(`https://price.jup.ag/v6/price?ids=${address}`);
+    const res = await fetch(`https://api.jup.ag/price/v2?ids=${address}`);
     const data = await res.json();
 
     if (data.data && data.data[address]) {
+      const priceValue = data.data[address].price ? Number(data.data[address].price) : undefined;
       return {
         valid: true,
         symbol: data.data[address].mintSymbol,
-        price: data.data[address].price
+        ...(priceValue !== undefined && { price: priceValue })
       };
     }
 

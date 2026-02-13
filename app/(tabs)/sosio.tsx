@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { SocialPost, NeonButton, IBuyBagModal, CopyTradingModal, SocialPostSkeleton } from '@/components';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { fetchFeed, createPost, toggleLike, Post, TokenMetadata } from '@/services/social';
 import { executeIBuy, getIBuySettings, verifyTokenForPost } from '@/services/ibuy';
 import { getStoredPin } from '@/services/wallet';
@@ -120,6 +120,14 @@ export default function SosioScreen() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchBar, setShowSearchBar] = useState(false);
 
+  // Handle hashtag navigation params
+  const { search: searchParam } = useLocalSearchParams<{ search?: string }>();
+  useEffect(() => {
+    if (searchParam) {
+      setSearchQuery(searchParam);
+      setShowSearchBar(true);
+    }
+  }, [searchParam]);
 
 
   // User search - mock implementation returning empty results
@@ -528,7 +536,7 @@ export default function SosioScreen() {
                 mentionedTokenMint={post.tokenAddress}
                 isVerified={false}
                 onLike={handleLike}
-                onUpdate={() => { if (__DEV__) console.log('Post updated'); }}
+                onUpdate={() => { }}
                 onCopyPress={() => {
                   router.push(`/profile/${post.user?.username}`);
                 }}
@@ -595,7 +603,6 @@ export default function SosioScreen() {
           onEndReached={() => {
             // Infinite scroll - fetch more when reaching end
             if (nextCursor && !loading) {
-              if (__DEV__) console.log('[Sosio] Load more posts - nextCursor:', nextCursor);
               loadMorePosts();
             }
           }}

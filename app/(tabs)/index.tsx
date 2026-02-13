@@ -25,24 +25,13 @@ import {
   ReceiveModal,
   SwapModal,
   CopyTradingModal,
-  CopyTradeExecutionModal,
-  QueueStatusBanner,
 } from '@/components';
 import * as SecureStore from 'expo-secure-store';
-import { createWallet, fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, fetchCopyConfig, fetchCopyPositions, checkCopyTradeQueue, CopyTradeQueueItem, CopyPosition, api } from '@/services';
+import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, fetchCopyConfig, fetchCopyPositions, CopyPosition, api } from '@/services';
 import { fetchTrendingTokens } from '@/services/market';
 import { showErrorToast, validateSession } from '@/utils';
 import { useAlert } from '@/contexts/AlertContext';
 
-// Static fallback wallet data for UI display
-const DUMMY_WALLET = {
-  publicKey: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-  balance: 1234.56,
-  tokens: [
-    { symbol: 'SOL', name: 'Solana', balance: 10.5, usdValue: 1050, mint: 'So11111111111111111111111111111111111111112', decimals: 9, logo: 'https://cryptologos.cc/logos/solana-sol-logo.png' },
-    { symbol: 'USDC', name: 'USD Coin', balance: 500, usdValue: 500, mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, logo: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png' },
-  ],
-};
 
 // Well-known token logos for popular Solana tokens (fallback when API doesn't have them)
 const WELL_KNOWN_TOKEN_LOGOS: Record<string, string> = {
@@ -76,269 +65,178 @@ export default function HomeScreen() {
 
   // Real wallet state
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [hasWallet, setHasWallet] = useState<boolean>(false);
   const [totalBalance, setTotalBalance] = useState<number>(0);
   const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [isLoadingWallet, setIsLoadingWallet] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [showCreateWalletModal, setShowCreateWalletModal] = useState<boolean>(false);
-  const [walletPin, setWalletPin] = useState<string>('');
-  const [isCreatingWallet, setIsCreatingWallet] = useState<boolean>(false);
 
   // Real user profile state
   const [user, setUser] = useState<any>(null);
-  const [_authLoading, setAuthLoading] = useState(true);
-  const _isAuthenticated = !!user;
   const dailyPnl = 0; // Will be calculated from holdings
+  const isMountedRef = React.useRef(true);
+  const trendingRequestIdRef = React.useRef(0);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Fetch user profile from backend
-  const fetchUserProfile = async () => {
+  const fetchUserProfile = useCallback(async () => {
     try {
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
-        setAuthLoading(false);
         return;
       }
 
       const data = await api.get<{ user: unknown }>('/me');
-      setUser(data.user || data);
+      if (isMountedRef.current) {
+        setUser(data.user || data);
+      }
     } catch {
-    } finally {
-      setAuthLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void validateSession();
-    fetchUserProfile();
-  }, []);
-
-  // Suppress unused variable warnings (used in Phase 2.2 Create Wallet modal)
-  void showCreateWalletModal; void setShowCreateWalletModal;
-  void isCreatingWallet;
-  void hasWallet; void isLoadingWallet;
+    void fetchUserProfile();
+  }, [fetchUserProfile]);
 
   // Load wallet data
   const loadWalletData = useCallback(async () => {
     try {
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
-        setIsLoadingWallet(false);
         return;
       }
 
-      // Check if wallet exists locally
       const hasLocal = await hasLocalWallet();
-      setHasWallet(hasLocal);
-
       if (hasLocal) {
         const pubkey = await getLocalPublicKey();
-        setWalletAddress(pubkey);
-        if (__DEV__) console.log('[Home] Local wallet:', pubkey);
+        if (isMountedRef.current) {
+          setWalletAddress(pubkey);
+        }
+
       }
 
-      // Fetch balances from backend (works if wallet is linked to user)
-      if (__DEV__) console.log('[Home] Fetching balances...');
+
       const portfolio = await fetchBalances(token);
+      if (!isMountedRef.current) {
+        return;
+      }
+
       if (portfolio) {
-        if (__DEV__) console.log('[Home] Portfolio:', portfolio);
+
         setTotalBalance(portfolio.totalUsdValue);
         setHoldings(portfolio.holdings);
-        // Update wallet address from backend if not set locally
-        if (!walletAddress && portfolio.publicKey) {
-          setWalletAddress(portfolio.publicKey);
-          setHasWallet(true);
+        if (portfolio.publicKey) {
+          setWalletAddress((current) => current || portfolio.publicKey);
         }
       } else {
-        if (__DEV__) console.log('[Home] No portfolio data');
+
         showErrorToast('Failed to load balances');
       }
     } catch (error: any) {
-      // "No wallet linked" is expected when wallet exists locally but isn't linked to backend yet
       if (error?.message?.includes('No wallet linked')) {
-        if (__DEV__) console.log('[Home] Wallet not linked to backend yet — skipping balance fetch');
-      } else {
-        if (__DEV__) console.error('[Home] Error loading wallet:', error);
-        showErrorToast('Failed to load wallet data');
-      }
-    } finally {
-      setIsLoadingWallet(false);
-    }
-  }, [walletAddress]);
 
-  useEffect(() => {
-    loadWalletData();
-  }, [loadWalletData]);
+        return;
+      }
+
+      showErrorToast('Failed to load wallet data');
+    }
+  }, []);
 
   // Refresh wallet data when tab gains focus (e.g. after swap on coin detail)
   useFocusEffect(
     useCallback(() => {
-      loadWalletData();
+      void loadWalletData();
     }, [loadWalletData])
   );
 
-  const refetch = async () => {
-    setRefreshing(true);
+  const refetch = useCallback(async () => {
     await loadWalletData();
-    setRefreshing(false);
-  };
+  }, [loadWalletData]);
 
-  // Handle wallet creation
-  const handleCreateWallet = async () => {
-    if (walletPin.length < 4) {
-      showAlert('Error', 'PIN must be at least 4 digits');
-      return;
-    }
+  // Wallet address for display
+  const solanaPublicKey = walletAddress || '';
 
-    setIsCreatingWallet(true);
-    try {
-      const token = await SecureStore.getItemAsync('token');
-      if (!token) {
-        showAlert('Error', 'Please login first');
-        return;
-      }
-
-      const result = await createWallet(token, walletPin);
-      if (result.success) {
-        setWalletAddress(result.publicKey || null);
-        setHasWallet(true);
-        setShowCreateWalletModal(false);
-        setWalletPin('');
-        showAlert('Success', 'Wallet created successfully!');
-        await loadWalletData();
-      } else {
-        showAlert('Error', result.error || 'Failed to create wallet');
-      }
-    } catch (error: any) {
-      showAlert('Error', error.message || 'Failed to create wallet');
-    } finally {
-      setIsCreatingWallet(false);
-    }
-  };
-  void handleCreateWallet; // Used in Phase 2.2 Create Wallet modal
-
-  // Static wallet data fallback for UI display
-  const _solanaWallet = { publicKey: walletAddress || DUMMY_WALLET.publicKey };
-  const solanaPublicKey = walletAddress || DUMMY_WALLET.publicKey;
-  const _getAvailableTokens = () => holdings.length > 0 ? holdings.map(h => ({
-    symbol: h.symbol,
-    name: h.name,
-    balance: h.balance,
-    usdValue: h.usdValue,
-    mint: h.mint,
-    decimals: h.decimals,
-    logo: WELL_KNOWN_TOKEN_LOGOS[h.symbol] || undefined
-  })) : DUMMY_WALLET.tokens;
-  const _executeSwap = async (_params?: any) => ({ success: true, signature: 'demo_signature_' + Date.now(), outputAmount: 0 });
-
-  // Mock profile query - use local user data
-  const profileQuery = { data: { profileImage: null }, isLoading: false };
 
   // Real trending tokens from API (refreshes daily at 15:00 UTC)
   const [trendingTokens, setTrendingTokens] = useState<any[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(true);
-  const [_lastTrendingUpdate, setLastTrendingUpdate] = useState<string | null>(null);
+
+  const transformTrendingTokens = useCallback((tokens: any[]) => {
+    return tokens.map((token: any) => ({
+      id: token.address,
+      symbol: token.symbol,
+      name: token.name,
+      price: token.price || 0,
+      change24h: token.priceChange24h || 0,
+      volume24h: token.volume24h || 0,
+      logo: token.logo || getWellKnownTokenLogo(token.symbol),
+      banner: token.banner,
+      liquidity: token.liquidity || 0,
+      contractAddress: token.address,
+      pairAddress: token.address,
+      marketCap: token.marketCap || 0,
+    }));
+  }, []);
+
+  const loadTrendingTokens = useCallback(async (options?: { silent?: boolean }) => {
+    const isSilent = options?.silent === true;
+    const requestId = trendingRequestIdRef.current + 1;
+    trendingRequestIdRef.current = requestId;
+    if (!isSilent && isMountedRef.current) {
+      setTrendingLoading(true);
+    }
+
+    try {
+      const result = await fetchTrendingTokens();
+      if (!isMountedRef.current || requestId !== trendingRequestIdRef.current) {
+        return;
+      }
+
+      if (result.success && result.tokens) {
+        setTrendingTokens(transformTrendingTokens(result.tokens));
+      } else if (!isSilent) {
+        showErrorToast(result.error || 'Failed to load trending tokens');
+      }
+    } catch (error: any) {
+      if (!isSilent && isMountedRef.current && requestId === trendingRequestIdRef.current) {
+        showErrorToast('Failed to load trending tokens');
+      }
+    } finally {
+      if (!isSilent && isMountedRef.current && requestId === trendingRequestIdRef.current) {
+        setTrendingLoading(false);
+      }
+    }
+  }, [transformTrendingTokens]);
 
   // Fetch trending tokens on mount
   useEffect(() => {
-    loadTrendingTokens();
-  }, []);
-
-  const loadTrendingTokens = async () => {
-    setTrendingLoading(true);
-    const result = await fetchTrendingTokens();
-    if (result.success && result.tokens) {
-      // Transform to match TokenCard format
-      const transformed = result.tokens.map((token: any) => ({
-        id: token.address,
-        symbol: token.symbol,
-        name: token.name,
-        price: token.price || 0,
-        change24h: token.priceChange24h || 0,
-        volume24h: token.volume24h || 0,
-        logo: token.logo || getWellKnownTokenLogo(token.symbol),
-        banner: token.banner,
-        liquidity: token.liquidity || 0,
-        contractAddress: token.address,
-        marketCap: token.marketCap || 0,
-      }));
-      setTrendingTokens(transformed);
-      setLastTrendingUpdate(result.lastUpdated || null);
-    }
-    setTrendingLoading(false);
-  };
+    void loadTrendingTokens();
+  }, [loadTrendingTokens]);
 
   // Poll prices every 5 minutes for trending tokens
   useEffect(() => {
-    if (trendingTokens.length === 0) return;
+    const interval = setInterval(() => {
+      void loadTrendingTokens({ silent: true });
+    }, 5 * 60 * 1000);
 
-    const pollPrices = async () => {
-      const result = await fetchTrendingTokens();
-      if (result.success && result.tokens) {
-        const transformed = result.tokens.map((token: any) => ({
-          id: token.address,
-          symbol: token.symbol,
-          name: token.name,
-          price: token.price || 0,
-          change24h: token.priceChange24h || 0,
-          volume24h: token.volume24h || 0,
-          logo: token.logo || getWellKnownTokenLogo(token.symbol),
-          banner: token.banner,
-          liquidity: token.liquidity || 0,
-          contractAddress: token.address,
-          marketCap: token.marketCap || 0,
-        }));
-        setTrendingTokens(transformed);
-      }
-    };
-
-    const interval = setInterval(pollPrices, 5 * 60 * 1000); // 5 minutes
     return () => clearInterval(interval);
-  }, [trendingTokens.length]);
+  }, [loadTrendingTokens]);
 
-  // Transform trending tokens for display
-  const topCoins = React.useMemo(() => {
-    return trendingTokens.map((token: any) => ({
-      id: token.id,
-      symbol: token.symbol,
-      name: token.name,
-      price: token.price,
-      change24h: token.change24h,
-      volume24h: token.volume24h,
-      logo: token.logo,
-      banner: token.banner,
-      liquidity: token.liquidity,
-      marketCap: token.marketCap,
-      contractAddress: token.contractAddress,
-      pairAddress: token.contractAddress, // Use address as pair address for navigation
-    }));
-  }, [trendingTokens]);
-
-  // Mock custodial wallet data - coming soon
-  const custodialWalletData: any = { hasWallet: false, balance: 0 };
-  const refetchCustodialWallet = async () => ({});
-  const setupCustodialWalletMutation = { mutateAsync: async (): Promise<any> => ({ publicKey: 'mock-public-key' }) };
+  const topCoins = trendingTokens;
 
   // Copy Trading State
   const [copyPositions, setCopyPositions] = React.useState<CopyPosition[]>([]);
-  const [copyQueue, setCopyQueue] = React.useState<CopyTradeQueueItem[]>([]);
   const [copyConfig, setCopyConfig] = React.useState<any>(null);
-  const [isLoadingCopyData, setIsLoadingCopyData] = React.useState(false);
-  const [showExecutionModal, setShowExecutionModal] = React.useState(false);
-  const [selectedQueueItem, setSelectedQueueItem] = React.useState<CopyTradeQueueItem | null>(null);
 
   // Copy trading data is now loaded from the backend via loadCopyTradingData
-  // copyConfig, copyPositions, and copyQueue are populated from real API calls
   const copyTradeSettings = copyConfig ? [copyConfig] : [];
-
-  // Copy positions from backend
   const copyTrades = copyPositions || [];
 
   const getStats = () => {
-    if (!copyConfig) {
-      return { activeCopies: 0, totalTrades: 0, profitLoss: 0, profitLossPercentage: 0 };
-    }
-    // Map stats to frontend format
     return {
       activeCopies: copyTradeSettings.filter((ct: any) => ct.isActive).length,
       totalTrades: copyPositions.length,
@@ -347,159 +245,45 @@ export default function HomeScreen() {
     };
   };
 
-  // Mock copy trade mutations - coming soon
-  const createCopyTradeMutation = { mutateAsync: async (_p: any): Promise<any> => { throw new Error('Feature not available'); }, isPending: false };
-  const stopCopyTradeMutation = { mutateAsync: async (_p: any): Promise<any> => { throw new Error('Feature not available'); }, isPending: false };
-
-  const _createCopyTrade = async (params: any) => {
-    try {
-      // Check if user has custodial wallet
-      if (!custodialWalletData?.hasWallet) {
-        // Setup custodial wallet first
-        const result = await setupCustodialWalletMutation.mutateAsync();
-        showAlert(
-          'Custodial Wallet Created',
-          `Deposit USDC to ${result.publicKey?.slice(0, 8)}...${result.publicKey?.slice(-8)} to start copy trading.`,
-          [{ text: 'OK', onPress: () => refetchCustodialWallet() }]
-        );
-        return;
-      }
-
-      // Check if user has sufficient USDC balance
-      if ((custodialWalletData?.usdcBalance || 0) < params.totalAmount) {
-        showAlert(
-          'Insufficient Balance',
-          `You need ${params.totalAmount} USDC but only have ${custodialWalletData?.usdcBalance?.toFixed(2) || 0} USDC.\n\nDeposit to: ${custodialWalletData?.publicKey?.slice(0, 8)}...${custodialWalletData?.publicKey?.slice(-8)}`
-        );
-        return;
-      }
-
-      await createCopyTradeMutation.mutateAsync({
-        walletAddress: params.targetWalletAddress,
-        totalBudget: params.totalAmount,
-        amountPerTrade: params.amountPerTrade,
-        stopLoss: params.stopLoss ? -Math.abs(params.stopLoss) : undefined,
-        takeProfit: params.takeProfit,
-        exitWithTrader: false,
-      });
-    } catch (error: any) {
-      throw new Error(error.message || 'Failed to create copy trade');
-    }
-  };
-
-
-
-  // Load copy trading data (positions, queue, config)
+  // Load copy trading data (positions and config)
   const loadCopyTradingData = useCallback(async () => {
     try {
-      setIsLoadingCopyData(true);
       const token = await SecureStore.getItemAsync('token');
-      if (!token) return;
+      if (!token) {
+        if (isMountedRef.current) {
+          setCopyConfig(null);
+          setCopyPositions([]);
+        }
+        return;
+      }
 
-      // Fetch config, positions, and queue in parallel
-      const [configResult, positionsResult, queueResult] = await Promise.all([
+      const [configResult, positionsResult] = await Promise.all([
         fetchCopyConfig(token),
         fetchCopyPositions(token),
-        checkCopyTradeQueue(token)
       ]);
 
-      if (configResult.success) {
-        setCopyConfig(configResult.config);
+      if (!isMountedRef.current) {
+        return;
       }
-      if (positionsResult.success && positionsResult.positions) {
-        setCopyPositions(positionsResult.positions);
+
+      setCopyConfig(configResult.success ? (configResult.config ?? null) : null);
+      setCopyPositions(positionsResult.success && positionsResult.positions ? positionsResult.positions : []);
+    } catch (error: any) {
+
+      if (isMountedRef.current) {
+        setCopyConfig(null);
+        setCopyPositions([]);
       }
-      if (queueResult.success && queueResult.queue) {
-        setCopyQueue(queueResult.queue.filter(item => item.status === 'pending'));
-      }
-    } finally {
-      setIsLoadingCopyData(false);
     }
   }, []);
 
-  // Load copy trading data on mount and when auth changes
+  // Load copy trading data on mount
   useEffect(() => {
-    loadCopyTradingData();
-  }, [loadCopyTradingData, user]);
-
-  // Handle queue banner action - open execution modal
-  const handleQueueAction = useCallback(() => {
-    if (copyQueue.length > 0) {
-      setSelectedQueueItem(copyQueue[0] ?? null);
-      setShowExecutionModal(true);
-    }
-  }, [copyQueue]);
-
-  // Handle successful execution - refresh data
-  const handleExecutionSuccess = useCallback(() => {
-    loadCopyTradingData();
-    setShowExecutionModal(false);
-    setSelectedQueueItem(null);
+    void loadCopyTradingData();
   }, [loadCopyTradingData]);
-
-  const _stopCopyTrade = async (copyTradingId: string) => {
-    try {
-      await stopCopyTradeMutation.mutateAsync({ copyTradingId });
-      showAlert('Success', 'Stopped copy trading');
-      // Refresh copy trading data
-      loadCopyTradingData();
-    } catch (error: any) {
-      showAlert('Error', error.message || 'Failed to stop copy trading');
-    }
-  };
-
-  const _isCreating = createCopyTradeMutation.isPending || false;
 
   const [activeTab, setActiveTab] = React.useState<'coins' | 'traders' | 'copy'>('coins');
   const [pnlPeriod, setPnlPeriod] = React.useState<'1d' | '7d' | '30d' | '1y'>('1d');
-
-  // Search and filter states
-  const [coinsSearchQuery, _setCoinsSearchQuery] = React.useState('');
-  const [tradersSearchQuery, _setTradersSearchQuery] = React.useState('');
-  const [_debouncedTradersSearch, setDebouncedTradersSearch] = React.useState('');
-
-  // ✅ Debounced search for real-time market search
-  const [debouncedCoinsSearch, setDebouncedCoinsSearch] = React.useState('');
-
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedCoinsSearch(coinsSearchQuery);
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timer);
-  }, [coinsSearchQuery]);
-
-  // Mock market search - using local data
-  const searchData: any = { pairs: [] };
-  const searchLoading = false;
-
-  // Transform search results
-  const searchCoins = React.useMemo(() => {
-    if (!searchData?.pairs) return [];
-
-    return searchData.pairs.slice(0, 10).map((pair: any) => {
-      const symbol = pair.baseToken?.symbol || 'UNKNOWN';
-      return {
-        id: pair.pairAddress || `${pair.chainId}-${pair.dexId}`,
-        symbol,
-        name: pair.baseToken?.name || 'Unknown Token',
-        price: parseFloat(pair.priceUsd || '0'),
-        change24h: parseFloat(pair.priceChange?.h24 || '0'),
-        volume24h: parseFloat(pair.volume?.h24 || '0'),
-        // Use DexScreener logo, header image, or well-known token logos as fallback
-        logo: pair.info?.imageUrl || pair.info?.header || getWellKnownTokenLogo(symbol),
-        // Add missing fields to match topCoins structure
-        liquidity: parseFloat(pair.liquidity?.usd || '0'),
-        transactions: (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0),
-        contractAddress: pair.baseToken?.address || '',
-        pairAddress: pair.pairAddress || '',
-      };
-    });
-  }, [searchData]);
-
-  // Determine which coins to display
-  const _displayCoins = debouncedCoinsSearch.length >= 2 ? searchCoins : topCoins;
-  const _isLoadingCoins = debouncedCoinsSearch.length >= 2 ? searchLoading : trendingLoading;
 
   // Real top traders with wallet addresses from birdeye.md
   const tradersLoading = false;
@@ -528,28 +312,9 @@ export default function HomeScreen() {
     }));
   }, []);
 
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedTradersSearch(tradersSearchQuery);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [tradersSearchQuery]);
-
-  // Mock trader search - coming soon
-  const _searchedTradersData: any = { data: [] };
-  const _searchedTradersLoading = false;
-
-  // New Copy Trading State (state declarations moved to before loadCopyTradingData)
+  // New Copy Trading State
   const [showCopyModal, setShowCopyModal] = React.useState(false);
   const [selectedTrader, setSelectedTrader] = React.useState<{ username: string; walletAddress: string } | null>(null);
-
-  // Legacy state (to be removed after migration)
-  const [selectedTraderWallet, _setSelectedTraderWallet] = React.useState<string | null>(null);
-  const [copyAmount, _setCopyAmount] = React.useState('1000');
-  const [amountPerTrade, _setAmountPerTrade] = React.useState('100');
-  const [stopLoss, _setStopLoss] = React.useState('10');
-  const [takeProfit, _setTakeProfit] = React.useState('30');
-  const [maxSlippage, _setMaxSlippage] = React.useState('0.5');
 
   // Wallet action modals
   const [showSendModal, setShowSendModal] = React.useState(false);
@@ -558,58 +323,14 @@ export default function HomeScreen() {
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refetch(), loadTrendingTokens()]);
-    setRefreshing(false);
-  }, [refetch]);
-
-  // Validate Solana address using regex (pure frontend)
-  const validateSolanaAddress = (address: string): boolean => {
-    if (!address || address.trim().length === 0) return false;
-    // Solana addresses are base58 encoded, 32-44 characters
-    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-  };
-
-  // Validate copy trade form
-  const _validateCopyTradeForm = (): boolean => {
-    const amount = parseFloat(copyAmount);
-    const perTrade = parseFloat(amountPerTrade);
-    const sl = stopLoss ? parseFloat(stopLoss) : undefined;
-    const tp = takeProfit ? parseFloat(takeProfit) : undefined;
-    const slip = maxSlippage ? parseFloat(maxSlippage) : 0.5;
-    if (!selectedTraderWallet || !validateSolanaAddress(selectedTraderWallet)) {
-      showAlert('Error', 'Please enter a valid wallet address');
-      return false;
+    try {
+      await Promise.all([refetch(), loadTrendingTokens()]);
+    } finally {
+      if (isMountedRef.current) {
+        setRefreshing(false);
+      }
     }
-    if (isNaN(amount) || amount <= 0) {
-      showAlert('Invalid Input', 'Total amount must be a positive number');
-      return false;
-    }
-    if (isNaN(perTrade) || perTrade <= 0) {
-      showAlert('Invalid Input', 'Amount per trade must be a positive number');
-      return false;
-    }
-    if (perTrade > amount) {
-      showAlert('Invalid Input', 'Amount per trade cannot exceed total budget');
-      return false;
-    }
-    if (sl !== undefined && (isNaN(sl) || sl > 0 || sl < -100)) {
-      showAlert('Invalid Input', 'Stop loss must be between -100% and 0%');
-      return false;
-    }
-    if (tp !== undefined && (isNaN(tp) || tp <= 0 || tp > 1000)) {
-      showAlert('Invalid Input', 'Take profit must be between 0% and 1000%');
-      return false;
-    }
-    if (isNaN(slip) || slip <= 0 || slip > 50) {
-      showAlert('Invalid Input', 'Max slippage must be between 0% and 50%');
-      return false;
-    }
-    if (typeof totalBalance === 'number' && amount > totalBalance) {
-      showAlert('Insufficient Balance', 'Reduce total amount to fit your balance');
-      return false;
-    }
-    return true;
-  };
+  }, [refetch, loadTrendingTokens]);
 
   const handleBuy = () => {
     const base = process.env.EXPO_PUBLIC_FIAT_ONRAMP_URL;
@@ -848,9 +569,7 @@ export default function HomeScreen() {
           <View style={styles.header}>
             <View style={styles.profileContainer}>
               <View style={styles.avatarContainer}>
-                {profileQuery.data?.profileImage ? (
-                  <Image source={{ uri: profileQuery.data.profileImage }} style={styles.avatar} />
-                ) : user?.profileImage ? (
+                {user?.profileImage ? (
                   <Image source={{ uri: user.profileImage }} style={styles.avatar} />
                 ) : (
                   <View style={styles.defaultAvatar}>
@@ -924,11 +643,6 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {/* Copy Trade Queue Status Banner */}
-          <QueueStatusBanner
-            onViewQueue={handleQueueAction}
-            pollInterval={30000}
-          />
 
           <View style={styles.tabsContainer}>
             <View style={styles.tabsHeader}>
@@ -990,21 +704,11 @@ export default function HomeScreen() {
           setShowCopyModal(false);
           setSelectedTrader(null);
           // Refresh copy trading data after config change
-          loadCopyTradingData();
+          void loadCopyTradingData();
         }}
         trader={selectedTrader}
       />
 
-      {/* Copy Trade Execution Modal */}
-      <CopyTradeExecutionModal
-        visible={showExecutionModal}
-        onClose={() => {
-          setShowExecutionModal(false);
-          setSelectedQueueItem(null);
-        }}
-        onSuccess={handleExecutionSuccess}
-        queueItem={selectedQueueItem}
-      />
 
       {/* Swap Modal */}
       <SwapModal
@@ -1135,11 +839,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: SPACING.s
   },
-  iconContainer: {
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
   walletCardContainer: {
     paddingHorizontal: SPACING.xs,
     marginBottom: SPACING.m
@@ -1202,77 +901,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.xs,
     paddingBottom: 0
   },
-  searchAndFilterContainer: {
-    marginBottom: SPACING.m
-  },
-  searchWithDropdownContainer: {
-    position: 'relative',
-    zIndex: 1000,
-    elevation: 1000
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    marginBottom: SPACING.s,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20'
-  },
-  searchInput: {
-    ...FONTS.phantomRegular,
-    flex: 1,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    marginLeft: SPACING.s,
-    paddingVertical: SPACING.xs
-  },
-  timeFilterContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20'
-  },
-  timeFilterButton: {
-    flex: 1,
-    paddingVertical: SPACING.s,
-    paddingHorizontal: SPACING.s,
-    alignItems: 'center',
-    borderRadius: BORDER_RADIUS.small,
-    marginHorizontal: 2
-  },
-  activeTimeFilterButton: {
-    backgroundColor: COLORS.solana + '20'
-  },
-  timeFilterText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 12
-  },
-  activeTimeFilterText: {
-    color: COLORS.solana
-  },
-  timeCycleButton: {
-    backgroundColor: COLORS.solana + '20',
-    borderRadius: BORDER_RADIUS.small,
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    marginLeft: SPACING.s,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '30',
-    minWidth: 50,
-    alignItems: 'center'
-  },
-  timeCycleText: {
-    ...FONTS.phantomBold,
-    color: COLORS.solana,
-    fontSize: 12
-  },
   copyTradeContainer: {
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
@@ -1300,485 +928,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: SPACING.xs
   },
-  copyInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: BORDER_RADIUS.small,
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.m,
-    marginBottom: SPACING.m
-  },
-  copyInputPrefix: {
-    ...FONTS.monospace,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-    marginRight: SPACING.xs
-  },
-  inputValue: {
-    ...FONTS.monospace,
-    color: COLORS.textPrimary,
-    fontSize: 16
-  },
-  sliderContainer: {
-    marginBottom: SPACING.m
-  },
-  sliderTrack: {
-    height: 6,
-    backgroundColor: COLORS.background,
-    borderRadius: 3,
-    marginVertical: SPACING.s,
-    position: 'relative'
-  },
-  sliderFill: {
-    height: 6,
-    backgroundColor: COLORS.solana,
-    borderRadius: 3
-  },
-  sliderThumb: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: COLORS.solana,
-    top: -7,
-    marginLeft: -10
-  },
-  sliderValue: {
-    ...FONTS.monospace,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    textAlign: 'right'
-  },
-  startCopyingButton: {
-    borderRadius: BORDER_RADIUS.medium,
-    overflow: 'hidden',
-    marginTop: SPACING.m
-  },
-  startCopyingGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.m
-  },
-  startCopyingText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginLeft: SPACING.s,
-    textShadowColor: 'rgba(0, 0, 0, 0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.l
-  },
-  modalContainer: {
-    backgroundColor: COLORS.background,
-    borderRadius: BORDER_RADIUS.large,
-    maxHeight: '90%',
-    borderWidth: 1,
-    borderColor: COLORS.solana + '30'
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: SPACING.l,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBackground
-  },
-  modalTitle: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 20
-  },
-  modalContent: {
-    padding: SPACING.l
-  },
-  modalScrollContent: {
-    paddingBottom: SPACING.l
-  },
-  modalDescription: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-    marginBottom: SPACING.l,
-    lineHeight: 24
-  },
-  inputSection: {
-    marginBottom: SPACING.m
-  },
-  inputLabel: {
-    ...FONTS.phantomSemiBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginBottom: SPACING.s
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    paddingHorizontal: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20'
-  },
-  inputPrefix: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 18,
-    marginRight: SPACING.s
-  },
-  inputSuffix: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 18,
-    marginLeft: SPACING.s
-  },
-  input: {
-    ...FONTS.phantomRegular,
-    flex: 1,
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    paddingVertical: SPACING.m
-  },
-  startCopyButton: {
-    borderRadius: BORDER_RADIUS.medium,
-    overflow: 'hidden',
-    marginTop: SPACING.l
-  },
-  startCopyGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.m
-  },
-  startCopyText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginLeft: SPACING.s
-  },
-  exitWithTraderButton: {
-    backgroundColor: COLORS.solana + '20',
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '30'
-  },
-  exitWithTraderText: {
-    ...FONTS.phantomBold,
-    color: COLORS.solana,
-    fontSize: 16,
-    marginBottom: SPACING.xs
-  },
-  exitWithTraderSubtext: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12
-  },
-  tokenSelector: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.background,
-    borderRadius: BORDER_RADIUS.small,
-    padding: 2,
-    marginBottom: SPACING.m
-  },
-  tokenOption: {
-    flex: 1,
-    paddingVertical: SPACING.s,
-    paddingHorizontal: SPACING.m,
-    borderRadius: BORDER_RADIUS.small,
-    alignItems: 'center'
-  },
-  selectedTokenOption: {
-    backgroundColor: COLORS.solana + '20'
-  },
-  tokenOptionText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 14
-  },
-  selectedTokenOptionText: {
-    color: COLORS.solana
-  },
-  qrContainer: {
-    alignItems: 'center',
-    marginVertical: SPACING.l
-  },
-  qrPlaceholder: {
-    width: 160,
-    height: 160,
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.solana + '30'
-  },
-  addressContainer: {
-    marginBottom: SPACING.l
-  },
-  addressLabel: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    marginBottom: SPACING.s
-  },
-  addressBox: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20'
-  },
-  addressText: {
-    ...FONTS.monospace,
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    textAlign: 'center'
-  },
-  actionButton: {
-    borderRadius: BORDER_RADIUS.medium,
-    overflow: 'hidden',
-    marginTop: SPACING.m
-  },
-  actionGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.m
-  },
-  actionText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginLeft: SPACING.s
-  },
-  swapContainer: {
-    marginBottom: SPACING.l
-  },
-  swapSection: {
-    marginBottom: SPACING.m
-  },
-  swapInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20'
-  },
-  swapInput: {
-    ...FONTS.phantomRegular,
-    flex: 1,
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    marginRight: SPACING.m
-  },
-  swapOutput: {
-    ...FONTS.phantomRegular,
-    flex: 1,
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    marginRight: SPACING.m
-  },
-  swapArrow: {
-    alignItems: 'center',
-    marginVertical: SPACING.s
-  },
-  swapArrowButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.cardBackground,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.solana + '30'
-  },
-  swapInfo: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.l
-  },
-  swapInfoText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginBottom: SPACING.xs
-  },
-  slippageContainer: {
-    marginBottom: SPACING.m
-  },
-  slippageLabel: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginBottom: SPACING.xs
-  },
-  slippageOptions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap'
-  },
-  slippageChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: BORDER_RADIUS.small,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '30',
-    backgroundColor: COLORS.background,
-    marginRight: SPACING.xs,
-    marginBottom: SPACING.xs
-  },
-  activeSlippageChip: {
-    backgroundColor: COLORS.solana + '20',
-    borderColor: COLORS.solana + '40'
-  },
-  slippageChipText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 12
-  },
-  activeSlippageChipText: {
-    color: COLORS.solana
-  },
-  slippageInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.small,
-    paddingHorizontal: 8,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    height: 32
-  },
-  slippageInput: {
-    ...FONTS.monospace,
-    color: COLORS.textPrimary,
-    width: 56,
-    paddingVertical: 0,
-    fontSize: 12
-  },
-  slippagePercent: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    marginLeft: 4,
-    fontSize: 12
-  },
-  dropdownButton: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    marginBottom: SPACING.m
-  },
-  dropdownButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.m
-  },
-  dropdownButtonText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginLeft: SPACING.s
-  },
-  dropdownContainer: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    marginBottom: SPACING.m,
-    maxHeight: 200
-  },
-  swapDropdownContainer: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    marginTop: SPACING.s,
-    maxHeight: 150
-  },
-  modalSearchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10'
-  },
-  modalSearchInput: {
-    ...FONTS.phantomRegular,
-    flex: 1,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    marginLeft: SPACING.s,
-    paddingVertical: SPACING.xs
-  },
-  dropdownList: {
-    maxHeight: 150
-  },
-  swapDropdownList: {
-    maxHeight: 100
-  },
-  dropdownItem: {
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10'
-  },
-  tokenInfo: {
-    flexDirection: 'row',
-    alignItems: 'center'
-  },
-  tokenLogo: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: SPACING.s
-  },
-  tokenLogoSmall: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    marginRight: SPACING.xs
-  },
-  tokenSymbol: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
-    fontSize: 14
-  },
-  tokenName: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12
-  },
-  swapTokenButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: BORDER_RADIUS.small,
-    paddingHorizontal: SPACING.s,
-    paddingVertical: SPACING.xs,
-    minWidth: 80
-  },
-  swapTokenText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    marginRight: SPACING.xs
-  },
   // Copy Trading Styles
   statsContainer: {
     flexDirection: 'row',
@@ -1802,53 +951,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 12
   },
-  activeCopiesContainer: {
-    backgroundColor: COLORS.background,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.m
-  },
-  activeCopiesTitle: {
-    ...FONTS.phantomBold,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    marginBottom: SPACING.s
-  },
-  activeCopyItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: SPACING.s,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.solana + '10'
-  },
-  activeCopyInfo: {
-    flex: 1
-  },
-  activeCopyWallet: {
-    ...FONTS.monospace,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    marginBottom: SPACING.xs
-  },
-  activeCopyAmount: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12
-  },
-  stopCopyButton: {
-    backgroundColor: COLORS.error + '20',
-    borderRadius: BORDER_RADIUS.small,
-    paddingHorizontal: SPACING.s,
-    paddingVertical: SPACING.xs,
-    borderWidth: 1,
-    borderColor: COLORS.error + '30'
-  },
-  stopCopyText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.error,
-    fontSize: 12
-  },
   quickSetupButton: {
     backgroundColor: COLORS.solana + '20',
     borderRadius: BORDER_RADIUS.medium,
@@ -1862,19 +964,6 @@ const styles = StyleSheet.create({
     ...FONTS.phantomBold,
     color: COLORS.solana,
     fontSize: 16
-  },
-  testTradeButton: {
-    backgroundColor: COLORS.warning + '20',
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.s,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.warning + '30'
-  },
-  testTradeText: {
-    ...FONTS.phantomMedium,
-    color: COLORS.warning,
-    fontSize: 14
   },
   recentTradesContainer: {
     backgroundColor: COLORS.background,
@@ -1938,13 +1027,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 14,
   },
-  trendingSubtitle: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginBottom: SPACING.m,
-    textAlign: 'center',
-  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1966,55 +1048,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     fontSize: 14,
-  },
-  // Comment 3: Skeleton loading styles
-  skeletonContainer: {
-    paddingHorizontal: SPACING.m,
-  },
-  skeletonCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.s,
-  },
-  skeletonLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  skeletonRight: {
-    alignItems: 'flex-end',
-  },
-  skeletonAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.background,
-  },
-  skeletonTextContainer: {
-    marginLeft: SPACING.s,
-  },
-  skeletonTextLarge: {
-    width: 80,
-    height: 14,
-    borderRadius: 4,
-    backgroundColor: COLORS.background,
-    marginBottom: SPACING.xs,
-  },
-  skeletonTextSmall: {
-    width: 60,
-    height: 10,
-    borderRadius: 4,
-    backgroundColor: COLORS.background,
-  },
-  skeletonTextMedium: {
-    width: 70,
-    height: 14,
-    borderRadius: 4,
-    backgroundColor: COLORS.background,
-    marginBottom: SPACING.xs,
   },
 });
 

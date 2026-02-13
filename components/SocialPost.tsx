@@ -178,7 +178,11 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     return parts.map((part, index) => {
       if (part.startsWith('#')) {
         return (
-          <Text key={index} style={styles.hashtag}>
+          <Text
+            key={index}
+            style={styles.hashtag}
+            onPress={() => router.push({ pathname: '/(tabs)/sosio', params: { search: part } })}
+          >
             {part}
           </Text>
         );

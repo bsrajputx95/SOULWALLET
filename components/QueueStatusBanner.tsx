@@ -63,15 +63,32 @@ export const QueueStatusBanner: React.FC<QueueStatusBannerProps> = ({
     const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const isMountedRef = React.useRef(true);
+
+    useEffect(() => {
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
 
     const fetchQueueStatus = useCallback(async () => {
-        if (!token) return;
+        if (!token) {
+            if (isMountedRef.current) {
+                setQueueStatus(null);
+                setError(null);
+                setIsLoading(false);
+            }
+            return;
+        }
         
         setIsLoading(true);
         setError(null);
         
         try {
             const result = await checkCopyTradeQueue(token);
+            if (!isMountedRef.current) {
+                return;
+            }
             
             if (result.success && result.queue) {
                 const pendingItems = result.queue.filter(item => item.status === 'pending');
@@ -102,20 +119,33 @@ export const QueueStatusBanner: React.FC<QueueStatusBannerProps> = ({
                 setQueueStatus({ pendingCount: 0, health: 'down', items: [] });
             }
         } catch (err: any) {
+            if (!isMountedRef.current) {
+                return;
+            }
             setError(err.message);
             setQueueStatus({ pendingCount: 0, health: 'down', items: [] });
         } finally {
-            setIsLoading(false);
+            if (isMountedRef.current) {
+                setIsLoading(false);
+            }
         }
     }, [token, highLoadThreshold]);
 
     // Initial fetch and polling
     useEffect(() => {
-        fetchQueueStatus();
+        if (!token) {
+            setQueueStatus(null);
+            setError(null);
+            setIsLoading(false);
+            return;
+        }
+        void fetchQueueStatus();
         
-        const interval = setInterval(fetchQueueStatus, pollInterval);
+        const interval = setInterval(() => {
+            void fetchQueueStatus();
+        }, pollInterval);
         return () => clearInterval(interval);
-    }, [fetchQueueStatus, pollInterval]);
+    }, [token, fetchQueueStatus, pollInterval]);
 
     // Determine if banner should show
     const shouldShow = React.useMemo(() => {
@@ -270,7 +300,12 @@ export const useQueueStatus = (pollInterval = 30000) => {
     const [error, setError] = useState<string | null>(null);
 
     const fetchStatus = useCallback(async () => {
-        if (!token) return;
+        if (!token) {
+            setStatus(null);
+            setError(null);
+            setIsLoading(false);
+            return;
+        }
         
         setIsLoading(true);
         setError(null);
@@ -310,10 +345,18 @@ export const useQueueStatus = (pollInterval = 30000) => {
     }, [token]);
 
     useEffect(() => {
-        fetchStatus();
-        const interval = setInterval(fetchStatus, pollInterval);
+        if (!token) {
+            setStatus(null);
+            setError(null);
+            setIsLoading(false);
+            return;
+        }
+        void fetchStatus();
+        const interval = setInterval(() => {
+            void fetchStatus();
+        }, pollInterval);
         return () => clearInterval(interval);
-    }, [fetchStatus, pollInterval]);
+    }, [token, fetchStatus, pollInterval]);
 
     return {
         status,

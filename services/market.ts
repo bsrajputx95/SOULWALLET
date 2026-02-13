@@ -1,4 +1,4 @@
-import { api, API_URL } from './api';
+import { api } from './api';
 
 export interface MarketToken {
   address: string;
@@ -20,19 +20,8 @@ export interface MarketTokensResponse {
   stale?: boolean;
 }
 
-// Add TrendingToken interface
-export interface TrendingToken {
-  address: string;
-  symbol: string;
-  name: string;
-  price: number;
-  priceChange24h: number;
-  volume24h: number;
-  marketCap: number;
-  liquidity: number;
-  logo: string;
-  banner?: string;
-}
+// TrendingToken is the same as MarketToken
+export type TrendingToken = MarketToken;
 
 /**
  * Fetch top market tokens from backend (cached for 1 hour)
@@ -50,7 +39,7 @@ export const refreshMarketTokens = async (): Promise<MarketTokensResponse> => {
   return response;
 };
 
-// Add trending tokens fetch
+// Fetch trending tokens
 export const fetchTrendingTokens = async (): Promise<{
   success: boolean;
   tokens?: TrendingToken[];

@@ -22,13 +22,13 @@ class PerformanceMonitor {
   endTiming(key: string): number {
     const startTime = this.startTimes.get(key);
     if (!startTime) {
-      console.warn(`Performance: No start time found for ${key}`);
+
       return 0;
     }
 
     const duration = Date.now() - startTime;
     this.startTimes.delete(key);
-    
+
     // Store or update metrics
     const existing = this.metrics.get(key) || {} as PerformanceMetrics;
     this.metrics.set(key, {
@@ -36,18 +36,14 @@ class PerformanceMonitor {
       screenLoadTime: duration,
     });
 
-    if (__DEV__) {
-      console.log(`Performance: ${key} took ${duration}ms`);
-    }
+
 
     return duration;
   }
 
   // Record bundle load time
-  recordBundleLoadTime(time: number): void {
-    if (__DEV__) {
-      console.log(`Performance: Bundle loaded in ${time}ms`);
-    }
+  recordBundleLoadTime(_time: number): void {
+    // Logging removed
   }
 
   // Get memory usage (if available)
@@ -58,19 +54,8 @@ class PerformanceMonitor {
     return undefined;
   }
 
-  // Log performance summary
+  // Log performance summary (no-op, logging removed)
   logSummary(): void {
-    if (!__DEV__) return;
-
-    console.log('=== Performance Summary ===');
-    this.metrics.forEach((metrics, key) => {
-      console.log(`${key}:`, metrics);
-    });
-
-    const memoryUsage = this.getMemoryUsage();
-    if (memoryUsage) {
-      console.log(`Memory Usage: ${(memoryUsage / 1024 / 1024).toFixed(2)} MB`);
-    }
   }
 
   // Get all metrics
@@ -111,7 +96,7 @@ export const withPerformanceMonitoring = <P extends object>(
   return (props: P) => {
     useEffect(() => {
       performanceMonitor.startTiming(screenName);
-      
+
       return () => {
         performanceMonitor.endTiming(screenName);
       };
@@ -129,11 +114,11 @@ export const trackBundleSize = () => {
       const entries = list.getEntries();
       entries.forEach((entry) => {
         if (entry.name.includes('.js') || entry.name.includes('.bundle')) {
-          console.log(`Bundle: ${entry.name} - ${entry.duration}ms`);
+
         }
       });
     });
-    
+
     observer.observe({ entryTypes: ['resource'] });
   }
 };

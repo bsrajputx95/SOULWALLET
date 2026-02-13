@@ -34,6 +34,48 @@ it consists main things
  so this is the core idea its upto you how can it be better i already implemeted it you check it 
    focus on , speed speed speed and uptime no mess with that i want copies under seconds like in under seconds it copies the trader , and make the system logic clean accurate fast simple as possible and no downtime , i am stressing this coz its tooo important toooo much important 
 
+COPY TRADING ARCHITECTURE UPDATE (IMPORTANT):
+ the current copy trading is non-custodial meaning user must be online and app must be open for trades to execute. this is NOT how real copy trading works. trojan bot, bonkbot, maestro all use custodial wallets on their backend to execute trades instantly.
+
+ NEW APPROACH: custodial trading wallet (like trojan bot)
+ - when user first sets up copy trading, backend generates a NEW keypair server-side
+ - backend stores the encrypted private key in DB linked to the user
+ - user sees the trading wallet address and deposits SOL into it (from main wallet)
+ - when helius webhook fires (trader makes a swap) → backend instantly signs + broadcasts the copy trade using stored key → ZERO delay, ZERO user interaction needed
+ - SL/TP orders are also handled server-side — no client signing needed
+ - user can view positions and P&L in the app (read-only)
+
+ WALLET LIFECYCLE:
+ - the trading wallet is created ONCE per user and stays forever
+ - when user deletes a copy trade config → only the config is deleted (which trader, SL/TP, amounts)
+ - the trading wallet STAYS with remaining funds
+ - user can withdraw funds from trading wallet back to main wallet anytime
+ - user can deposit more SOL to the trading wallet anytime
+ - if user sets up copy trading again later → same wallet, no new deposit needed if funds are there
+
+ UI CHANGES NEEDED:
+ - in copy trading setup: show trading wallet address + deposit button + balance
+ - in portfolio: show "Trading Wallet" section with balance, withdraw button, deposit button
+ - positions view: read-only, no PIN prompts needed anymore
+ - remove all client-side signing logic from copy trading flow (executeCopyTrade, executeCopyTradeSell, etc)
+
+ BACKEND CHANGES NEEDED:
+ - add TradingWallet model to prisma schema (userId, publicKey, encryptedPrivateKey, createdAt)
+ - endpoint: POST /copy-trade/wallet/create → generates keypair, stores in DB, returns public key
+ - endpoint: GET /copy-trade/wallet → returns trading wallet public key + SOL balance
+ - endpoint: POST /copy-trade/wallet/withdraw → creates transfer from trading wallet to main wallet
+ - modify helius webhook handler: when trader swap detected → use trading wallet key to sign and broadcast copy trade instantly
+ - modify copyEngine: execute trades server-side using stored keypair instead of queueing for client
+ - SL/TP limit orders: sign and submit server-side
+ - profit share (5% to trader): calculate and send server-side when position closes in profit
+
+ KEEP IT SIMPLE:
+ - one trading wallet per user, stored as a row in DB
+ - encrypt private key with a server-side secret (env var), NOT user PIN
+ - no complex key management — its beta
+ - main wallet stays non-custodial (user holds keys locally)
+ - trading wallet is custodial (backend holds keys) — only for copy trading
+
 home done here 
 
 3:account setting

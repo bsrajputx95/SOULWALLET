@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     StyleSheet,
     View,
@@ -14,7 +14,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { createCopyConfig } from '../services/copyTrading';
+import { createCopyConfig, createCopyWallet, fetchCopyWallet, CopyTradingWallet } from '../services/copyTrading';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
 import { useAlert } from '../contexts/AlertContext';
 
@@ -38,12 +38,49 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [exitWithTrader, setExitWithTrader] = useState(false);
     const [isPending, setIsPending] = useState(false);
     const [copyName, setCopyName] = useState('');
+    const [copyWallet, setCopyWallet] = useState<CopyTradingWallet | null>(null);
+    const [isWalletLoading, setIsWalletLoading] = useState(false);
     // Manual wallet address input (for manual setup when no trader address)
     const [manualWalletAddress, setManualWalletAddress] = useState('');
 
     // Use manual address if trader has no address (manual setup)
     const isManualSetup = !trader?.walletAddress;
     const effectiveWalletAddress = isManualSetup ? manualWalletAddress : trader?.walletAddress;
+
+    const loadCopyWallet = useCallback(async () => {
+        try {
+            setIsWalletLoading(true);
+            const authToken = await SecureStore.getItemAsync('token');
+            if (!authToken) {
+                setCopyWallet(null);
+                return;
+            }
+
+            const walletResult = await fetchCopyWallet(authToken);
+            if (walletResult.success && walletResult.wallet) {
+                setCopyWallet(walletResult.wallet);
+                return;
+            }
+
+            const created = await createCopyWallet(authToken);
+            if (created.success && created.wallet) {
+                setCopyWallet(created.wallet);
+                return;
+            }
+
+            setCopyWallet(null);
+        } catch {
+            setCopyWallet(null);
+        } finally {
+            setIsWalletLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (visible) {
+            void loadCopyWallet();
+        }
+    }, [visible, loadCopyWallet]);
 
     const handleStartCopying = async () => {
         if (!effectiveWalletAddress || effectiveWalletAddress.trim().length === 0) {
@@ -66,6 +103,15 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
             if (!authToken) {
                 showAlert('Error', 'Please login first');
                 return;
+            }
+
+            if (!copyWallet) {
+                const walletResult = await createCopyWallet(authToken);
+                if (!walletResult.success || !walletResult.wallet) {
+                    showErrorToast(walletResult.error || 'Failed to initialize trading wallet');
+                    return;
+                }
+                setCopyWallet(walletResult.wallet);
             }
 
             const result = await createCopyConfig({
@@ -128,6 +174,27 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                                 : `Set up copy trading parameters for @${trader.username}`
                             }
                         </Text>
+
+                        <View style={styles.walletInfoCard}>
+                            <Text style={styles.walletInfoTitle}>Trading Wallet</Text>
+                            {isWalletLoading ? (
+                                <Text style={styles.walletInfoText}>Loading trading wallet...</Text>
+                            ) : copyWallet ? (
+                                <>
+                                    <Text style={styles.walletInfoText}>
+                                        {copyWallet.publicKey.slice(0, 8)}...{copyWallet.publicKey.slice(-8)}
+                                    </Text>
+                                    <Text style={styles.walletInfoBalance}>
+                                        Balance: ◎ {copyWallet.balance.toFixed(4)}
+                                    </Text>
+                                </>
+                            ) : (
+                                <Text style={styles.walletInfoText}>Trading wallet will be created on start.</Text>
+                            )}
+                            <Text style={styles.inputHint}>
+                                Deposit SOL here for instant server-side copy execution.
+                            </Text>
+                        </View>
 
                         {/* Copy trade name input */}
                         <View style={styles.inputSection}>
@@ -341,6 +408,31 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: 14,
         marginBottom: SPACING.l,
+    },
+    walletInfoCard: {
+        backgroundColor: COLORS.solana + '10',
+        borderRadius: BORDER_RADIUS.medium,
+        borderWidth: 1,
+        borderColor: COLORS.solana + '20',
+        padding: SPACING.m,
+        marginBottom: SPACING.m,
+    },
+    walletInfoTitle: {
+        ...FONTS.phantomBold,
+        color: COLORS.solana,
+        fontSize: 14,
+        marginBottom: SPACING.xs,
+    },
+    walletInfoText: {
+        ...FONTS.monospace,
+        color: COLORS.textPrimary,
+        fontSize: 12,
+    },
+    walletInfoBalance: {
+        ...FONTS.phantomMedium,
+        color: COLORS.success,
+        fontSize: 13,
+        marginTop: SPACING.xs,
     },
     inputSection: {
         marginBottom: SPACING.m,

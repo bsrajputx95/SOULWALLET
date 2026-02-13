@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
-import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import axios from 'axios';
 import fetch from 'cross-fetch';
 import bs58 from 'bs58';
@@ -20,6 +20,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.set('trust proxy', 1);
 
 // Token cache for market data (1 hour TTL)
 const tokenCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
@@ -88,17 +89,39 @@ const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/tokens/v1/solana';
 app.use(cors());
 
 // JSON body parser
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
-// Rate limiter (100 requests per 15 minutes per IP)
+// Rate limiter (200 requests per 15 minutes per IP)
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    max: 200,
     message: { error: 'Too many requests, please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,
 });
 app.use(limiter);
+
+// Register limiter (stricter)
+const registerLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 8,
+    message: { error: 'Too many registration attempts, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Login limiter: allow reasonable retries but protect from brute force,
+// and don't penalize successful logins.
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    skipSuccessfulRequests: true,
+    message: { error: 'Too many authentication attempts, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+app.use('/register', registerLimiter);
+app.use('/login', loginLimiter);
 
 // Request logging middleware
 app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -1473,8 +1496,162 @@ app.get('/transactions/history', authMiddleware, async (req: AuthRequest, res: R
 // ====== Copy Trading Endpoints ======
 
 import { queueCopyTrade, markTradeExecuted, getPendingQueueItems, checkBudget } from './services/copyEngine';
-import { cancelLimitOrder, checkOrderStatus, getSwapTransaction, getTokenDecimals } from './services/jupiterLimitOrder';
+import { cancelLimitOrder, checkOrderStatus, getSwapTransaction, getTokenDecimals, calculateSLTPPrices } from './services/jupiterLimitOrder';
 import { ensureTraderWebhook, deleteTraderWebhook } from './services/heliusWebhook';
+import { ensureCopyWallet, getCopyWallet, getCopyWalletKeypair, getCopyWalletSolBalance, setCopyWalletAllocation } from './services/copyWallet';
+
+const COPY_SOL_MINT = 'So11111111111111111111111111111111111111112';
+const COPY_WALLET_TX_FEE_BUFFER_SOL = 0.003;
+
+interface CustodialCopyExecutionParams {
+    config: {
+        id: string;
+        userId: string;
+        perTradeAmount: number;
+        totalInvestment: number;
+        stopLossPercent: number;
+        takeProfitPercent: number;
+    };
+    traderTxSignature: string;
+    inputMint: string;
+    inputSymbol: string;
+    outputMint: string;
+    outputSymbol: string;
+    inputAmount: number;
+    outputAmount: number;
+}
+
+async function executeCopyTradeWithCustodialWallet(params: CustodialCopyExecutionParams): Promise<{ success: boolean; signature?: string; error?: string }> {
+    let copyKeypair: Keypair | null = null;
+    try {
+        const positionTradeKey = `${params.traderTxSignature}:${params.config.userId}`;
+        const existingPosition = await prisma.copyPosition.findFirst({
+            where: {
+                configId: params.config.id,
+                traderTxSignature: positionTradeKey
+            }
+        });
+        if (existingPosition) {
+            return { success: true };
+        }
+
+        const openPositionsCount = await prisma.copyPosition.count({
+            where: {
+                configId: params.config.id,
+                status: 'open'
+            }
+        });
+        const projectedUsedBudget = (openPositionsCount + 1) * params.config.perTradeAmount;
+        if (projectedUsedBudget > params.config.totalInvestment) {
+            return { success: false, error: 'Copy budget exceeded' };
+        }
+
+        const copyWallet = await ensureCopyWallet(params.config.userId);
+        copyKeypair = await getCopyWalletKeypair(params.config.userId);
+        if (!copyKeypair) {
+            return { success: false, error: 'Copy wallet keypair unavailable' };
+        }
+
+        const spendAmount = Math.min(params.outputAmount, params.config.perTradeAmount);
+        if (!Number.isFinite(spendAmount) || spendAmount <= 0) {
+            return { success: false, error: 'Invalid spend amount' };
+        }
+
+        if (params.outputMint === COPY_SOL_MINT) {
+            const currentSolBalance = await getCopyWalletSolBalance(copyWallet.publicKey);
+            if (currentSolBalance < spendAmount + COPY_WALLET_TX_FEE_BUFFER_SOL) {
+                return { success: false, error: 'Insufficient copy wallet SOL balance' };
+            }
+        }
+
+        const outputDecimals = await getTokenDecimals(params.outputMint);
+        const spendAmountRaw = Math.max(1, Math.floor(spendAmount * Math.pow(10, outputDecimals)));
+
+        const swapTransaction = await getSwapTransaction({
+            inputMint: params.outputMint,
+            outputMint: params.inputMint,
+            amount: spendAmountRaw,
+            slippageBps: 50,
+            userPublicKey: copyWallet.publicKey
+        });
+
+        if (!swapTransaction?.swapTransaction) {
+            return { success: false, error: 'Failed to create swap transaction' };
+        }
+
+        const txBuffer = Buffer.from(swapTransaction.swapTransaction, 'base64');
+        const versionedTx = VersionedTransaction.deserialize(txBuffer);
+        versionedTx.sign([copyKeypair]);
+
+        const signature = await executeRpcCall(
+            conn => conn.sendRawTransaction(versionedTx.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+            }),
+            'sendRawTransaction'
+        );
+
+        const latestBlockhash = await executeRpcCall(
+            conn => conn.getLatestBlockhash(),
+            'getLatestBlockhash'
+        );
+        await executeRpcCall(
+            conn => conn.confirmTransaction({
+                signature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+            }, 'confirmed'),
+            'confirmTransaction'
+        );
+
+        const effectiveInputAmount = Number.isFinite(params.inputAmount) && params.inputAmount > 0 ? params.inputAmount : 0;
+        const entryPrice = effectiveInputAmount > 0 ? spendAmount / effectiveInputAmount : 0;
+        const { slPrice, tpPrice } = calculateSLTPPrices(
+            entryPrice,
+            params.config.stopLossPercent,
+            params.config.takeProfitPercent
+        );
+
+        await prisma.copyPosition.create({
+            data: {
+                configId: params.config.id,
+                userId: params.config.userId,
+                traderTxSignature: positionTradeKey,
+                inputMint: params.inputMint,
+                inputSymbol: params.inputSymbol,
+                outputMint: params.outputMint,
+                outputSymbol: params.outputSymbol,
+                entryAmount: spendAmount,
+                tokenAmount: effectiveInputAmount,
+                entryPrice,
+                slPrice,
+                tpPrice,
+                status: 'open'
+            }
+        });
+
+        const latestBalance = await getCopyWalletSolBalance(copyWallet.publicKey);
+        await prisma.copyWallet.update({
+            where: { userId: params.config.userId },
+            data: {
+                availableAmount: latestBalance,
+                lastBalanceCheckAt: new Date()
+            }
+        }).catch(() => { });
+
+        return { success: true, signature };
+    } catch (error: any) {
+        return { success: false, error: error?.message || 'Custodial execution failed' };
+    } finally {
+        if (copyKeypair) {
+            const secretKeyRef = copyKeypair.secretKey;
+            for (let i = 0; i < secretKeyRef.length; i++) {
+                secretKeyRef[i] = 0;
+            }
+            copyKeypair = null;
+        }
+    }
+}
 
 // Validation schemas for copy trading
 const copyConfigSchema = z.object({
@@ -1490,11 +1667,206 @@ const copyConfigSchema = z.object({
     path: ['perTradeAmount']
 });
 
+const copyWalletWithdrawSchema = z.object({
+    amount: z.number().positive('Amount must be greater than 0').optional()
+});
+
+// POST /copy-trade/wallet/create - Create (or return existing) custodial copy wallet
+app.post('/copy-trade/wallet/create', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const wallet = await ensureCopyWallet(req.userId!);
+        const balance = await getCopyWalletSolBalance(wallet.publicKey);
+
+        await prisma.copyWallet.update({
+            where: { userId: req.userId! },
+            data: {
+                availableAmount: balance,
+                lastBalanceCheckAt: new Date()
+            }
+        }).catch(() => { });
+
+        res.json({
+            success: true,
+            wallet: {
+                publicKey: wallet.publicKey,
+                balance,
+                status: wallet.status
+            }
+        });
+    } catch (error) {
+        console.error('Create copy wallet error:', error);
+        res.status(500).json({ error: 'Failed to create copy wallet' });
+    }
+});
+
+// GET /copy-trade/wallet - Get custodial copy wallet details + SOL balance
+app.get('/copy-trade/wallet', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const wallet = await getCopyWallet(req.userId!);
+        if (!wallet) {
+            res.json({ success: true, wallet: null });
+            return;
+        }
+
+        const balance = await getCopyWalletSolBalance(wallet.publicKey);
+
+        await prisma.copyWallet.update({
+            where: { userId: req.userId! },
+            data: {
+                availableAmount: balance,
+                lastBalanceCheckAt: new Date()
+            }
+        }).catch(() => { });
+
+        res.json({
+            success: true,
+            wallet: {
+                publicKey: wallet.publicKey,
+                balance,
+                status: wallet.status
+            }
+        });
+    } catch (error) {
+        console.error('Get copy wallet error:', error);
+        res.status(500).json({ error: 'Failed to fetch copy wallet' });
+    }
+});
+
+// POST /copy-trade/wallet/withdraw - Withdraw SOL from custodial copy wallet to user's main wallet
+app.post('/copy-trade/wallet/withdraw', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    let copyKeypair: Keypair | null = null;
+    try {
+        const data = copyWalletWithdrawSchema.parse(req.body ?? {});
+        const userId = req.userId!;
+
+        const copyWallet = await getCopyWallet(userId);
+        if (!copyWallet) {
+            res.status(404).json({ error: 'Copy wallet not found' });
+            return;
+        }
+
+        if (copyWallet.status !== 'active') {
+            res.status(400).json({ error: 'Copy wallet is not active' });
+            return;
+        }
+
+        const userWallet = await prisma.wallet.findUnique({
+            where: { userId },
+            select: { publicKey: true }
+        });
+        if (!userWallet?.publicKey) {
+            res.status(400).json({ error: 'Main wallet not found' });
+            return;
+        }
+
+        copyKeypair = await getCopyWalletKeypair(userId);
+        if (!copyKeypair) {
+            res.status(500).json({ error: 'Unable to access copy wallet signing key' });
+            return;
+        }
+
+        const fromPubkey = new PublicKey(copyWallet.publicKey);
+        const toPubkey = new PublicKey(userWallet.publicKey);
+
+        const currentLamports = await executeRpcCall(
+            conn => conn.getBalance(fromPubkey, 'confirmed'),
+            'getBalance'
+        );
+        const feeBufferLamports = 5000;
+        const requestedLamports = data.amount ? Math.floor(data.amount * LAMPORTS_PER_SOL) : 0;
+
+        const lamportsToWithdraw = requestedLamports > 0
+            ? requestedLamports
+            : Math.max(0, currentLamports - feeBufferLamports);
+
+        if (lamportsToWithdraw <= 0) {
+            res.status(400).json({ error: 'No withdrawable SOL in copy wallet' });
+            return;
+        }
+
+        if (lamportsToWithdraw + feeBufferLamports > currentLamports) {
+            res.status(400).json({
+                error: 'Insufficient copy wallet balance',
+                available: currentLamports / LAMPORTS_PER_SOL
+            });
+            return;
+        }
+
+        const transaction = new Transaction().add(
+            SystemProgram.transfer({
+                fromPubkey,
+                toPubkey,
+                lamports: lamportsToWithdraw
+            })
+        );
+
+        const latestBlockhash = await executeRpcCall(
+            conn => conn.getLatestBlockhash(),
+            'getLatestBlockhash'
+        );
+        transaction.recentBlockhash = latestBlockhash.blockhash;
+        transaction.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+        transaction.feePayer = fromPubkey;
+        transaction.sign(copyKeypair);
+
+        const signature = await executeRpcCall(
+            conn => conn.sendRawTransaction(transaction.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+            }),
+            'sendRawTransaction'
+        );
+
+        await executeRpcCall(
+            conn => conn.confirmTransaction({
+                signature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+            }, 'confirmed'),
+            'confirmTransaction'
+        );
+
+        const latestBalance = await getCopyWalletSolBalance(copyWallet.publicKey);
+        await prisma.copyWallet.update({
+            where: { userId },
+            data: {
+                availableAmount: latestBalance,
+                lastBalanceCheckAt: new Date()
+            }
+        }).catch(() => { });
+
+        res.json({
+            success: true,
+            signature,
+            withdrawnAmount: lamportsToWithdraw / LAMPORTS_PER_SOL,
+            toAddress: userWallet.publicKey,
+            explorerUrl: `https://solscan.io/tx/${signature}`
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            res.status(400).json({ error: error.issues[0]?.message || 'Validation failed' });
+            return;
+        }
+        console.error('Copy wallet withdraw error:', error);
+        const { statusCode, message } = handleRpcError(error);
+        res.status(statusCode).json({ error: message });
+    } finally {
+        if (copyKeypair) {
+            const secretKeyRef = copyKeypair.secretKey;
+            for (let i = 0; i < secretKeyRef.length; i++) {
+                secretKeyRef[i] = 0;
+            }
+            copyKeypair = null;
+        }
+    }
+});
+
 // POST /copy-trade/config - Create/update copy trading config
 app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const data = copyConfigSchema.parse(req.body);
         const userId = req.userId!;
+        const copyWallet = await ensureCopyWallet(userId);
 
         // Validate per-trade vs total
         if (data.perTradeAmount > data.totalInvestment) {
@@ -1502,10 +1874,13 @@ app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Res
             return;
         }
 
+        await setCopyWalletAllocation(userId, data.totalInvestment).catch(() => { });
+
         // Upsert config
         const config = await prisma.copyTradingConfig.upsert({
             where: { userId },
             update: {
+                copyWalletId: copyWallet.id,
                 name: data.name || undefined,
                 traderAddress: data.traderAddress,
                 totalInvestment: data.totalInvestment,
@@ -1517,6 +1892,7 @@ app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Res
             },
             create: {
                 userId,
+                copyWalletId: copyWallet.id,
                 name: data.name || undefined,
                 traderAddress: data.traderAddress,
                 totalInvestment: data.totalInvestment,
@@ -1553,7 +1929,17 @@ app.post('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Res
 app.get('/copy-trade/config', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const config = await prisma.copyTradingConfig.findUnique({
-            where: { userId: req.userId! }
+            where: { userId: req.userId! },
+            include: {
+                copyWallet: {
+                    select: {
+                        publicKey: true,
+                        status: true,
+                        availableAmount: true,
+                        lastBalanceCheckAt: true
+                    }
+                }
+            }
         });
 
         res.json({ success: true, config });
@@ -1952,7 +2338,8 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
                 }
             }).catch(() => { }); // Ignore duplicates
 
-            // Only queue copy trades for BUYs (when trader buys, we copy the buy)
+            // For BUYs, execute server-side from custodial copy wallet first.
+            // If execution fails, fall back to legacy queue so users do not miss trades during migration.
             if (swapType === 'buy') {
                 // Validate input amounts to prevent divide-by-zero and NaN
                 // Skip trades with invalid amounts that would cause calculation errors
@@ -1992,6 +2379,30 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
                         continue;
                     }
 
+                    const custodialExecution = await executeCopyTradeWithCustodialWallet({
+                        config: {
+                            id: config.id,
+                            userId: config.userId,
+                            perTradeAmount: config.perTradeAmount,
+                            totalInvestment: config.totalInvestment,
+                            stopLossPercent: config.stopLossPercent,
+                            takeProfitPercent: config.takeProfitPercent
+                        },
+                        traderTxSignature: tx.signature,
+                        inputMint: outputMint,
+                        inputSymbol: outputSymbol,
+                        outputMint: inputMint,
+                        outputSymbol: inputSymbol,
+                        inputAmount: proportionalInputAmount,
+                        outputAmount: cappedOutputAmount
+                    });
+
+                    if (custodialExecution.success) {
+                        console.log(`[CopyTrading] Custodial execution success for user ${config.userId} (${tx.signature})`);
+                        continue;
+                    }
+
+                    console.warn(`[CopyTrading] Custodial execution failed for user ${config.userId}, queue fallback: ${custodialExecution.error}`);
                     await queueCopyTrade({
                         userId: config.userId,
                         configId: config.id,

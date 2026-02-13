@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
-import { NeonCard, NeonButton, QueueStatusBanner, PortfolioSkeleton, ErrorBoundary } from '@/components';
+import { NeonCard, NeonButton, PortfolioSkeleton, ErrorBoundary } from '@/components';
 import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, api } from '@/services';
 import { fetchCopyConfig, createCopyConfig, stopCopyTrading } from '@/services/copyTrading';
 import { validateSession } from '@/utils';
@@ -166,16 +166,15 @@ export default function PortfolioScreen() {
       if (hasLocal) {
         localPubkey = await getLocalPublicKey();
         setSolanaPublicKey(localPubkey);
-        if (__DEV__) console.log('Local wallet found:', localPubkey);
+
       } else {
-        if (__DEV__) console.log('No local wallet found');
       }
 
       // Fetch balances from backend (works even if no local wallet)
-      if (__DEV__) console.log('Fetching portfolio from backend...');
+
       const portfolio = await fetchBalances(token);
       if (portfolio) {
-        if (__DEV__) console.log('Portfolio received:', portfolio);
+
         setTotalBalance(portfolio.totalUsdValue);
         // Use public key from backend if not available locally
         if (localPubkey) {
@@ -183,8 +182,7 @@ export default function PortfolioScreen() {
         } else if (portfolio.publicKey) {
           setSolanaPublicKey(portfolio.publicKey);
         }
-        if (__DEV__) console.log('Holdings count:', portfolio.holdings.length);
-        if (__DEV__) console.log('Holdings:', portfolio.holdings.map((h: Holding) => ({ symbol: h.symbol, balance: h.balance, usdValue: h.usdValue, price: h.price })));
+
 
         // Transform holdings to Token type with real price data
         setTokens(portfolio.holdings.map((h: Holding, i: number) => ({
@@ -235,16 +233,10 @@ export default function PortfolioScreen() {
     await Promise.all([fetchUserProfile(), fetchWalletData(true)]);
   }, [fetchUserProfile, fetchWalletData]);
 
-  // Load data on mount
+  // Validate session on mount
   useEffect(() => {
     void validateSession();
-    const loadData = async () => {
-      setIsLoading(true);
-      await Promise.all([fetchUserProfile(), fetchWalletData(), loadCopyConfig()]);
-      setIsLoading(false);
-    };
-    loadData();
-  }, [fetchUserProfile, fetchWalletData]);
+  }, []);
 
   // Edit modal state — declared before useFocusEffect so we can skip refresh when modal is open
   const [selectedWallet, setSelectedWallet] = useState<CopiedWallet | null>(null);
@@ -259,10 +251,13 @@ export default function PortfolioScreen() {
     useCallback(() => {
       // Skip refresh when edit modal is open to prevent input flickering
       if (selectedWallet) return;
-      // Refresh wallet data when portfolio tab is focused
-      fetchWalletData();
-      loadCopyConfig();
-    }, [fetchWalletData, selectedWallet])
+      const loadAll = async () => {
+        setIsLoading(true);
+        await Promise.all([fetchUserProfile(), fetchWalletData(), loadCopyConfig()]);
+        setIsLoading(false);
+      };
+      loadAll();
+    }, [fetchWalletData, fetchUserProfile, loadCopyConfig, selectedWallet])
   );
 
   const [isUpdatingCopyTrade, setIsUpdatingCopyTrade] = useState(false);
@@ -336,8 +331,6 @@ export default function PortfolioScreen() {
     return () => clearTimeout(timer);
   }, [isLoading]);
 
-  // Mock trending data - static mock data
-  const trendingData: any = { pairs: [] };
 
   // Responsive padding logic like Home screen
   const { width } = useWindowDimensions();
@@ -476,8 +469,6 @@ export default function PortfolioScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
-          {/* Settings now open in a dedicated screen; inline panel removed */}
-          <QueueStatusBanner testID="queue-banner-portfolio" />
 
           {isInitialLoad && tokens.length === 0 ? <PortfolioSkeleton /> : (
             <>

@@ -1,18 +1,7 @@
 import { api } from './api';
-import { executeSwap, getQuote, SwapQuote } from './swap';
+import { executeSwap, getQuote, SwapQuote, getTokenDecimals } from './swap';
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
-
-// Helper to get token decimals from Jupiter
-async function getTokenDecimals(mintAddress: string): Promise<number> {
-    try {
-        const response = await fetch(`https://api.jup.ag/tokens/v1/token/${mintAddress}`);
-        const data = await response.json();
-        return data.decimals ?? 6;
-    } catch {
-        return 6;
-    }
-}
 
 export interface IBuyPosition {
     id: string;
@@ -116,10 +105,10 @@ export const executeIBuy = async (
 
         // Get output token decimals from Jupiter
         const tokenDecimals = await getTokenDecimals(prepareRes.tokenAddress);
-        
+
         // Calculate token amount received using correct decimals
         const tokenAmount = parseInt(prepareRes.quote.outAmount) / Math.pow(10, tokenDecimals);
-        
+
         // Calculate price as SOL per token (SOL spent / tokens received)
         const solSpent = prepareRes.amount;
         const price = tokenAmount > 0 ? solSpent / tokenAmount : 0;

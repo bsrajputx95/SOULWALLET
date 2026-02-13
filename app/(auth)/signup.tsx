@@ -17,19 +17,19 @@ import { User, Mail, Lock, UserPlus, Eye, EyeOff } from 'lucide-react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '@/constants';
-import { NeonButton, NeonDivider, SocialButton, GlowingText } from '@/components';
+import { NeonButton, GlowingText } from '@/components';
 import { api } from '@/services';
 import { useAuth } from '@/contexts/AuthContext';
-import { useAlert } from '@/contexts/AlertContext';
+import { persistAuthSession } from '@/utils/session';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
+const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignupNewScreen() {
     const router = useRouter();
     const { setToken } = useAuth();
-    const { showAlert } = useAlert();
 
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
@@ -39,28 +39,62 @@ export default function SignupNewScreen() {
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [tosAccepted, setTosAccepted] = useState(false);
 
     const emailInputRef = useRef<TextInput>(null);
     const passwordInputRef = useRef<TextInput>(null);
     const confirmPasswordInputRef = useRef<TextInput>(null);
 
-    const handleSignup = async () => {
-        Keyboard.dismiss();
+    const getSignupErrorMessage = (error: unknown): string => {
+        if (!(error instanceof Error)) {
+            return 'Something went wrong. Please try again.';
+        }
 
-        if (!username.trim()) {
+        if (error.message.includes('Network request failed')) {
+            return 'Network error. Please check your connection.';
+        }
+
+        if (error.message.includes('Too many authentication attempts')) {
+            return 'Too many attempts. Please wait a bit and try again.';
+        }
+
+        return error.message || 'Signup failed. Please try again.';
+    };
+
+    const handleSignup = async () => {
+        if (isLoading) {
+            return;
+        }
+        Keyboard.dismiss();
+        const normalizedUsername = username.trim();
+        const normalizedEmail = email.trim().toLowerCase();
+
+        if (!normalizedUsername) {
             setErrorMessage('Username is required');
             return;
         }
-        if (!email.trim()) {
+        if (normalizedUsername.length < 3 || normalizedUsername.length > 30 || !USERNAME_REGEX.test(normalizedUsername)) {
+            setErrorMessage('Username must be 3-30 chars and use letters, numbers, or underscores');
+            return;
+        }
+        if (!normalizedEmail) {
             setErrorMessage('Email is required');
             return;
         }
-        if (!password) {
-            setErrorMessage('Password is required');
+        if (!EMAIL_REGEX.test(normalizedEmail)) {
+            setErrorMessage('Please enter a valid email address');
+            return;
+        }
+        if (!password || password.length < 6) {
+            setErrorMessage('Password must be at least 6 characters');
             return;
         }
         if (password !== confirmPassword) {
             setErrorMessage('Passwords do not match');
+            return;
+        }
+        if (!tosAccepted) {
+            setErrorMessage('Please accept Terms of Service to continue');
             return;
         }
 
@@ -77,40 +111,27 @@ export default function SignupNewScreen() {
                 user: unknown;
                 error?: string;
             }>('/register', {
-                username: username.trim(),
-                email: email.trim(),
+                username: normalizedUsername,
+                email: normalizedEmail,
                 password,
                 confirmPassword,
             });
-
-            // Store JWT token securely
-            if (data.token) {
-                await SecureStore.setItemAsync('token', data.token);
-                await SecureStore.setItemAsync('user_data', JSON.stringify(data.user));
-                // Update AuthContext with the new token
-                setToken(data.token);
+            if (!data.token) {
+                throw new Error('Signup failed. Please try again.');
             }
+            await persistAuthSession(data.token, data.user);
+            setToken(data.token);
 
             // Navigate to main app on success
             router.replace('/(tabs)');
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            setErrorMessage(errorMessage);
+            setErrorMessage(getSignupErrorMessage(error));
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleSocialPress = (provider: string) => {
-        if (Platform.OS !== 'web') {
-            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        }
-        showAlert(
-            'Coming Soon',
-            `${provider} signup will be available in a future update.`,
-            [{ text: 'OK' }]
-        );
-    };
+
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -213,7 +234,7 @@ export default function SignupNewScreen() {
                                 </TouchableOpacity>
                             </View>
                             <Text style={styles.passwordHint}>
-                                Min 8 chars: uppercase, lowercase, number, special (@$!%*?&)
+                                Minimum 6 characters
                             </Text>
                         </View>
 
@@ -244,33 +265,37 @@ export default function SignupNewScreen() {
                                     )}
                                 </TouchableOpacity>
                             </View>
-                        </View>{/* Signup Button */}
+                        </View>
+
+                        {/* Terms of Service Checkbox */}
+                        <TouchableOpacity
+                            style={styles.tosContainer}
+                            onPress={() => setTosAccepted(!tosAccepted)}
+                            activeOpacity={0.7}
+                        >
+                            <View style={[styles.checkbox, tosAccepted && styles.checkboxChecked]}>
+                                {tosAccepted && <Text style={styles.checkmark}>✓</Text>}
+                            </View>
+                            <Text style={styles.tosText}>
+                                I agree to the{' '}
+                                <Text style={styles.tosLink}>Terms of Service</Text>
+                                {' '}and{' '}
+                                <Text style={styles.tosLink}>Privacy Policy</Text>
+                            </Text>
+                        </TouchableOpacity>
+
+                        {/* Signup Button */}
                         <NeonButton
                             title="Create Account"
                             icon={<UserPlus size={20} color={COLORS.textPrimary} />}
                             onPress={handleSignup}
                             loading={isLoading}
+                            disabled={!tosAccepted || isLoading}
                             fullWidth
-                            style={styles.signupButton}
+                            style={[styles.signupButton, !tosAccepted && { opacity: 0.5 }]}
                         />
 
-                        <NeonDivider text="OR CONTINUE WITH" />
 
-                        {/* Social Buttons */}
-                        <View style={styles.socialButtonsContainer}>
-                            <SocialButton
-                                title="Google"
-                                icon={<Text style={styles.socialIcon}>G</Text>}
-                                style={styles.socialButton}
-                                onPress={() => handleSocialPress('Google')}
-                            />
-                            <SocialButton
-                                title="Apple"
-                                icon={<Text style={styles.socialIcon}>A</Text>}
-                                style={styles.socialButton}
-                                onPress={() => handleSocialPress('Apple')}
-                            />
-                        </View>
 
                         {/* Login Link */}
                         <View style={styles.loginContainer}>
@@ -378,17 +403,40 @@ const styles = StyleSheet.create({
     signupButton: {
         marginBottom: 24,
     },
-    socialButtonsContainer: {
+    tosContainer: {
         flexDirection: 'row',
-        gap: 12,
-        marginBottom: 24,
+        alignItems: 'center',
+        marginBottom: 20,
+        paddingHorizontal: 4,
     },
-    socialButton: {
-        flex: 1,
+    checkbox: {
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: COLORS.textSecondary + '80',
+        backgroundColor: 'transparent',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 10,
     },
-    socialIcon: {
-        fontSize: 20,
+    checkboxChecked: {
+        borderColor: COLORS.usdc,
+        backgroundColor: COLORS.usdc + '20',
+    },
+    checkmark: {
+        color: COLORS.usdc,
+        fontSize: 14,
         fontWeight: 'bold',
+    },
+    tosText: {
+        flex: 1,
+        color: COLORS.textSecondary,
+        fontSize: 13,
+    },
+    tosLink: {
+        color: COLORS.usdc,
+        fontWeight: '500',
     },
     loginContainer: {
         flexDirection: 'row',

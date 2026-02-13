@@ -35,6 +35,7 @@ model User {
 
   // Wallet Relation (1-to-1)
   wallet       Wallet?
+  copyWallet   CopyWallet?
   
   // Transaction History
   transactions Transaction[]
@@ -75,6 +76,27 @@ model Wallet {
   @@map("wallets")
 }
 
+model CopyWallet {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  publicKey           String   @unique
+  encryptedPrivateKey String
+  status              String   @default("active") // "active", "paused"
+  allocatedAmount     Float    @default(0)
+  availableAmount     Float    @default(0)
+  reservedAmount      Float    @default(0)
+  lastBalanceCheckAt  DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  config              CopyTradingConfig?
+
+  @@index([status])
+  @@index([userId, status])
+  @@map("copy_wallets")
+}
+
 model Transaction {
   id            String   @id @default(cuid())
   userId        String
@@ -99,6 +121,7 @@ model Transaction {
 model CopyTradingConfig {
   id                  String   @id @default(cuid())
   userId              String   @unique
+  copyWalletId        String?  @unique
   name                String?  // User-defined label (e.g. "ELON's wallet")
   traderAddress       String   // The wallet address being copied
   totalInvestment     Float    // Max total budget (e.g., 1000 USDC)
@@ -111,6 +134,7 @@ model CopyTradingConfig {
   updatedAt           DateTime @updatedAt
 
   user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  copyWallet          CopyWallet? @relation(fields: [copyWalletId], references: [id], onDelete: SetNull)
   positions           CopyPosition[]
   queueItems          CopyTradeQueue[]
 
@@ -170,6 +194,7 @@ model CopyTradeQueue {
   configId          String
   userId            String
   positionId        String?  // Set for exit trades, null for entry trades
+  idempotencyKey    String?  @unique
   traderTxSignature String
   traderAddress     String
   type              String   @default("entry") // "entry" (buy) or "exit" (sell)
@@ -183,7 +208,19 @@ model CopyTradeQueue {
   slPrice           Float?
   tpPrice           Float?
   cancelTransactions String? // JSON string of SL/TP cancel transactions for client to sign (exit trades only)
-  status            String   @default("pending") // "pending", "completed", "expired", "cancelled"
+  status            String   @default("pending") // "pending", "processing", "completed", "failed", "expired", "cancelled"
+  retryCount        Int      @default(0)
+  maxRetries        Int      @default(3)
+  lockedBy          String?
+  lockedAt          DateTime?
+  processingStartedAt DateTime?
+  processedAt       DateTime?
+  failedAt          DateTime?
+  failureReason     String?
+  txSignature       String?
+  webhookReceivedAt DateTime?
+  enqueueLatencyMs  Int?
+  submitLatencyMs   Int?
   expiresAt         DateTime
   createdAt         DateTime @default(now())
 
@@ -195,6 +232,7 @@ model CopyTradeQueue {
   @@unique(name: "unique_queue_item", [userId, traderTxSignature, positionId])
   @@index([userId, status])
   @@index([configId, status])
+  @@index([status, createdAt])
   @@index([positionId])
   @@index([expiresAt])
   @@map("copy_trade_queue")

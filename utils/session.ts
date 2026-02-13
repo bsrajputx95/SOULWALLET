@@ -1,5 +1,14 @@
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
+const SESSION_KEYS = [
+    'token',
+    'user_data',
+    'wallet_secret',
+    'wallet_pubkey',
+    'wallet_pin_hash',
+    'cached_pin',
+    'cached_pin_expiry',
+] as const;
 
 /**
  * Validate user session by checking for auth token
@@ -33,13 +42,17 @@ export const getAuthToken = async (): Promise<string | null> => {
 };
 
 /**
+ * Persist auth session token and user payload.
+ */
+export const persistAuthSession = async (token: string, user: unknown): Promise<void> => {
+    await SecureStore.setItemAsync('token', token);
+    await SecureStore.setItemAsync('user_data', JSON.stringify(user ?? null));
+};
+
+/**
  * Clear all session data (for logout)
  */
 export const clearSession = async (): Promise<void> => {
-    try {
-        await SecureStore.deleteItemAsync('token');
-        await SecureStore.deleteItemAsync('user_data');
-    } catch {
-        // Silent fail
-    }
+    const clearTasks = SESSION_KEYS.map((key) => SecureStore.deleteItemAsync(key));
+    await Promise.allSettled(clearTasks);
 };
