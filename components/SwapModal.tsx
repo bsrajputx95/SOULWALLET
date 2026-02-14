@@ -65,13 +65,11 @@ export const SwapModal: React.FC<SwapModalProps> = ({
     const [pinError, setPinError] = useState('');
     const [quoteError, setQuoteError] = useState('');
     const [jupiterTokens, setJupiterTokens] = useState<JupiterToken[]>([]);
-    const [loadingTokens, setLoadingTokens] = useState(false);
     const abortControllerRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
         if (visible) {
-            setLoadingTokens(true);
-            getTokenList().then(setJupiterTokens).finally(() => setLoadingTokens(false));
+            getTokenList().then(setJupiterTokens);
         }
     }, [visible]);
 

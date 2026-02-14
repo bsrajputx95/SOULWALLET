@@ -502,24 +502,6 @@ const styles = StyleSheet.create({
         fontSize: 14,
         marginBottom: SPACING.s,
     },
-    presetsRow: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    presetButton: {
-        flex: 1,
-        backgroundColor: COLORS.background,
-        borderRadius: BORDER_RADIUS.small,
-        paddingVertical: SPACING.s,
-        alignItems: 'center',
-    },
-    presetButtonActive: {
-        backgroundColor: COLORS.success + '30',
-    },
-    presetText: {
-        ...FONTS.phantomSemiBold,
-        color: COLORS.textPrimary,
-    },
     inputWrapper: {
         borderWidth: 1,
         borderColor: COLORS.textSecondary + '50',

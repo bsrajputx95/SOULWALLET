@@ -8,12 +8,10 @@ import { formatSubscriptPrice, formatLargeNumber } from '../utils/formatPrice';
 
 interface TokenCardProps {
   symbol: string;
-  name?: string;  // Optional - not displayed but kept for compatibility
   price: number;
   change: number;
   liquidity?: number;
   volume?: number;
-  transactions?: number;
   logo?: string;
   onPress?: () => void;
 }
@@ -25,7 +23,6 @@ export const TokenCard = memo<TokenCardProps>(({
   change,
   liquidity,
   volume,
-  transactions,
   logo,
   onPress,
 }) => {
@@ -75,7 +72,7 @@ export const TokenCard = memo<TokenCardProps>(({
               {isPositive ? '+' : ''}{change.toFixed(1)}%
             </Text>
 
-            {(!!liquidity || !!volume || !!transactions) && (
+            {(!!liquidity || !!volume) && (
               <View style={styles.stats}>
                 {!!liquidity && (
                   <View style={styles.stat}>
@@ -103,7 +100,8 @@ export const TokenCard = memo<TokenCardProps>(({
     prev.price === next.price &&
     prev.change === next.change &&
     prev.liquidity === next.liquidity &&
-    prev.volume === next.volume
+    prev.volume === next.volume &&
+    prev.logo === next.logo
   );
 });
 

@@ -174,12 +174,12 @@ export default function MarketScreen() {
       if (response.success) {
         setTokens(response.tokens);
       } else {
-        console.warn('[Market] API returned unsuccessful response, using mock data');
+        if (__DEV__) console.warn('[Market] API returned unsuccessful response, using mock data');
         setTokens(mockTokens);
         setUsingMockData(true);
       }
     } catch (err) {
-      console.error('[Market] Failed to fetch tokens:', err);
+      if (__DEV__) console.error('[Market] Failed to fetch tokens:', err);
       // Use mock data as fallback when backend is unavailable
       setTokens(mockTokens);
       setUsingMockData(true);
@@ -261,7 +261,6 @@ export default function MarketScreen() {
               <TokenCard
                 key={token.address}
                 symbol={token.symbol}
-                name={token.name}
                 price={token.price}
                 change={token.priceChange24h}
                 {...(token.liquidity !== undefined ? { liquidity: token.liquidity } : {})}

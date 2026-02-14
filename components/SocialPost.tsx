@@ -202,10 +202,6 @@ export const SocialPost: React.FC<SocialPostProps> = React.memo(({
     });
   }, [router]);
 
-
-
-
-
   const handleUsernamePress = useCallback(() => {
     router.push(`/profile/${username}`);
   }, [router, username]);
@@ -483,13 +479,6 @@ const styles = StyleSheet.create({
   mention: {
     color: COLORS.solana,
   },
-  token: {
-    color: COLORS.success,
-  },
-  postLink: {
-    color: COLORS.solana,
-    textDecorationLine: 'underline',
-  },
   actionsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -532,9 +521,6 @@ const styles = StyleSheet.create({
   },
   likedText: {
     color: COLORS.error,
-  },
-  repostedText: {
-    color: COLORS.success,
   },
   imagesContainer: {
     marginTop: SPACING.s,

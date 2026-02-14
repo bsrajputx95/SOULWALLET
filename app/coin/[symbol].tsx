@@ -32,7 +32,7 @@ import { COLORS, BORDER_RADIUS, FONTS, SPACING } from '@/constants';
 import { NeonCard, NeonButton, GlowingText } from '@/components';
 import { formatSubscriptPrice, formatLargeNumber as formatLargeNum, showErrorToast, showSuccessToast } from '@/utils';
 import { getQuote, executeSwap, getTokenDecimals, JupiterToken } from '@/services/swap';
-import { createTriggerOrder, executeTriggerOrder, calculateLimitOutput, calculateLimitInput } from '@/services/trigger';
+import { createTriggerOrder, executeTriggerOrder } from '@/services/trigger';
 import { getLocalPublicKey } from '@/services/wallet';
 import { useAlert } from '@/contexts/AlertContext';
 
@@ -499,7 +499,7 @@ export default function CoinDetailsScreen() {
         ]
       );
     } catch (error: any) {
-      console.error('[Trade] Market order failed:', error);
+      if (__DEV__) console.error('[Trade] Market order failed:', error);
       showErrorToast(error.message || 'Swap failed');
       setIsTrading(false);
     }
@@ -544,7 +544,7 @@ export default function CoinDetailsScreen() {
                   throw new Error(result.error || 'Swap failed');
                 }
               } catch (error: any) {
-                console.error('[Trade] Swap execution failed:', error);
+                if (__DEV__) console.error('[Trade] Swap execution failed:', error);
                 showErrorToast(error.message || 'Swap failed');
                 setIsTrading(false);
               }
@@ -555,7 +555,7 @@ export default function CoinDetailsScreen() {
         'Enter PIN'
       );
     } catch (error: any) {
-      console.error('[Trade] Market swap failed:', error);
+      if (__DEV__) console.error('[Trade] Market swap failed:', error);
       showErrorToast(error.message || 'Swap failed');
       setIsTrading(false);
     }
@@ -604,7 +604,8 @@ export default function CoinDetailsScreen() {
         // Calculate output based on target price
         // For buy: targetPrice is in USD per token
         // We need to calculate how many tokens we get for our SOL
-        const solPriceUsd = 85; // Approximate SOL price - should fetch dynamically
+        // Use token's current price for calculations
+        const solPriceUsd = tokenInfo?.priceUsd ? parseFloat(tokenInfo.priceUsd) : 150;
         const solValueUsd = amount * solPriceUsd;
         const expectedTokens = solValueUsd / targetPrice;
         takingAmount = Math.floor(expectedTokens * Math.pow(10, outputDecimals)).toString();
@@ -618,7 +619,8 @@ export default function CoinDetailsScreen() {
         // Calculate output based on target price
         // For sell: targetPrice is in USD per token
         const tokenValueUsd = amount * targetPrice;
-        const solPriceUsd = 85; // Approximate SOL price - should fetch dynamically
+        // Use token's current price for calculations
+        const solPriceUsd = tokenInfo?.priceUsd ? parseFloat(tokenInfo.priceUsd) : 150;
         const expectedSol = tokenValueUsd / solPriceUsd;
         takingAmount = Math.floor(expectedSol * Math.pow(10, outputDecimals)).toString();
       }
@@ -698,7 +700,7 @@ export default function CoinDetailsScreen() {
                             throw new Error('Failed to submit order');
                           }
                         } catch (error: any) {
-                          console.error('[Trade] Limit order submission failed:', error);
+                          if (__DEV__) console.error('[Trade] Limit order submission failed:', error);
                           showErrorToast(error.message || 'Failed to submit order');
                           setIsTrading(false);
                         }
@@ -709,7 +711,7 @@ export default function CoinDetailsScreen() {
                   'Enter PIN'
                 );
               } catch (error: any) {
-                console.error('[Trade] Limit order creation failed:', error);
+                if (__DEV__) console.error('[Trade] Limit order creation failed:', error);
                 showErrorToast(error.message || 'Failed to create limit order');
                 setIsTrading(false);
               }
@@ -718,7 +720,7 @@ export default function CoinDetailsScreen() {
         ]
       );
     } catch (error: any) {
-      console.error('[Trade] Limit order failed:', error);
+      if (__DEV__) console.error('[Trade] Limit order failed:', error);
       showErrorToast(error.message || 'Failed to create limit order');
       setIsTrading(false);
     }

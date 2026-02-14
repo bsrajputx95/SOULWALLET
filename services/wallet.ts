@@ -80,7 +80,7 @@ export interface TransactionRecord {
  * Create a new wallet keypair client-side, encrypt and store in SecureStore,
  * then link the public key to the user's account on the backend.
  */
-export const createWallet = async (authToken: string, userPin: string): Promise<{ success: boolean; publicKey?: string; error?: string }> => {
+export const createWallet = async (_authToken: string, userPin: string): Promise<{ success: boolean; publicKey?: string; error?: string }> => {
     try {
         // 1. Generate keypair
         const keypair = Keypair.generate();
@@ -273,7 +273,7 @@ export const importWallet = async (
             }
             // If backend fails but local storage succeeded, we can still proceed
             // The wallet will work locally and retry linking on next fetch
-            console.warn('Backend link failed, wallet stored locally:', linkError);
+            if (__DEV__) console.warn('Backend link failed, wallet stored locally:', linkError);
         }
 
         return { success: true, publicKey, secretKey };

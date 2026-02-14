@@ -1,5 +1,5 @@
 import { api } from './api';
-import { executeSwap, SwapQuote, getTokenDecimals } from './swap';
+import { executeSwap, SwapQuote } from './swap';
 
 export interface IBuyPosition {
     id: string;
@@ -159,7 +159,10 @@ export const executeIBuy = async (
         const positionsRes = await getMyIBuyBag();
         const position = positionsRes.positions?.find(p => p.id === completeRes.positionId);
 
-        return { success: true, position };
+        if (position) {
+            return { success: true, position };
+        }
+        return { success: true };
     } catch (error: any) {
         return { success: false, error: error.message || 'IBUY failed' };
     }
@@ -267,7 +270,12 @@ export const getCreatorEarnings = async (): Promise<{
             avgProfit: number;
             breakdown: Array<{ postId: string; tokenSymbol: string; earnings: number }>;
         }>('/ibuy/creator-earnings');
-        return { success: true, ...response };
+        return { success: true, 
+            totalEarnings: response.totalEarnings,
+            positionCount: response.positionCount,
+            avgProfit: response.avgProfit,
+            breakdown: response.breakdown
+        };
     } catch (error: any) {
         return { success: false, error: error.message };
     }

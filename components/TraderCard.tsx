@@ -19,7 +19,7 @@ export const TraderCard: React.FC<TraderCardProps> = ({
   username: _username,
   walletAddress,
   roi,
-  period: _period = '24h',
+  period = '24h',
   onPress,
 }) => {
   const { showAlert } = useAlert();
@@ -59,7 +59,7 @@ export const TraderCard: React.FC<TraderCardProps> = ({
             styles.roi,
             { color: roi >= 0 ? COLORS.success : COLORS.error }
           ]}>
-            {roi >= 0 ? '+' : ''}{roi.toFixed(1)}% today
+            {roi >= 0 ? '+' : ''}{roi.toFixed(1)}% {period === '24h' ? 'today' : period}
           </Text>
         </View>
       </NeonCard>

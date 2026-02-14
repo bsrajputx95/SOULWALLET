@@ -124,7 +124,7 @@ export function calculateLimitOutput(
     inputAmount: number,
     targetPrice: number,
     inputDecimals: number = 6,
-    outputDecimals: number = 6
+    _outputDecimals: number = 6
 ): string {
     // Convert input to raw amount
     const inputRaw = inputAmount * Math.pow(10, inputDecimals);
@@ -148,7 +148,7 @@ export function calculateLimitOutput(
 export function calculateLimitInput(
     outputAmount: number,
     targetPrice: number,
-    inputDecimals: number = 6,
+    _inputDecimals: number = 6,
     outputDecimals: number = 6
 ): string {
     // Convert output to raw amount

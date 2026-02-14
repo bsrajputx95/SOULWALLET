@@ -34,7 +34,7 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
     const [amountPerTrade, setAmountPerTrade] = useState('0.5');
     const [stopLoss, setStopLoss] = useState('10');
     const [takeProfit, setTakeProfit] = useState('30');
-    const [maxSlippage, setMaxSlippage] = useState('0.5');
+
     const [exitWithTrader, setExitWithTrader] = useState(false);
     const [isPending, setIsPending] = useState(false);
     const [copyName, setCopyName] = useState('');
@@ -288,21 +288,6 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                             </View>
                         </View>
 
-                        <View style={styles.inputSection}>
-                            <Text style={styles.inputLabel}>Max Slippage (%)</Text>
-                            <View style={styles.inputContainer}>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="0.5"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                    value={maxSlippage}
-                                    onChangeText={setMaxSlippage}
-                                    keyboardType="numeric"
-                                />
-                                <Text style={styles.inputSuffix}>%</Text>
-                            </View>
-                        </View>
-
                         <TouchableOpacity
                             style={[styles.exitWithTraderButton, exitWithTrader && styles.exitWithTraderButtonActive]}
                             onPress={() => setExitWithTrader(prev => !prev)}
@@ -494,14 +479,6 @@ const styles = StyleSheet.create({
         ...FONTS.phantomRegular,
         color: COLORS.textSecondary,
         fontSize: 12,
-    },
-    feeDisclosure: {
-        backgroundColor: COLORS.solana + '10',
-        borderRadius: BORDER_RADIUS.medium,
-        padding: SPACING.m,
-        marginBottom: SPACING.m,
-        borderWidth: 1,
-        borderColor: COLORS.solana + '20',
     },
     startCopyButton: {
         backgroundColor: COLORS.success + '20',

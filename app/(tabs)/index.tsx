@@ -302,12 +302,13 @@ export default function HomeScreen() {
       '2dRR9CaNrEsHm3UqZacEf8AoDuDx4NGQyMhGxG71NzkN',
     ];
 
-    // Generate random positive gains between 10% and 250%
+    // Use deterministic values based on wallet address (consistent across renders)
     return walletAddresses.map((address, index) => ({
       id: `trader-${index}`,
       name: `Trader ${index + 1}`,
       walletAddress: address,
-      roi: Math.floor(Math.random() * 240 + 10), // Random 10-250%
+      // Deterministic pseudo-random based on address characters
+      roi: ((address.charCodeAt(0) + address.charCodeAt(10) + index * 37) % 240) + 10,
       username: `${address.slice(0, 4)}...${address.slice(-4)}`,
     }));
   }, []);
@@ -373,7 +374,6 @@ export default function HomeScreen() {
                     <TokenCard
                       key={coin.id}
                       symbol={coin.symbol}
-                      name={coin.name}
                       price={coin.price}
                       change={coin.change24h || 0}
                       liquidity={coin.liquidity}

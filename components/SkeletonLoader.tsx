@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated } from 'react-native';
+import { View, StyleSheet, Animated, StyleProp, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, SPACING } from '../constants/theme';
@@ -8,7 +8,7 @@ interface SkeletonLoaderProps {
   width?: number | string;
   height?: number;
   borderRadius?: number;
-  style?: any;
+  style?: StyleProp<ViewStyle>;
 }
 
 export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
@@ -56,7 +56,7 @@ export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
           opacity,
         },
         style,
-      ]}
+      ] as any}
     >
       <LinearGradient
         colors={[COLORS.cardBackground, COLORS.cardBackground + 'AA', COLORS.cardBackground]}
