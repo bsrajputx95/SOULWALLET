@@ -26,6 +26,7 @@ import { NeonCard, NeonButton, PortfolioSkeleton, ErrorBoundary } from '@/compon
 import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, sendTransaction, api } from '@/services';
 import { fetchCopyConfig, createCopyConfig, stopCopyTrading, fetchCopyWallet, createCopyWallet, withdrawCopyWallet, CopyTradingWallet, fetchCopyPositions, CopyPosition } from '@/services/copyTrading';
 import { getMyIBuyBag, IBuyPosition } from '@/services/ibuy';
+import { getTriggerOrders, cancelTriggerOrder, TriggerOrder } from '@/services/trigger';
 import { validateSession } from '@/utils';
 import { useAlert } from '@/contexts/AlertContext';
 
@@ -58,7 +59,7 @@ type CopiedWallet = {
   roi: number;
 };
 
-type PortfolioTab = 'tokens' | 'copied' | 'watchlist';
+type PortfolioTab = 'tokens' | 'copied' | 'orders' | 'watchlist';
 type ChartPeriod = '24h' | '7d' | '30d' | 'all';
 type ChartType = 'line' | 'candle';
 
@@ -230,6 +231,10 @@ export default function PortfolioScreen() {
   const [iBuyPositions, setIBuyPositions] = useState<IBuyPosition[]>([]);
   const [copyPositions, setCopyPositions] = useState<CopyPosition[]>([]);
 
+  // NEW: Trigger orders state
+  const [triggerOrders, setTriggerOrders] = useState<TriggerOrder[]>([]);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(false);
+
   // Abort controller refs for cleanup
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -328,6 +333,53 @@ export default function PortfolioScreen() {
       if (__DEV__) console.warn('Failed to load positions', e);
     }
   }, []);
+
+  // NEW: Load trigger/limit orders
+  const loadTriggerOrders = useCallback(async (signal?: AbortSignal) => {
+    try {
+      if (signal?.aborted) return;
+      setIsOrdersLoading(true);
+      
+      const orders = await getTriggerOrders('open');
+      if (signal?.aborted) return;
+      
+      setTriggerOrders(orders);
+    } catch (e) {
+      if (__DEV__) console.warn('Failed to load trigger orders', e);
+    } finally {
+      setIsOrdersLoading(false);
+    }
+  }, []);
+
+  // NEW: Cancel a trigger order
+  const handleCancelOrder = useCallback(async (orderId: string) => {
+    try {
+      showAlert(
+        'Cancel Order',
+        'Are you sure you want to cancel this limit order?',
+        [
+          { text: 'No', style: 'cancel' },
+          {
+            text: 'Yes, Cancel',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const tx = await cancelTriggerOrder(orderId);
+                if (tx) {
+                  showAlert('Success', 'Order cancelled successfully');
+                  loadTriggerOrders(); // Refresh orders
+                }
+              } catch (error: any) {
+                showAlert('Error', error.message || 'Failed to cancel order');
+              }
+            }
+          }
+        ]
+      );
+    } catch (e) {
+      showAlert('Error', 'Failed to cancel order');
+    }
+  }, [showAlert, loadTriggerOrders]);
 
   const ensureCopyWallet = useCallback(async (): Promise<{ token: string; wallet: CopyTradingWallet | null }> => {
     const token = await SecureStore.getItemAsync('token');
@@ -634,7 +686,7 @@ export default function PortfolioScreen() {
       return () => {
         abortControllerRef.current?.abort();
       };
-    }, [fetchWalletData, fetchUserProfile, loadCopyConfig, loadCopyWallet, loadPositions, selectedWallet])
+    }, [fetchWalletData, fetchUserProfile, loadCopyConfig, loadCopyWallet, loadPositions, loadTriggerOrders, selectedWallet])
   );
 
   const [isUpdatingCopyTrade, setIsUpdatingCopyTrade] = useState(false);
@@ -784,6 +836,7 @@ export default function PortfolioScreen() {
       await Promise.all([
         refetch(signal),
         loadPositions(signal),
+        loadTriggerOrders(signal),
         loadWatchlist(signal),
         loadCopyConfig(signal),
         loadCopyWallet(signal)
@@ -796,7 +849,7 @@ export default function PortfolioScreen() {
         setRefreshing(false);
       }
     }
-  }, [loadCopyConfig, loadCopyWallet, loadWatchlist, loadPositions, refetch]);
+  }, [loadCopyConfig, loadCopyWallet, loadWatchlist, loadPositions, loadTriggerOrders, refetch]);
 
   useEffect(() => {
     void loadWatchlist();
@@ -979,6 +1032,21 @@ export default function PortfolioScreen() {
                 <Pressable
                   style={[
                     styles.tab,
+                    activeTab === 'orders' && styles.activeTab,
+                  ]}
+                  onPress={() => setActiveTab('orders')}
+                >
+                  <Text style={[
+                    styles.tabText,
+                    activeTab === 'orders' && styles.activeTabText,
+                  ]}>
+                    Orders
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={[
+                    styles.tab,
                     activeTab === 'watchlist' && styles.activeTab,
                   ]}
                   onPress={() => setActiveTab('watchlist')}
@@ -990,7 +1058,6 @@ export default function PortfolioScreen() {
                     Watch List
                   </Text>
                 </Pressable>
-
 
               </View>
 
@@ -1145,6 +1212,71 @@ export default function PortfolioScreen() {
                           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: wallet.isActive ? COLORS.success : COLORS.error }} />
                           <Text style={{ ...FONTS.sfProRegular, color: wallet.isActive ? COLORS.success : COLORS.error, fontSize: 12 }}>
                             {wallet.isActive ? 'Active' : 'Paused'}
+                          </Text>
+                        </View>
+                      </NeonCard>
+                    ))
+                  )}
+                </View>
+              )}
+
+              {activeTab === 'orders' && (
+                <View style={styles.walletsContainer}>
+                  {isOrdersLoading ? (
+                    <View style={{ padding: SPACING.m, alignItems: 'center' }}>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14 }}>
+                        Loading orders...
+                      </Text>
+                    </View>
+                  ) : triggerOrders.length === 0 ? (
+                    <View style={{ padding: SPACING.m, alignItems: 'center' }}>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14, textAlign: 'center' }}>
+                        No active limit orders.
+                      </Text>
+                      <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 12, marginTop: SPACING.s, textAlign: 'center' }}>
+                        Go to any coin and select "Target" to create a limit order.
+                      </Text>
+                    </View>
+                  ) : (
+                    triggerOrders.map((order) => (
+                      <NeonCard key={order.id} style={styles.walletCard}>
+                        <View style={styles.walletHeader}>
+                          <View style={styles.walletInfo}>
+                            <Text style={styles.walletUsername}>
+                              {order.inputMint === 'So11111111111111111111111111111111111111112' ? 'SOL' : 'Token'} 
+                              → 
+                              {order.outputMint === 'So11111111111111111111111111111111111111112' ? 'SOL' : 'Token'}
+                            </Text>
+                            <Text style={styles.copiedWalletAddress}>
+                              Order ID: {order.id.slice(0, 8)}...{order.id.slice(-6)}
+                            </Text>
+                          </View>
+
+                          <Pressable
+                            style={[styles.editButton, { backgroundColor: COLORS.error + '20' }]}
+                            onPress={() => handleCancelOrder(order.id)}
+                          >
+                            <Text style={[styles.editButtonText, { color: COLORS.error }]}>Cancel</Text>
+                          </Pressable>
+                        </View>
+
+                        <View style={styles.walletStats}>
+                          <View style={styles.walletStat}>
+                            <Text style={styles.walletStatLabel}>Status</Text>
+                            <Text style={[styles.walletStatValue, { color: COLORS.success }]}>{order.status}</Text>
+                          </View>
+                          <View style={styles.walletStat}>
+                            <Text style={styles.walletStatLabel}>Created</Text>
+                            <Text style={[styles.walletStatValue, { color: COLORS.textPrimary }]}>
+                              {new Date(order.createdAt).toLocaleDateString()}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: SPACING.xs, gap: 6 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.solana }} />
+                          <Text style={{ ...FONTS.sfProRegular, color: COLORS.solana, fontSize: 12 }}>
+                            Limit Order Active
                           </Text>
                         </View>
                       </NeonCard>
