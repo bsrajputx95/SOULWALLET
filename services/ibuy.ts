@@ -1,7 +1,5 @@
 import { api } from './api';
-import { executeSwap, getQuote, SwapQuote, getTokenDecimals } from './swap';
-
-const SOL_MINT = 'So11111111111111111111111111111111111111112';
+import { executeSwap, SwapQuote, getTokenDecimals } from './swap';
 
 export interface IBuyPosition {
     id: string;
@@ -31,6 +29,16 @@ export interface IBuySettings {
     ibuySlippage: number;
     ibuyDefaultSol: number;
     autoApprove: boolean;
+}
+
+export interface IBuyQueueItem {
+    id: string;
+    postId: string;
+    amount: number;
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    position?: number;
+    errorMessage?: string;
+    createdAt: string;
 }
 
 // Verify token for post
@@ -71,61 +79,87 @@ export const updateIBuySettings = async (settings: Partial<IBuySettings>): Promi
     }
 };
 
-// Execute IBUY (buy token from post)
+// Execute IBUY via Queue (handles viral posts)
 export const executeIBuy = async (
     postId: string,
     amount: number,
     pin: string
-): Promise<{ success: boolean; position?: IBuyPosition; error?: string }> => {
+): Promise<{ success: boolean; position?: IBuyPosition; error?: string; queued?: boolean; queueId?: string }> => {
     try {
-        // Step 1: Get settings for slippage
-        const settings = await getIBuySettings();
-
-        // Step 2: Prepare IBUY (get quote from backend)
-        const prepareRes = await api.post<{
+        // Step 1: Add to queue
+        const queueRes = await api.post<{
             success: boolean;
-            quote: SwapQuote;
+            queued: boolean;
+            queueId: string;
+            position: number;
             tokenAddress: string;
             tokenSymbol: string;
-            amount: number;
-            creatorFee: number;
-            error?: string;
+            message: string;
         }>('/ibuy/prepare', { postId, amount });
 
-        if (!prepareRes.success) {
-            return { success: false, error: prepareRes.error || 'Prepare failed' };
+        if (!queueRes.success) {
+            return { success: false, error: 'Failed to queue iBuy' };
         }
 
-        // Step 3: Execute swap using swap service
-        const swapResult = await executeSwap(prepareRes.quote, pin);
+        // Step 2: Wait for queue processing (poll for quote)
+        let quote: SwapQuote | null = null;
+        let retries = 0;
+        const maxRetries = 30; // 30 seconds max wait
+
+        while (!quote && retries < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s
+            
+            const statusRes = await api.get<{
+                success: boolean;
+                items: Array<{
+                    id: string;
+                    status: string;
+                    quote?: string;
+                    errorMessage?: string;
+                }>;
+            }>('/ibuy/queue');
+
+            const item = statusRes.items.find(i => i.id === queueRes.queueId);
+            if (item) {
+                if (item.status === 'failed') {
+                    return { success: false, error: item.errorMessage || 'Queue processing failed' };
+                }
+                if (item.quote) {
+                    quote = JSON.parse(item.quote);
+                }
+            }
+            retries++;
+        }
+
+        if (!quote) {
+            return { success: false, error: 'Timeout waiting for quote' };
+        }
+
+        // Step 3: Execute swap
+        const swapResult = await executeSwap(quote, pin);
 
         if (!swapResult.success || !swapResult.signature) {
             return { success: false, error: swapResult.error || 'Swap failed' };
         }
 
-        // Get output token decimals from Jupiter
-        const tokenDecimals = await getTokenDecimals(prepareRes.tokenAddress);
-
-        // Calculate token amount received using correct decimals
-        const tokenAmount = parseInt(prepareRes.quote.outAmount) / Math.pow(10, tokenDecimals);
-
-        // Calculate price as SOL per token (SOL spent / tokens received)
-        const solSpent = prepareRes.amount;
-        const price = tokenAmount > 0 ? solSpent / tokenAmount : 0;
-
-        const executeRes = await api.post<{
+        // Step 4: Complete the queue item
+        const completeRes = await api.post<{
             success: boolean;
-            position: IBuyPosition;
+            positionId: string;
         }>('/ibuy/execute', {
-            postId,
-            signature: swapResult.signature,
-            tokenAmount,
-            solAmount: prepareRes.amount,
-            price,
-            creatorFee: prepareRes.creatorFee
+            queueId: queueRes.queueId,
+            signature: swapResult.signature
         });
 
-        return { success: true, position: executeRes.position };
+        if (!completeRes.success) {
+            return { success: false, error: 'Failed to complete iBuy' };
+        }
+
+        // Get the created position
+        const positionsRes = await getMyIBuyBag();
+        const position = positionsRes.positions?.find(p => p.id === completeRes.positionId);
+
+        return { success: true, position };
     } catch (error: any) {
         return { success: false, error: error.message || 'IBUY failed' };
     }
@@ -138,6 +172,26 @@ export const getMyIBuyBag = async (): Promise<{ success: boolean; positions?: IB
         return { success: true, positions: response.positions };
     } catch (error: any) {
         return { success: false, error: error.message };
+    }
+};
+
+// Get queue status
+export const getIBuyQueueStatus = async (): Promise<{
+    success: boolean;
+    pending: number;
+    processing: number;
+    items: IBuyQueueItem[];
+}> => {
+    try {
+        const response = await api.get<{
+            success: boolean;
+            pending: number;
+            processing: number;
+            items: IBuyQueueItem[];
+        }>('/ibuy/queue');
+        return response;
+    } catch {
+        return { success: false, pending: 0, processing: 0, items: [] };
     }
 };
 

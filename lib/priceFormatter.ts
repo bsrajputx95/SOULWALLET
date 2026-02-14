@@ -3,11 +3,15 @@
  * Re-exports from utils/formatPrice for consistency
  */
 
-export {
-    formatPrice,
+// Import for internal use to avoid circular reference
+import {
+    formatPrice as _formatPrice,
     formatSubscriptPrice,
     formatLargeNumber,
 } from '../utils/formatPrice';
+
+// Re-export for external use
+export { _formatPrice as formatPrice, formatSubscriptPrice, formatLargeNumber };
 
 /**
  * Format a percentage value with sign
@@ -43,7 +47,7 @@ export const formatTokenBalance = (balance: number, decimals: number = 9): strin
     if (balance < 0.0001) return balance.toExponential(4);
     if (balance < 1) return balance.toFixed(decimals > 6 ? 6 : decimals);
     if (balance < 1000) return balance.toFixed(4);
-    return formatLargeNumber(balance);
+    return formatLargeNumber(balance); // Uses imported function
 };
 
 /**
@@ -53,7 +57,7 @@ export const formatTokenBalance = (balance: number, decimals: number = 9): strin
  */
 export const formatCurrency = (value: number): string => {
     if (value === 0) return '$0';
-    return `$${formatPrice(value).replace('$', '')}`;
+    return `$${_formatPrice(value).replace('$', '')}`;
 };
 
 /**

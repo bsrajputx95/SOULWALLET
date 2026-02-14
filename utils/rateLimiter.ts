@@ -1,4 +1,4 @@
-class RateLimiter {
+export class RateLimiter {
   private calls: Map<string, number[]> = new Map();
 
   canCall(key: string, maxCalls: number, windowMs: number): boolean {

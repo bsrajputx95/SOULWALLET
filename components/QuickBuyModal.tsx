@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     StyleSheet,
     View,
@@ -9,18 +9,15 @@ import {
     ActivityIndicator,
     ScrollView,
     Image,
-    TouchableOpacity,
-    Linking,
 } from 'react-native';
-import { X, Search, AlertCircle, ShoppingCart, Shield, ExternalLink } from 'lucide-react-native';
+import { X, Search, AlertCircle, ShoppingCart, Shield } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { COLORS } from '../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../constants/theme';
-import { getQuote, executeSwap, getTokenList, JupiterToken } from '../services/swap';
+import { getQuote, executeSwap } from '../services/swap';
 import { api } from '../services/api';
 import { showSuccessToast, showErrorToast } from '../utils/toast';
-import { useAlert } from '../contexts/AlertContext';
 
 interface QuickBuyModalProps {
     visible: boolean;
@@ -32,18 +29,15 @@ interface TokenInfo {
     address: string;
     symbol: string;
     name: string;
-    logoURI?: string | undefined;
+    logoURI?: string;
     decimals: number;
-    price?: number;
-    verified?: boolean;
-    source?: 'jupiter' | 'generic';
+    verified: boolean;
 }
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const SOL_DECIMALS = 9;
 
 export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, onSuccess }) => {
-    const { showAlert } = useAlert();
     const [tokenAddress, setTokenAddress] = useState('');
     const [solAmount, setSolAmount] = useState('');
     const [slippage, setSlippage] = useState('1');
@@ -55,14 +49,12 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
     const [isFetchingQuote, setIsFetchingQuote] = useState(false);
     const [showPinInput, setShowPinInput] = useState(false);
     const [pin, setPin] = useState('');
-    const [jupiterTokens, setJupiterTokens] = useState<JupiterToken[]>([]);
 
-    // Load Jupiter token list on mount
-    useEffect(() => {
-        getTokenList().then(setJupiterTokens).catch(() => { });
-    }, []);
+    // Abort controllers for race condition prevention
+    const verifyAbortRef = useRef<AbortController | null>(null);
+    const quoteAbortRef = useRef<AbortController | null>(null);
 
-    // Reset state when modal opens
+    // Reset on open
     useEffect(() => {
         if (visible) {
             setTokenAddress('');
@@ -76,14 +68,22 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
         }
     }, [visible]);
 
-    // Fetch quote when inputs change
+    // Fetch quote with debounce and abort
     useEffect(() => {
-        const fetchQuote = async () => {
-            if (!tokenInfo || !solAmount || parseFloat(solAmount) <= 0) {
-                setQuote(null);
-                return;
-            }
+        // Cancel previous quote request
+        if (quoteAbortRef.current) {
+            quoteAbortRef.current.abort();
+        }
 
+        if (!tokenInfo || !solAmount || parseFloat(solAmount) <= 0) {
+            setQuote(null);
+            return;
+        }
+
+        const controller = new AbortController();
+        quoteAbortRef.current = controller;
+
+        const fetchQuote = async () => {
             setIsFetchingQuote(true);
             try {
                 const amountInLamports = Math.floor(parseFloat(solAmount) * Math.pow(10, SOL_DECIMALS));
@@ -93,176 +93,122 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                     SOL_MINT,
                     tokenInfo.address,
                     amountInLamports,
-                    slippageBps
+                    slippageBps,
+                    controller.signal
                 );
 
-                setQuote(quoteResult);
+                if (!controller.signal.aborted) {
+                    setQuote(quoteResult);
+                }
             } catch (err: any) {
-                setQuote(null);
+                if (err.name !== 'AbortError') {
+                    setQuote(null);
+                }
             } finally {
-                setIsFetchingQuote(false);
+                if (!controller.signal.aborted) {
+                    setIsFetchingQuote(false);
+                }
             }
         };
 
-        const timer = setTimeout(fetchQuote, 500);
-        return () => clearTimeout(timer);
+        const timer = setTimeout(fetchQuote, 400);
+        return () => {
+            clearTimeout(timer);
+            controller.abort();
+        };
     }, [tokenInfo, solAmount, slippage]);
 
-    // Validate Solana address format (32-44 base58 chars)
-    const isValidSolanaAddress = (address: string): boolean => {
+    // Validate Solana address
+    const isValidSolanaAddress = useCallback((address: string): boolean => {
         return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address.trim());
-    };
+    }, []);
 
-    // Fetch token info from Jupiter API
-    const fetchTokenFromJupiter = async (addr: string): Promise<TokenInfo | null> => {
-        try {
-            console.log(`[QuickBuy] Fetching token info for: ${addr}`);
-
-            // Try Jupiter Tokens V2 API
-            const data = await api.get<{ tokens: any[] }>(`/tokens/search?query=${addr}`);
-            console.log(`[QuickBuy] API data:`, JSON.stringify(data).substring(0, 500));
-
-            if (!data.tokens || data.tokens.length === 0) {
-                console.log('[QuickBuy] No tokens found');
-                return null;
-            }
-
-            // Find exact match - Jupiter uses 'id' for address
-            const token = data.tokens.find((t: any) => t.id === addr || t.address === addr);
-            console.log(`[QuickBuy] Found token:`, token ? JSON.stringify(token).substring(0, 300) : 'null');
-
-            if (!token) return null;
-
-            // Token metadata stored for display
-
-            // Backend maps Jupiter's icon to logoURI, also check image field
-            const logoUrl = token.logoURI || token.icon || token.image;
-            const tokenInfo = {
-                address: token.id || token.address,
-                symbol: token.symbol,
-                name: token.name,
-                decimals: token.decimals || 9,
-                logoURI: logoUrl,
-                verified: token.verified || false,
-                source: 'jupiter' as const,
-            };
-
-            console.log(`[QuickBuy] Returning token info:`, tokenInfo);
-            return tokenInfo;
-        } catch (err: any) {
-            console.error('[QuickBuy] Error fetching token:', err.message);
-            return null;
-        }
-    };
-
-    // Open DexScreener for this token
-    const handleTokenPress = () => {
-        if (tokenInfo?.address) {
-            const dexScreenerUrl = `https://dexscreener.com/solana/${tokenInfo.address}`;
-            Linking.openURL(dexScreenerUrl).catch(() => {
-                showErrorToast('Could not open DexScreener');
-            });
-        }
-    };
-
-    // Verify token - check local list first, then Jupiter API
-    const handleVerifyToken = async () => {
+    // Verify token with abort support
+    const handleVerifyToken = useCallback(async () => {
         const addr = tokenAddress.trim();
         if (!addr) {
-            setError('Please enter a token address');
+            setError('Enter token address');
             return;
         }
         if (!isValidSolanaAddress(addr)) {
-            setError('Invalid Solana token address format');
+            setError('Invalid address format');
             return;
         }
+
+        // Cancel previous verification
+        if (verifyAbortRef.current) {
+            verifyAbortRef.current.abort();
+        }
+
+        const controller = new AbortController();
+        verifyAbortRef.current = controller;
 
         setIsVerifying(true);
         setError(null);
         setTokenInfo(null);
 
         try {
-            // Tier 1: Check local hardcoded list
-            const localToken = jupiterTokens.find(t => t.address === addr);
-            if (localToken) {
+            const data = await api.get<{ tokens: any[] }>(`/tokens/search?query=${addr}`);
+            
+            if (controller.signal.aborted) return;
+
+            const token = data.tokens?.find((t: any) => t.id === addr || t.address === addr);
+
+            if (token) {
                 setTokenInfo({
-                    address: localToken.address,
-                    symbol: localToken.symbol,
-                    name: localToken.name,
-                    decimals: localToken.decimals,
-                    logoURI: localToken.logoURI,
-                    verified: true,
-                    source: 'jupiter',
+                    address: token.id || token.address,
+                    symbol: token.symbol || 'Unknown',
+                    name: token.name || 'Unknown Token',
+                    decimals: token.decimals || 9,
+                    logoURI: token.logoURI || token.icon || token.image,
+                    verified: token.verified || false,
                 });
-                setIsVerifying(false);
-                return;
+            } else {
+                // Unknown token - allow with warning
+                setTokenInfo({
+                    address: addr,
+                    symbol: 'Unknown',
+                    name: 'Unverified Token',
+                    decimals: 9,
+                    verified: false,
+                });
             }
-
-            // Tier 2: Fetch from Jupiter API
-            const jupiterToken = await fetchTokenFromJupiter(addr);
-            if (jupiterToken) {
-                setTokenInfo(jupiterToken);
-                setIsVerifying(false);
-                return;
-            }
-
-            // Tier 3: Unknown token - still allow but with warning
-            setTokenInfo({
-                address: addr,
-                symbol: 'Unknown',
-                name: 'Unverified Token',
-                decimals: 9,
-                verified: false,
-                source: 'generic',
-            });
         } catch {
-            setError('Unable to verify token');
+            if (!controller.signal.aborted) {
+                setError('Verification failed');
+            }
         } finally {
-            setIsVerifying(false);
+            if (!controller.signal.aborted) {
+                setIsVerifying(false);
+            }
         }
-    };
+    }, [tokenAddress]);
 
-    // Auto-verify when address looks complete
+    // Auto-verify on complete address
     useEffect(() => {
         if (tokenAddress.length >= 32 && isValidSolanaAddress(tokenAddress)) {
             const timer = setTimeout(() => {
-                void handleVerifyToken();
-            }, 500);
+                handleVerifyToken();
+            }, 600);
             return () => clearTimeout(timer);
         }
         return undefined;
-    }, [tokenAddress]);
+    }, [tokenAddress, handleVerifyToken]);
 
-    // Execute buy using Jupiter swap
-    const handleBuy = async () => {
-        if (!tokenInfo) {
-            setError('Please verify the token first');
+    // Execute buy
+    const handleBuy = () => {
+        if (!tokenInfo || !solAmount || parseFloat(solAmount) <= 0 || !quote) {
+            setError('Complete all fields');
             return;
         }
-
-        const amount = parseFloat(solAmount);
-        if (isNaN(amount) || amount <= 0) {
-            setError('Please enter a valid SOL amount');
-            return;
-        }
-
-        if (!quote) {
-            setError('No swap quote available');
-            return;
-        }
-
         setShowPinInput(true);
+        setError(null);
     };
 
-    // Confirm swap with PIN
+    // Confirm swap
     const handleConfirmSwap = async () => {
-        if (!pin || pin.length < 4) {
-            setError('Please enter a valid PIN (min 4 digits)');
-            return;
-        }
-
-        if (!quote) {
-            setError('No quote available');
+        if (!pin || pin.length < 4 || !quote) {
+            setError('Enter valid PIN');
             return;
         }
 
@@ -273,27 +219,10 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
             const result = await executeSwap(quote, pin);
 
             if (result.success) {
-                showSuccessToast(`Bought ${tokenInfo?.symbol || 'tokens'}`);
+                showSuccessToast(`Bought ${tokenInfo?.symbol}`);
                 setPin('');
-                setShowPinInput(false);
                 onClose();
                 onSuccess?.();
-
-                showAlert(
-                    'Swap Successful!',
-                    `You swapped ${solAmount} SOL for ${tokenInfo?.symbol}`,
-                    [
-                        {
-                            text: 'View on Solscan',
-                            onPress: () => {
-                                if (result.explorerUrl) {
-                                    // Open in browser
-                                }
-                            },
-                        },
-                        { text: 'Done', style: 'default' }
-                    ]
-                );
             } else {
                 setError(result.error || 'Swap failed');
                 showErrorToast(result.error || 'Swap failed');
@@ -307,7 +236,6 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
         }
     };
 
-    // Calculate estimated output
     const estimatedOutput = quote && tokenInfo
         ? (Number(quote.outAmount) / Math.pow(10, tokenInfo.decimals)).toFixed(6)
         : '0';
@@ -315,12 +243,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
     const canBuy = tokenInfo && solAmount && parseFloat(solAmount) > 0 && quote && !isFetchingQuote;
 
     return (
-        <Modal
-            visible={visible}
-            animationType="slide"
-            transparent={true}
-            onRequestClose={onClose}
-        >
+        <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
             <View style={styles.overlay}>
                 <View style={styles.container}>
                     {/* Header */}
@@ -337,11 +260,11 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                     <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                         {/* Token Address Input */}
                         <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Token Contract Address</Text>
+                            <Text style={styles.label}>Token Address</Text>
                             <View style={styles.inputRow}>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="Enter token mint address..."
+                                    placeholder="Paste token mint address..."
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={tokenAddress}
                                     onChangeText={setTokenAddress}
@@ -363,71 +286,50 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                             </View>
                         </View>
 
-                        {/* Token Info Card - Tappable */}
+                        {/* Token Info Card */}
                         {tokenInfo && (
-                            <TouchableOpacity
-                                style={[
-                                    styles.tokenCard,
-                                    !tokenInfo.verified && styles.tokenCardUnverified
-                                ]}
-                                onPress={handleTokenPress}
-                                activeOpacity={0.8}
-                            >
+                            <View style={[styles.tokenCard, !tokenInfo.verified && styles.tokenCardUnverified]}>
                                 <View style={styles.tokenInfo}>
                                     {tokenInfo.logoURI ? (
-                                        <Image
-                                            source={{ uri: tokenInfo.logoURI }}
-                                            style={styles.tokenLogo}
-                                            resizeMode="cover"
-                                        />
+                                        <Image source={{ uri: tokenInfo.logoURI }} style={styles.tokenLogo} />
                                     ) : (
                                         <View style={styles.tokenLogoPlaceholder}>
-                                            <Text style={styles.tokenLogoText}>{tokenInfo.symbol?.[0]}</Text>
+                                            <Text style={styles.tokenLogoText}>{tokenInfo.symbol[0]}</Text>
                                         </View>
                                     )}
                                     <View style={styles.tokenDetails}>
                                         <Text style={styles.tokenSymbol}>{tokenInfo.symbol}</Text>
-                                        <Text style={styles.tokenName} numberOfLines={1}>
-                                            {tokenInfo.name}
-                                        </Text>
+                                        <Text style={styles.tokenName} numberOfLines={1}>{tokenInfo.name}</Text>
                                     </View>
-                                    <View style={styles.tokenBadgeContainer}>
-                                        {tokenInfo.verified ? (
-                                            <View style={styles.verifiedBadge}>
-                                                <Shield size={14} color={COLORS.success} />
-                                                <Text style={styles.verifiedText}>Verified</Text>
-                                            </View>
-                                        ) : (
-                                            <View style={styles.unverifiedBadge}>
-                                                <AlertCircle size={14} color={COLORS.warning || '#FFB800'} />
-                                                <Text style={styles.unverifiedText}>Unknown</Text>
-                                            </View>
-                                        )}
-                                        <View style={styles.viewDetailsHint}>
-                                            <Text style={styles.viewDetailsText}>Tap for details</Text>
-                                            <ExternalLink size={12} color={COLORS.textSecondary} />
+                                    {tokenInfo.verified ? (
+                                        <View style={styles.verifiedBadge}>
+                                            <Shield size={14} color={COLORS.success} />
+                                            <Text style={styles.verifiedText}>Verified</Text>
                                         </View>
-                                    </View>
+                                    ) : (
+                                        <View style={styles.unverifiedBadge}>
+                                            <AlertCircle size={14} color={COLORS.warning} />
+                                            <Text style={styles.unverifiedText}>Unknown</Text>
+                                        </View>
+                                    )}
                                 </View>
-                            </TouchableOpacity>
+                            </View>
                         )}
 
-                        {/* Warning for unverified tokens */}
+                        {/* Warning for unverified */}
                         {tokenInfo && !tokenInfo.verified && (
-                            <View style={styles.warningContainer}>
-                                <AlertCircle size={16} color={COLORS.warning || '#FFB800'} />
-                                <Text style={styles.warningText}>
-                                    This token is not verified. Only trade if you trust this contract address.
-                                </Text>
+                            <View style={styles.warningBox}>
+                                <AlertCircle size={14} color={COLORS.warning} />
+                                <Text style={styles.warningText}>Unverified token. Trade with caution.</Text>
                             </View>
                         )}
 
                         {/* Amount Input */}
                         <View style={styles.inputGroup}>
                             <Text style={styles.label}>Amount (SOL)</Text>
-                            <View style={styles.amountContainer}>
+                            <View style={styles.amountRow}>
                                 <TextInput
-                                    style={styles.input}
+                                    style={[styles.input, { flex: 1 }]}
                                     placeholder="0.1"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={solAmount}
@@ -437,47 +339,35 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                                 />
                                 <Text style={styles.solLabel}>SOL</Text>
                             </View>
-                            <View style={styles.presetButtons}>
-                                {['0.1', '0.5', '1', '2'].map((preset) => (
+                            <View style={styles.presetRow}>
+                                {['0.1', '0.5', '1', '2'].map((p) => (
                                     <Pressable
-                                        key={preset}
-                                        style={[styles.presetButton, solAmount === preset && styles.presetButtonActive]}
-                                        onPress={() => setSolAmount(preset)}
+                                        key={p}
+                                        style={[styles.presetBtn, solAmount === p && styles.presetBtnActive]}
+                                        onPress={() => setSolAmount(p)}
                                         disabled={isBuying}
                                     >
-                                        <Text style={[styles.presetText, solAmount === preset && styles.presetTextActive]}>
-                                            {preset} SOL
+                                        <Text style={[styles.presetText, solAmount === p && styles.presetTextActive]}>
+                                            {p}
                                         </Text>
                                     </Pressable>
                                 ))}
                             </View>
                         </View>
 
-                        {/* Slippage Input */}
+                        {/* Slippage */}
                         <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Slippage Tolerance (%)</Text>
-                            <View style={styles.slippageContainer}>
-                                <TextInput
-                                    style={[styles.input, styles.slippageInput]}
-                                    placeholder="1"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                    value={slippage}
-                                    onChangeText={setSlippage}
-                                    keyboardType="decimal-pad"
-                                    editable={!isBuying}
-                                />
-                                <Text style={styles.percentLabel}>%</Text>
-                            </View>
-                            <View style={styles.presetButtons}>
-                                {['0.5', '1', '2', '5'].map((preset) => (
+                            <Text style={styles.label}>Slippage (%)</Text>
+                            <View style={styles.presetRow}>
+                                {['0.5', '1', '2', '5'].map((p) => (
                                     <Pressable
-                                        key={preset}
-                                        style={[styles.presetButton, slippage === preset && styles.presetButtonActive]}
-                                        onPress={() => setSlippage(preset)}
+                                        key={p}
+                                        style={[styles.presetBtn, slippage === p && styles.presetBtnActive]}
+                                        onPress={() => setSlippage(p)}
                                         disabled={isBuying}
                                     >
-                                        <Text style={[styles.presetText, slippage === preset && styles.presetTextActive]}>
-                                            {preset}%
+                                        <Text style={[styles.presetText, slippage === p && styles.presetTextActive]}>
+                                            {p}%
                                         </Text>
                                     </Pressable>
                                 ))}
@@ -486,7 +376,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
 
                         {/* Quote Loading */}
                         {isFetchingQuote && (
-                            <View style={styles.quoteLoadingContainer}>
+                            <View style={styles.quoteLoading}>
                                 <ActivityIndicator size="small" color={COLORS.solana} />
                                 <Text style={styles.quoteLoadingText}>Fetching quote...</Text>
                             </View>
@@ -495,23 +385,20 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                         {/* Estimated Output */}
                         {quote && !isFetchingQuote && (
                             <View style={styles.estimateCard}>
-                                <Text style={styles.estimateLabel}>Estimated Output</Text>
+                                <Text style={styles.estimateLabel}>You'll receive</Text>
                                 <Text style={styles.estimateValue}>
                                     ~{estimatedOutput} {tokenInfo?.symbol}
-                                </Text>
-                                <Text style={styles.estimateSubtext}>
-                                    Slippage: {slippage}%
                                 </Text>
                             </View>
                         )}
 
-                        {/* PIN Input (shown when confirming) */}
+                        {/* PIN Input */}
                         {showPinInput && (
                             <View style={styles.pinContainer}>
-                                <Text style={styles.label}>Enter Wallet PIN</Text>
+                                <Text style={styles.label}>Enter PIN</Text>
                                 <TextInput
-                                    style={[styles.input, styles.pinInput]}
-                                    placeholder="Enter PIN"
+                                    style={styles.pinInput}
+                                    placeholder="****"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={pin}
                                     onChangeText={setPin}
@@ -523,14 +410,14 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                                 />
                                 <View style={styles.pinButtons}>
                                     <Pressable
-                                        style={[styles.pinButton, styles.pinCancelButton]}
+                                        style={[styles.pinBtn, styles.pinCancelBtn]}
                                         onPress={() => { setShowPinInput(false); setPin(''); }}
                                         disabled={isBuying}
                                     >
                                         <Text style={styles.pinCancelText}>Back</Text>
                                     </Pressable>
                                     <Pressable
-                                        style={[styles.pinButton, styles.pinConfirmButton, (!pin || pin.length < 4) && styles.disabledButton]}
+                                        style={[styles.pinBtn, styles.pinConfirmBtn, (!pin || pin.length < 4) && styles.disabledBtn]}
                                         onPress={handleConfirmSwap}
                                         disabled={!pin || pin.length < 4 || isBuying}
                                     >
@@ -544,29 +431,23 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                             </View>
                         )}
 
-                        {/* Error Message */}
+                        {/* Error */}
                         {error && (
-                            <View style={styles.errorContainer}>
-                                <AlertCircle size={16} color={COLORS.error} />
+                            <View style={styles.errorBox}>
+                                <AlertCircle size={14} color={COLORS.error} />
                                 <Text style={styles.errorText}>{error}</Text>
                             </View>
                         )}
 
-                        {/* Buy Button (hidden when showing PIN input) */}
+                        {/* Buy Button */}
                         {!showPinInput && (
                             <Pressable
-                                style={[
-                                    styles.buyButton,
-                                    (!canBuy) && styles.buyButtonDisabled
-                                ]}
+                                style={[styles.buyButton, !canBuy && styles.buyButtonDisabled]}
                                 onPress={handleBuy}
                                 disabled={!canBuy}
                             >
                                 <LinearGradient
-                                    colors={canBuy
-                                        ? [COLORS.success, COLORS.success + '80']
-                                        : [COLORS.textSecondary, COLORS.textSecondary + '80']
-                                    }
+                                    colors={canBuy ? [COLORS.success, COLORS.success + '80'] : [COLORS.textSecondary, COLORS.textSecondary + '80']}
                                     style={styles.buyButtonGradient}
                                 >
                                     <Text style={styles.buyButtonText}>
@@ -577,7 +458,7 @@ export const QuickBuyModal: React.FC<QuickBuyModalProps> = ({ visible, onClose, 
                         )}
 
                         <Text style={styles.disclaimer}>
-                            ⚠️ Always verify the token address. Do your own research before buying.
+                            ⚠️ Verify token address before trading
                         </Text>
                     </ScrollView>
                 </View>
@@ -666,6 +547,9 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.success + '30',
     },
+    tokenCardUnverified: {
+        borderColor: COLORS.warning + '50',
+    },
     tokenInfo: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -703,7 +587,49 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: 12,
     },
-    amountContainer: {
+    verifiedBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.success + '20',
+        paddingHorizontal: SPACING.s,
+        paddingVertical: SPACING.xs,
+        borderRadius: BORDER_RADIUS.small,
+        gap: 4,
+    },
+    verifiedText: {
+        ...FONTS.phantomMedium,
+        color: COLORS.success,
+        fontSize: 11,
+    },
+    unverifiedBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.warning + '20',
+        paddingHorizontal: SPACING.s,
+        paddingVertical: SPACING.xs,
+        borderRadius: BORDER_RADIUS.small,
+        gap: 4,
+    },
+    unverifiedText: {
+        ...FONTS.phantomMedium,
+        color: COLORS.warning,
+        fontSize: 11,
+    },
+    warningBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.s,
+        backgroundColor: COLORS.warning + '20',
+        borderRadius: BORDER_RADIUS.small,
+        padding: SPACING.m,
+        marginBottom: SPACING.l,
+    },
+    warningText: {
+        ...FONTS.phantomRegular,
+        color: COLORS.warning,
+        fontSize: 12,
+    },
+    amountRow: {
         flexDirection: 'row',
         alignItems: 'center',
     },
@@ -713,20 +639,21 @@ const styles = StyleSheet.create({
         fontSize: 14,
         marginLeft: SPACING.m,
     },
-    presetButtons: {
+    presetRow: {
         flexDirection: 'row',
         gap: SPACING.s,
         marginTop: SPACING.s,
     },
-    presetButton: {
+    presetBtn: {
+        flex: 1,
         backgroundColor: COLORS.cardBackground,
         borderRadius: BORDER_RADIUS.small,
         paddingVertical: SPACING.xs,
-        paddingHorizontal: SPACING.m,
+        alignItems: 'center',
         borderWidth: 1,
         borderColor: COLORS.solana + '20',
     },
-    presetButtonActive: {
+    presetBtnActive: {
         backgroundColor: COLORS.solana + '20',
         borderColor: COLORS.solana,
     },
@@ -738,20 +665,7 @@ const styles = StyleSheet.create({
     presetTextActive: {
         color: COLORS.solana,
     },
-    slippageContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    slippageInput: {
-        flex: 0.3,
-    },
-    percentLabel: {
-        ...FONTS.phantomBold,
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        marginLeft: SPACING.s,
-    },
-    quoteLoadingContainer: {
+    quoteLoading: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -770,44 +684,47 @@ const styles = StyleSheet.create({
         marginBottom: SPACING.l,
         borderWidth: 1,
         borderColor: COLORS.solana + '20',
+        alignItems: 'center',
     },
     estimateLabel: {
         ...FONTS.phantomRegular,
         color: COLORS.textSecondary,
         fontSize: 12,
-        marginBottom: SPACING.xs,
     },
     estimateValue: {
         ...FONTS.phantomBold,
         color: COLORS.textPrimary,
-        fontSize: 18,
-    },
-    estimateSubtext: {
-        ...FONTS.phantomRegular,
-        color: COLORS.textSecondary,
-        fontSize: 12,
+        fontSize: 20,
         marginTop: SPACING.xs,
     },
     pinContainer: {
         marginBottom: SPACING.l,
     },
     pinInput: {
+        ...FONTS.monospace,
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: BORDER_RADIUS.medium,
+        paddingHorizontal: SPACING.m,
+        paddingVertical: SPACING.m,
+        color: COLORS.textPrimary,
+        fontSize: 20,
         textAlign: 'center',
         letterSpacing: 8,
-        fontSize: 20,
+        borderWidth: 1,
+        borderColor: COLORS.solana + '20',
     },
     pinButtons: {
         flexDirection: 'row',
         gap: SPACING.m,
         marginTop: SPACING.m,
     },
-    pinButton: {
+    pinBtn: {
         flex: 1,
         paddingVertical: SPACING.m,
         borderRadius: BORDER_RADIUS.medium,
         alignItems: 'center',
     },
-    pinCancelButton: {
+    pinCancelBtn: {
         backgroundColor: COLORS.cardBackground,
         borderWidth: 1,
         borderColor: COLORS.textSecondary + '30',
@@ -817,7 +734,7 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: 16,
     },
-    pinConfirmButton: {
+    pinConfirmBtn: {
         backgroundColor: COLORS.solana,
     },
     pinConfirmText: {
@@ -825,10 +742,10 @@ const styles = StyleSheet.create({
         color: COLORS.textPrimary,
         fontSize: 16,
     },
-    disabledButton: {
+    disabledBtn: {
         opacity: 0.5,
     },
-    errorContainer: {
+    errorBox: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: SPACING.s,
@@ -841,7 +758,6 @@ const styles = StyleSheet.create({
         ...FONTS.phantomRegular,
         color: COLORS.error,
         fontSize: 12,
-        flex: 1,
     },
     buyButton: {
         borderRadius: BORDER_RADIUS.medium,
@@ -854,7 +770,6 @@ const styles = StyleSheet.create({
     buyButtonGradient: {
         paddingVertical: SPACING.l,
         alignItems: 'center',
-        justifyContent: 'center',
     },
     buyButtonText: {
         ...FONTS.phantomBold,
@@ -867,69 +782,6 @@ const styles = StyleSheet.create({
         fontSize: 11,
         textAlign: 'center',
         marginBottom: SPACING.xl,
-    },
-    tokenCardUnverified: {
-        borderColor: (COLORS.warning || '#FFB800') + '50',
-    },
-    tokenBadgeContainer: {
-        alignItems: 'flex-end',
-        gap: SPACING.xs,
-    },
-    verifiedBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.success + '20',
-        paddingHorizontal: SPACING.s,
-        paddingVertical: SPACING.xs,
-        borderRadius: BORDER_RADIUS.small,
-        gap: 4,
-    },
-    verifiedText: {
-        ...FONTS.phantomMedium,
-        color: COLORS.success,
-        fontSize: 11,
-    },
-    unverifiedBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: (COLORS.warning || '#FFB800') + '20',
-        paddingHorizontal: SPACING.s,
-        paddingVertical: SPACING.xs,
-        borderRadius: BORDER_RADIUS.small,
-        gap: 4,
-    },
-    unverifiedText: {
-        ...FONTS.phantomMedium,
-        color: COLORS.warning || '#FFB800',
-        fontSize: 11,
-    },
-    viewDetailsHint: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 2,
-    },
-    viewDetailsText: {
-        ...FONTS.phantomRegular,
-        color: COLORS.textSecondary,
-        fontSize: 10,
-    },
-    warningContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.s,
-        backgroundColor: (COLORS.warning || '#FFB800') + '20',
-        borderRadius: BORDER_RADIUS.small,
-        padding: SPACING.m,
-        marginBottom: SPACING.l,
-        borderWidth: 1,
-        borderColor: (COLORS.warning || '#FFB800') + '40',
-    },
-    warningText: {
-        ...FONTS.phantomRegular,
-        color: COLORS.warning || '#FFB800',
-        fontSize: 12,
-        flex: 1,
     },
 });
 

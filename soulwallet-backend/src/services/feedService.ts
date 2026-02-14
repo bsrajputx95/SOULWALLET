@@ -10,21 +10,30 @@ export async function getFeed(userId: string, cursor?: string, limit = 20, mode?
   });
   const followingIds = following.map(f => f.followingId);
 
+  // Get global user IDs (their posts show everywhere)
+  const globalUsers = await prisma.user.findMany({
+    where: { username: { in: GLOBAL_USERS } },
+    select: { id: true }
+  });
+  const globalUserIds = globalUsers.map(u => u.id);
+
   // Build WHERE clause for visibility
   // VIP posts are EXCLUDED until VIP membership is fully implemented
   const visibilityFilter: any = {
     OR: [
       { visibility: 'public' },
-      { AND: [{ visibility: 'followers' }, { userId: { in: followingIds } }] }
-      // VIP posts excluded from feed until membership is implemented
+      { AND: [{ visibility: 'followers' }, { userId: { in: followingIds } }] },
+      // Global users' posts show everywhere (public or followers-only)
+      { userId: { in: globalUserIds } }
     ]
   };
 
-  // If mode is 'following', only show posts from followed users
+  // If mode is 'following', only show posts from followed users + global users
   if (mode === 'following') {
     visibilityFilter.OR = [
       { AND: [{ visibility: 'public' }, { userId: { in: followingIds } }] },
-      { AND: [{ visibility: 'followers' }, { userId: { in: followingIds } }] }
+      { AND: [{ visibility: 'followers' }, { userId: { in: followingIds } }] },
+      { userId: { in: globalUserIds } } // Global users always show
     ];
   }
 

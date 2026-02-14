@@ -396,3 +396,29 @@ model CreatorRevenue {
   @@index([creatorId, createdAt])
   @@map("creator_revenues")
 }
+
+// iBuy Queue for handling viral post scenarios
+model IBuyQueue {
+  id                String   @id @default(cuid())
+  userId            String
+  postId            String
+  amount            Float
+  status            String   @default("pending") // pending | processing | completed | failed
+  retryCount        Int      @default(0)
+  maxRetries        Int      @default(3)
+  quote             String?  // JSON string of Jupiter quote
+  errorMessage      String?
+  processingStartedAt DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  
+  // Result fields
+  positionId        String?  // Set when completed
+  tokenAmount       Float?
+  creatorFee        Float?
+
+  @@index([status, createdAt])
+  @@index([postId, status])
+  @@index([userId])
+  @@map("ibuy_queue")
+}

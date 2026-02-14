@@ -16,12 +16,9 @@ export { QuickActionButton } from './QuickActionButton';
 export { TokenCard } from './TokenCard';
 export { TraderCard } from './TraderCard';
 export { CopyTradingModal } from './CopyTradingModal';
-export { CopyTradeExecutionModal } from './CopyTradeExecutionModal';
-export { QueueStatusBanner } from './QueueStatusBanner';
 
 // Social Components
 export { SocialPost } from './SocialPost';
-export { SocialButton } from './SocialButton';
 export { IBuyBagModal } from './IBuyBagModal';
 export { QuickBuyModal } from './QuickBuyModal';
 

@@ -337,6 +337,9 @@ export default function SosioScreen() {
     }
   };
 
+  // Abort controller for token verification
+  const tokenVerifyAbortRef = useRef<AbortController | null>(null);
+
   // Verify token when address changes
   const handleTokenAddressChange = async (address: string) => {
     setTokenAddress(address);
@@ -346,9 +349,20 @@ export default function SosioScreen() {
 
     if (address.length < 32) return; // Solana addresses are 32-44 chars
 
+    // Cancel previous verification
+    if (tokenVerifyAbortRef.current) {
+      tokenVerifyAbortRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    tokenVerifyAbortRef.current = controller;
+
     setTokenVerifyLoading(true);
     try {
       const result = await verifyTokenForPost(address);
+      
+      if (controller.signal.aborted) return;
+      
       if (result.valid) {
         setTokenVerified(true);
         setTokenName(result.symbol || '');
@@ -358,9 +372,13 @@ export default function SosioScreen() {
         setTokenVerifyError(result.error || 'Invalid token');
       }
     } catch {
-      setTokenVerifyError('Verification failed');
+      if (!controller.signal.aborted) {
+        setTokenVerifyError('Verification failed');
+      }
     } finally {
-      setTokenVerifyLoading(false);
+      if (!controller.signal.aborted) {
+        setTokenVerifyLoading(false);
+      }
     }
   };
 
@@ -513,10 +531,32 @@ export default function SosioScreen() {
             }
 
             const handleLike = async () => {
+              // Optimistic update - don't reload entire feed
+              setPosts(prev => prev.map(p => {
+                if (p.id === post.id) {
+                  return {
+                    ...p,
+                    isLiked: !p.isLiked,
+                    likesCount: p.isLiked ? (p.likesCount - 1) : (p.likesCount + 1)
+                  };
+                }
+                return p;
+              }));
+              
+              // API call in background
               const result = await toggleLike(post.id);
-              if (result.success) {
-                // Refresh the feed to get updated like status
-                loadFeed();
+              if (!result.success) {
+                // Revert on error
+                setPosts(prev => prev.map(p => {
+                  if (p.id === post.id) {
+                    return {
+                      ...p,
+                      isLiked: post.isLiked,
+                      likesCount: post.likesCount
+                    };
+                  }
+                  return p;
+                }));
               }
             };
 

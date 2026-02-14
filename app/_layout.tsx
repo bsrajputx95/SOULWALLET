@@ -10,8 +10,6 @@ import { ErrorBoundary, WebPreviewBanner } from "@/components";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AlertProvider } from "@/contexts/AlertContext";
 
-import { registerBackgroundTasks } from "@/services";
-
 
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -65,12 +63,6 @@ export default function RootLayout() {
     }
   }, [appIsReady]);
 
-  // Register background tasks for copy trading
-  useEffect(() => {
-    if (appIsReady) {
-      registerBackgroundTasks();
-    }
-  }, [appIsReady]);
 
   // Hide browser scrollbar globally (web only)
   useEffect(() => {

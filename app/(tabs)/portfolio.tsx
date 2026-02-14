@@ -23,8 +23,8 @@ import * as SecureStore from 'expo-secure-store';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, NeonButton, PortfolioSkeleton, ErrorBoundary } from '@/components';
-import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, api } from '@/services';
-import { fetchCopyConfig, createCopyConfig, stopCopyTrading } from '@/services/copyTrading';
+import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, sendTransaction, api } from '@/services';
+import { fetchCopyConfig, createCopyConfig, stopCopyTrading, fetchCopyWallet, createCopyWallet, withdrawCopyWallet, CopyTradingWallet } from '@/services/copyTrading';
 import { validateSession } from '@/utils';
 import { useAlert } from '@/contexts/AlertContext';
 
@@ -84,13 +84,16 @@ const TokenLogo: React.FC<{ token: Token }> = ({ token }) => {
 
 export default function PortfolioScreen() {
   const router = useRouter();
-  const { showAlert } = useAlert();
+  const { showAlert, showPrompt } = useAlert();
 
   // Real user profile state
   const [user, setUser] = useState<any>(null);
   const [solanaPublicKey, setSolanaPublicKey] = useState<string | null>(null);
   const [tokens, setTokens] = useState<Token[]>([]);
   const [copiedWallets, setCopiedWallets] = useState<CopiedWallet[]>([]);
+  const [copyWallet, setCopyWallet] = useState<CopyTradingWallet | null>(null);
+  const [isCopyWalletLoading, setIsCopyWalletLoading] = useState(false);
+  const [isCopyWalletActionLoading, setIsCopyWalletActionLoading] = useState(false);
   const [isCopyLoading, setIsCopyLoading] = useState(false);
 
   // Fetch copy trading config from backend
@@ -125,6 +128,155 @@ export default function PortfolioScreen() {
       setIsCopyLoading(false);
     }
   }, []);
+
+  const loadCopyWallet = useCallback(async () => {
+    try {
+      setIsCopyWalletLoading(true);
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) {
+        setCopyWallet(null);
+        return;
+      }
+
+      const walletResult = await fetchCopyWallet(token);
+      if (walletResult.success) {
+        setCopyWallet(walletResult.wallet || null);
+      } else {
+        setCopyWallet(null);
+      }
+    } catch {
+      setCopyWallet(null);
+    } finally {
+      setIsCopyWalletLoading(false);
+    }
+  }, []);
+
+  const ensureCopyWallet = useCallback(async (): Promise<{ token: string; wallet: CopyTradingWallet | null }> => {
+    const token = await SecureStore.getItemAsync('token');
+    if (!token) {
+      showAlert('Error', 'Please login first');
+      return { token: '', wallet: null };
+    }
+
+    const existing = await fetchCopyWallet(token);
+    if (existing.success && existing.wallet) {
+      setCopyWallet(existing.wallet);
+      return { token, wallet: existing.wallet };
+    }
+
+    const created = await createCopyWallet(token);
+    if (created.success && created.wallet) {
+      setCopyWallet(created.wallet);
+      return { token, wallet: created.wallet };
+    }
+
+    showAlert('Error', created.error || existing.error || 'Failed to initialize trading wallet');
+    return { token, wallet: null };
+  }, [showAlert]);
+
+  const handleDepositToCopyWallet = useCallback(() => {
+    showPrompt(
+      'Deposit SOL',
+      'Enter amount of SOL to send to your trading wallet',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: async (amountValue?: string) => {
+            const amount = parseFloat((amountValue || '').trim());
+            if (!Number.isFinite(amount) || amount <= 0) {
+              showAlert('Invalid Amount', 'Please enter a valid SOL amount.');
+              return;
+            }
+
+            const { token, wallet } = await ensureCopyWallet();
+            if (!token || !wallet) return;
+
+            showPrompt(
+              'Enter PIN',
+              'Enter your wallet PIN to confirm deposit',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Deposit',
+                  onPress: async (pin?: string) => {
+                    if (!pin || pin.length < 4) {
+                      showAlert('Invalid PIN', 'PIN is required.');
+                      return;
+                    }
+
+                    try {
+                      setIsCopyWalletActionLoading(true);
+                      const result = await sendTransaction(token, wallet.publicKey, amount, pin, 'SOL');
+                      if (!result.success) {
+                        showAlert('Deposit Failed', result.error || 'Failed to deposit SOL');
+                        return;
+                      }
+
+                      await Promise.all([loadCopyWallet()]);
+                      showAlert('Deposit Complete', `Sent ◎${amount.toFixed(4)} to trading wallet.`);
+                    } finally {
+                      setIsCopyWalletActionLoading(false);
+                    }
+                  }
+                }
+              ],
+              true,
+              'Enter PIN'
+            );
+          }
+        }
+      ],
+      false,
+      'Amount in SOL'
+    );
+  }, [ensureCopyWallet, loadCopyWallet, showAlert, showPrompt]);
+
+  const handleWithdrawFromCopyWallet = useCallback(() => {
+    showPrompt(
+      'Withdraw SOL',
+      'Enter amount to withdraw (leave blank to withdraw all available SOL)',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Withdraw',
+          onPress: async (amountValue?: string) => {
+            const trimmed = (amountValue || '').trim();
+            const parsedAmount = trimmed ? parseFloat(trimmed) : undefined;
+            if (trimmed && (!Number.isFinite(parsedAmount) || (parsedAmount || 0) <= 0)) {
+              showAlert('Invalid Amount', 'Please enter a valid SOL amount.');
+              return;
+            }
+
+            const token = await SecureStore.getItemAsync('token');
+            if (!token) {
+              showAlert('Error', 'Please login first');
+              return;
+            }
+
+            try {
+              setIsCopyWalletActionLoading(true);
+              const result = await withdrawCopyWallet(token, parsedAmount);
+              if (!result.success) {
+                showAlert('Withdraw Failed', result.error || 'Failed to withdraw SOL');
+                return;
+              }
+
+              await Promise.all([loadCopyWallet()]);
+              showAlert(
+                'Withdraw Complete',
+                `Received ◎${(result.withdrawnAmount || 0).toFixed(4)} from trading wallet.`
+              );
+            } finally {
+              setIsCopyWalletActionLoading(false);
+            }
+          }
+        }
+      ],
+      false,
+      'Leave blank for all'
+    );
+  }, [loadCopyWallet, showAlert, showPrompt]);
   const [totalBalance, setTotalBalance] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -253,11 +405,11 @@ export default function PortfolioScreen() {
       if (selectedWallet) return;
       const loadAll = async () => {
         setIsLoading(true);
-        await Promise.all([fetchUserProfile(), fetchWalletData(), loadCopyConfig()]);
+        await Promise.all([fetchUserProfile(), fetchWalletData(), loadCopyConfig(), loadCopyWallet()]);
         setIsLoading(false);
       };
       loadAll();
-    }, [fetchWalletData, fetchUserProfile, loadCopyConfig, selectedWallet])
+    }, [fetchWalletData, fetchUserProfile, loadCopyConfig, loadCopyWallet, selectedWallet])
   );
 
   const [isUpdatingCopyTrade, setIsUpdatingCopyTrade] = useState(false);
@@ -404,8 +556,9 @@ export default function PortfolioScreen() {
     await openPositionsQuery.refetch();
     await loadWatchlist();
     await loadCopyConfig();
+    await loadCopyWallet();
     setRefreshing(false);
-  }, [refetch, loadWatchlist]);
+  }, [loadCopyWallet, loadWatchlist, refetch]);
 
   useEffect(() => {
     void loadWatchlist();
@@ -633,6 +786,53 @@ export default function PortfolioScreen() {
 
               {activeTab === 'copied' && (
                 <View style={styles.walletsContainer}>
+                  <NeonCard style={styles.tradingWalletCard}>
+                    <View style={styles.tradingWalletHeader}>
+                      <Text style={styles.tradingWalletTitle}>Trading Wallet</Text>
+                      <Pressable
+                        style={styles.tradingWalletRefresh}
+                        onPress={() => { void loadCopyWallet(); }}
+                        disabled={isCopyWalletLoading || isCopyWalletActionLoading}
+                      >
+                        <Text style={styles.tradingWalletRefreshText}>
+                          {isCopyWalletLoading ? 'Loading...' : 'Refresh'}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    {copyWallet ? (
+                      <>
+                        <Text style={styles.tradingWalletAddress}>
+                          {copyWallet.publicKey.slice(0, 10)}...{copyWallet.publicKey.slice(-8)}
+                        </Text>
+                        <Text style={styles.tradingWalletBalance}>
+                          Balance: ◎{copyWallet.balance.toFixed(4)}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={styles.tradingWalletEmpty}>
+                        No trading wallet yet. Create one to enable instant copy execution.
+                      </Text>
+                    )}
+
+                    <View style={styles.tradingWalletActions}>
+                      <Pressable
+                        style={[styles.tradingWalletButton, (isCopyWalletLoading || isCopyWalletActionLoading) && styles.tradingWalletButtonDisabled]}
+                        onPress={handleDepositToCopyWallet}
+                        disabled={isCopyWalletLoading || isCopyWalletActionLoading}
+                      >
+                        <Text style={styles.tradingWalletButtonText}>Deposit</Text>
+                      </Pressable>
+
+                      <Pressable
+                        style={[styles.tradingWalletButton, styles.tradingWalletWithdrawButton, (isCopyWalletLoading || isCopyWalletActionLoading) && styles.tradingWalletButtonDisabled]}
+                        onPress={handleWithdrawFromCopyWallet}
+                        disabled={isCopyWalletLoading || isCopyWalletActionLoading}
+                      >
+                        <Text style={styles.tradingWalletWithdrawText}>Withdraw</Text>
+                      </Pressable>
+                    </View>
+                  </NeonCard>
                   {isCopyLoading ? (
                     <View style={{ padding: SPACING.m, alignItems: 'center' }}>
                       <Text style={{ ...FONTS.sfProRegular, color: COLORS.textSecondary, fontSize: 14 }}>Loading copy trades...</Text>
@@ -1338,6 +1538,78 @@ const styles = StyleSheet.create({
   },
   walletsContainer: {
     marginBottom: SPACING.xs
+  },
+  tradingWalletCard: {
+    marginBottom: SPACING.s
+  },
+  tradingWalletHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.xs
+  },
+  tradingWalletTitle: {
+    ...FONTS.orbitronMedium,
+    color: COLORS.textPrimary,
+    fontSize: 15
+  },
+  tradingWalletRefresh: {
+    backgroundColor: COLORS.solana + '20',
+    borderRadius: BORDER_RADIUS.small,
+    paddingHorizontal: SPACING.s,
+    paddingVertical: 4
+  },
+  tradingWalletRefreshText: {
+    ...FONTS.sfProMedium,
+    color: COLORS.solana,
+    fontSize: 12
+  },
+  tradingWalletAddress: {
+    ...FONTS.monospace,
+    color: COLORS.textSecondary,
+    fontSize: 12
+  },
+  tradingWalletBalance: {
+    ...FONTS.monospace,
+    color: COLORS.success,
+    fontSize: 14,
+    marginTop: SPACING.xs
+  },
+  tradingWalletEmpty: {
+    ...FONTS.sfProRegular,
+    color: COLORS.textSecondary,
+    fontSize: 13
+  },
+  tradingWalletActions: {
+    flexDirection: 'row',
+    marginTop: SPACING.s,
+    gap: SPACING.s
+  },
+  tradingWalletButton: {
+    flex: 1,
+    backgroundColor: COLORS.solana + '20',
+    borderRadius: BORDER_RADIUS.small,
+    paddingVertical: SPACING.s,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.solana + '30'
+  },
+  tradingWalletWithdrawButton: {
+    backgroundColor: COLORS.error + '12',
+    borderColor: COLORS.error + '35'
+  },
+  tradingWalletButtonDisabled: {
+    opacity: 0.6
+  },
+  tradingWalletButtonText: {
+    ...FONTS.orbitronMedium,
+    color: COLORS.solana,
+    fontSize: 13
+  },
+  tradingWalletWithdrawText: {
+    ...FONTS.orbitronMedium,
+    color: COLORS.error,
+    fontSize: 13
   },
   walletCard: {
     marginBottom: SPACING.s

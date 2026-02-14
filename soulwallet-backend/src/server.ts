@@ -2358,63 +2358,97 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
                     continue;
                 }
 
-                for (const config of configs) {
-                    // Cap the spend to user's perTradeAmount
-                    const cappedOutputAmount = Math.min(config.perTradeAmount, inputAmount);
+                // Process configs in parallel batches for scalability
+                // Limit concurrent executions to avoid overwhelming RPC/BLOCKCHAIN
+                const BATCH_SIZE = 10;
+                const MAX_SYNC_EXECUTION = 50; // If more copiers, process async in background
 
-                    // Skip if capped amount is invalid
-                    if (cappedOutputAmount <= 0) {
-                        console.warn(`[Webhook] Skipping config ${config.id}: invalid capped amount ${cappedOutputAmount}`);
-                        continue;
-                    }
-
-                    // Calculate proportional input amount based on price ratio
-                    // proportionalInputAmount = cappedOutputAmount / priceRatio
-                    // This ensures we get the correct amount of output tokens for our input
-                    const proportionalInputAmount = cappedOutputAmount / priceRatio;
-
-                    // Final validation before writing to database
-                    if (!Number.isFinite(proportionalInputAmount) || proportionalInputAmount < 0) {
-                        console.warn(`[Webhook] Skipping config ${config.id}: calculated NaN/Infinity input amount`);
-                        continue;
-                    }
-
-                    const custodialExecution = await executeCopyTradeWithCustodialWallet({
-                        config: {
-                            id: config.id,
+                // For very large copier counts, return early and let background processing handle it
+                if (configs.length > MAX_SYNC_EXECUTION) {
+                    console.log(`[Webhook] Large copier count (${configs.length}), queuing all for async processing`);
+                    // Queue all for background processing
+                    await Promise.all(configs.map(config => {
+                        const cappedOutputAmount = Math.min(config.perTradeAmount, inputAmount);
+                        if (cappedOutputAmount <= 0) return Promise.resolve();
+                        const proportionalInputAmount = cappedOutputAmount / priceRatio;
+                        if (!Number.isFinite(proportionalInputAmount) || proportionalInputAmount < 0) return Promise.resolve();
+                        
+                        return queueCopyTrade({
                             userId: config.userId,
-                            perTradeAmount: config.perTradeAmount,
-                            totalInvestment: config.totalInvestment,
-                            stopLossPercent: config.stopLossPercent,
-                            takeProfitPercent: config.takeProfitPercent
-                        },
-                        traderTxSignature: tx.signature,
-                        inputMint: outputMint,
-                        inputSymbol: outputSymbol,
-                        outputMint: inputMint,
-                        outputSymbol: inputSymbol,
-                        inputAmount: proportionalInputAmount,
-                        outputAmount: cappedOutputAmount
-                    });
+                            configId: config.id,
+                            traderAddress,
+                            traderTxSignature: tx.signature,
+                            inputMint: outputMint,
+                            inputSymbol: outputSymbol,
+                            outputMint: inputMint,
+                            outputSymbol: inputSymbol,
+                            inputAmount: proportionalInputAmount,
+                            outputAmount: cappedOutputAmount
+                        });
+                    }));
+                    continue;
+                }
 
-                    if (custodialExecution.success) {
-                        console.log(`[CopyTrading] Custodial execution success for user ${config.userId} (${tx.signature})`);
-                        continue;
-                    }
+                // Process in batches of BATCH_SIZE concurrently
+                for (let i = 0; i < configs.length; i += BATCH_SIZE) {
+                    const batch = configs.slice(i, i + BATCH_SIZE);
+                    
+                    await Promise.all(batch.map(async (config) => {
+                        // Cap the spend to user's perTradeAmount
+                        const cappedOutputAmount = Math.min(config.perTradeAmount, inputAmount);
 
-                    console.warn(`[CopyTrading] Custodial execution failed for user ${config.userId}, queue fallback: ${custodialExecution.error}`);
-                    await queueCopyTrade({
-                        userId: config.userId,
-                        configId: config.id,
-                        traderAddress,
-                        traderTxSignature: tx.signature,
-                        inputMint: outputMint,           // We buy what trader bought
-                        inputSymbol: outputSymbol,
-                        outputMint: inputMint,           // We spend what trader spent
-                        outputSymbol: inputSymbol,
-                        inputAmount: proportionalInputAmount,  // Proportional to capped spend
-                        outputAmount: cappedOutputAmount       // Capped to perTradeAmount
-                    });
+                        // Skip if capped amount is invalid
+                        if (cappedOutputAmount <= 0) {
+                            console.warn(`[Webhook] Skipping config ${config.id}: invalid capped amount ${cappedOutputAmount}`);
+                            return;
+                        }
+
+                        // Calculate proportional input amount based on price ratio
+                        const proportionalInputAmount = cappedOutputAmount / priceRatio;
+
+                        // Final validation before writing to database
+                        if (!Number.isFinite(proportionalInputAmount) || proportionalInputAmount < 0) {
+                            console.warn(`[Webhook] Skipping config ${config.id}: calculated NaN/Infinity input amount`);
+                            return;
+                        }
+
+                        const custodialExecution = await executeCopyTradeWithCustodialWallet({
+                            config: {
+                                id: config.id,
+                                userId: config.userId,
+                                perTradeAmount: config.perTradeAmount,
+                                totalInvestment: config.totalInvestment,
+                                stopLossPercent: config.stopLossPercent,
+                                takeProfitPercent: config.takeProfitPercent
+                            },
+                            traderTxSignature: tx.signature,
+                            inputMint: outputMint,
+                            inputSymbol: outputSymbol,
+                            outputMint: inputMint,
+                            outputSymbol: inputSymbol,
+                            inputAmount: proportionalInputAmount,
+                            outputAmount: cappedOutputAmount
+                        });
+
+                        if (custodialExecution.success) {
+                            console.log(`[CopyTrading] Custodial execution success for user ${config.userId} (${tx.signature})`);
+                            return;
+                        }
+
+                        console.warn(`[CopyTrading] Custodial execution failed for user ${config.userId}, queue fallback: ${custodialExecution.error}`);
+                        await queueCopyTrade({
+                            userId: config.userId,
+                            configId: config.id,
+                            traderAddress,
+                            traderTxSignature: tx.signature,
+                            inputMint: outputMint,
+                            inputSymbol: outputSymbol,
+                            outputMint: inputMint,
+                            outputSymbol: inputSymbol,
+                            inputAmount: proportionalInputAmount,
+                            outputAmount: cappedOutputAmount
+                        });
+                    }));
                 }
             }
         }
@@ -3268,7 +3302,9 @@ app.post('/tokens/verify', authMiddleware, async (req: AuthRequest, res: Respons
     }
 });
 
-// IBUY Prepare
+// IBUY Prepare - Now uses Queue System for viral post handling
+import { enqueueIBuy, getQueueStatus, processIBuyQueue, completeIBuy } from './services/ibuyQueueService';
+
 app.post('/ibuy/prepare', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { postId, amount } = req.body;
@@ -3297,64 +3333,26 @@ app.post('/ibuy/prepare', authMiddleware, async (req: AuthRequest, res: Response
             return;
         }
 
-        // Get Jupiter Ultra API quote (95% of amount goes to swap, 5% creator fee)
-        const swapAmount = amount * 0.95;
-        const creatorFee = amount * 0.05;
-        const amountLamports = Math.floor(swapAmount * 1e9);
+        // Add to queue for processing (handles viral scenarios)
+        const result = await enqueueIBuy(req.userId!, postId, amount);
 
-        const quoteParams = new URLSearchParams({
-            inputMint: SOL_MINT,
-            outputMint: post.tokenAddress,
-            amount: amountLamports.toString(),
-            slippageBps: '50',
-        });
-
-        const quoteUrl = `${JUPITER_ULTRA_API}/order?${quoteParams}`;
-        console.log(`[IBUY] Fetching quote from: ${quoteUrl}`);
-
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
-
-        const quoteResponse = await fetch(quoteUrl, { signal: controller.signal });
-        clearTimeout(timeout);
-
-        if (!quoteResponse.ok) {
-            const errorText = await quoteResponse.text();
-            console.error(`[IBUY] Jupiter returned ${quoteResponse.status}:`, errorText.substring(0, 500));
-            res.status(400).json({ error: `Jupiter quote failed: ${errorText.substring(0, 200)}` });
+        if (!result.success) {
+            res.status(400).json({ error: result.error });
             return;
         }
 
-        const quoteData = await quoteResponse.json();
-
-        if (quoteData.errorCode) {
-            console.error(`[IBUY] Jupiter error: ${quoteData.errorCode} - ${quoteData.errorMessage}`);
-            res.status(400).json({ error: quoteData.errorMessage || quoteData.errorCode });
-            return;
-        }
-
-        // Transform to match expected format
-        const quote = {
-            inputMint: quoteData.inputMint || SOL_MINT,
-            outputMint: quoteData.outputMint || post.tokenAddress,
-            inAmount: quoteData.inAmount || amountLamports.toString(),
-            outAmount: quoteData.outAmount,
-            otherAmountThreshold: quoteData.otherAmountThreshold || quoteData.outAmount,
-            swapMode: 'ExactIn',
-            slippageBps: 50,
-            priceImpactPct: quoteData.priceImpactPct || '0',
-            routePlan: quoteData.routePlan || [],
-            swapTransaction: quoteData.transaction || quoteData.swapTransaction,
-        };
+        // Get queue status
+        const status = await getQueueStatus(req.userId!);
 
         res.json({
             success: true,
-            quote,
+            queued: true,
+            queueId: result.queueId,
+            position: result.position,
+            message: `Queued at position ${result.position}. Processing ${status.processing} items.`,
             postId,
             tokenAddress: post.tokenAddress,
             tokenSymbol: post.tokenSymbol || 'Unknown',
-            amount: swapAmount,
-            creatorFee,
             creatorWallet: post.user.wallet?.publicKey
         });
     } catch (err: any) {
@@ -3363,75 +3361,56 @@ app.post('/ibuy/prepare', authMiddleware, async (req: AuthRequest, res: Response
     }
 });
 
-// IBUY Execute
+// IBUY Queue Status
+app.get('/ibuy/queue', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const status = await getQueueStatus(req.userId!);
+        res.json({
+            success: true,
+            pending: status.pending,
+            processing: status.processing,
+            items: status.userQueue
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// IBUY Process Queue (admin/worker endpoint - call periodically)
+app.post('/ibuy/process-queue', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { batchSize = 10 } = req.body;
+        const result = await processIBuyQueue(batchSize);
+        res.json({
+            success: true,
+            processed: result.processed,
+            successful: result.successful,
+            failed: result.failed
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// IBUY Execute - Now completes queue item
 app.post('/ibuy/execute', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { postId, signature, tokenAmount, solAmount, price, creatorFee } = req.body;
+        const { queueId, signature } = req.body;
 
-        const post = await prisma.post.findUnique({
-            where: { id: postId },
-            include: { user: true }
-        });
-
-        if (!post) {
-            res.status(400).json({ error: 'Post not found' });
+        if (!queueId || !signature) {
+            res.status(400).json({ error: 'Queue ID and signature required' });
             return;
         }
 
-        // Fetch SOL/USD price to convert entry price to USD
-        let entryPriceUsd = price;
-        try {
-            const solPriceRes = await axios.get(`https://price.jup.ag/v6/price?ids=${SOL_MINT}`, {
-                timeout: 5000
-            });
-            const solPrice = solPriceRes.data.data?.[SOL_MINT]?.price || 0;
-            if (solPrice > 0) {
-                entryPriceUsd = price * solPrice; // Convert SOL/token to USD/token
-            }
-        } catch {
-            // If price fetch fails, store SOL price and frontend will handle conversion
-            console.warn('Failed to fetch SOL/USD price, storing SOL price');
+        // Complete the queued iBuy
+        const result = await completeIBuy(queueId, signature, req.userId!);
+
+        if (!result.success) {
+            res.status(400).json({ error: result.error });
+            return;
         }
 
-        // Create position with entry price in USD
-        const position = await prisma.iBuyPosition.create({
-            data: {
-                userId: req.userId!,
-                postId,
-                creatorId: post.userId,
-                tokenAddress: post.tokenAddress!,
-                tokenSymbol: post.tokenSymbol || 'Unknown',
-                entryPrice: entryPriceUsd, // Stored in USD for consistent P&L
-                solAmount,
-                tokenAmount,
-                creatorFee,
-                remainingAmount: tokenAmount,
-                status: 'open'
-            }
-        });
-
-        // Record creator revenue for the buy fee
-        if (creatorFee > 0) {
-            await prisma.creatorRevenue.create({
-                data: {
-                    creatorId: post.userId,
-                    positionId: position.id,
-                    amount: creatorFee,
-                    type: 'ibuy_fee'
-                }
-            });
-        }
-
-        // Update post stats
-        await prisma.post.update({
-            where: { id: postId },
-            data: {
-                ibuyCount: { increment: 1 },
-                ibuyVolume: { increment: solAmount }
-            }
-        });
-
-        res.json({ success: true, position });
+        res.json({ success: true, positionId: result.positionId });
     } catch (err) {
         console.error('IBUY execute error:', err);
         res.status(500).json({ error: 'Failed to execute IBUY' });
@@ -3657,7 +3636,10 @@ app.post('/ibuy/sell/execute', authMiddleware, async (req: AuthRequest, res: Res
         // Calculate P&L
         const costBasis = pending.sellAmount * position.entryPrice;
         const profit = solReceived - costBasis;
-        const creatorShare = profit > 0 ? profit * 0.05 : 0;
+        
+        // Minimum $10 profit (~0.067 SOL at $150/SOL) before sharing
+        const MIN_PROFIT_SOL = 0.067;
+        const creatorShare = (profit > MIN_PROFIT_SOL) ? profit * 0.05 : 0;
 
         // Update position
         const newRemaining = position.remainingAmount - pending.sellAmount;

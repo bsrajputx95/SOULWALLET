@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     StyleSheet,
     View,
@@ -62,19 +62,35 @@ export const IBuyBagModal: React.FC<IBuyBagModalProps> = ({
     const [slippageText, setSlippageText] = useState(String(settings.ibuySlippage / 100));
     const [solAmountText, setSolAmountText] = useState(String(settings.ibuyDefaultSol));
 
+    // Refs for image caching (avoid dependency array issues)
+    const fetchingMintsRef = useRef<Set<string>>(new Set());
+    const tokenImagesRef = useRef<Record<string, string>>({});
 
-
-    // Fetch token image from Jupiter
+    // Fetch token image from Jupiter - cached per session
     const fetchTokenImage = useCallback(async (mint: string) => {
-        if (tokenImages[mint]) return;
+        // Skip if already cached or currently fetching
+        if (tokenImagesRef.current[mint] || fetchingMintsRef.current.has(mint)) return;
+        
+        fetchingMintsRef.current.add(mint);
         try {
-            const res = await fetch(`https://api.jup.ag/tokens/v1/token/${mint}`);
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 5000);
+            const res = await fetch(`https://api.jup.ag/tokens/v1/token/${mint}`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+            
             const data = await res.json();
             if (data.logoURI) {
-                setTokenImages(prev => ({ ...prev, [mint]: data.logoURI }));
+                tokenImagesRef.current[mint] = data.logoURI;
+                setTokenImages({ ...tokenImagesRef.current });
             }
-        } catch { /* ignore */ }
-    }, [tokenImages]);
+        } catch { 
+            /* ignore - token image not critical */ 
+        } finally {
+            fetchingMintsRef.current.delete(mint);
+        }
+    }, []);  // Empty deps - uses refs
 
     // Load positions when modal opens
     const loadPositions = useCallback(async () => {
