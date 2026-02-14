@@ -1,5 +1,5 @@
 import React from 'react';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -24,7 +24,8 @@ import * as SecureStore from 'expo-secure-store';
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, NeonButton, PortfolioSkeleton, ErrorBoundary } from '@/components';
 import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, sendTransaction, api } from '@/services';
-import { fetchCopyConfig, createCopyConfig, stopCopyTrading, fetchCopyWallet, createCopyWallet, withdrawCopyWallet, CopyTradingWallet } from '@/services/copyTrading';
+import { fetchCopyConfig, createCopyConfig, stopCopyTrading, fetchCopyWallet, createCopyWallet, withdrawCopyWallet, CopyTradingWallet, fetchCopyPositions, CopyPosition } from '@/services/copyTrading';
+import { getMyIBuyBag, IBuyPosition } from '@/services/ibuy';
 import { validateSession } from '@/utils';
 import { useAlert } from '@/contexts/AlertContext';
 
@@ -61,8 +62,8 @@ type PortfolioTab = 'tokens' | 'copied' | 'watchlist';
 type ChartPeriod = '24h' | '7d' | '30d' | 'all';
 type ChartType = 'line' | 'candle';
 
-// Token Logo component with fallback
-const TokenLogo: React.FC<{ token: Token }> = ({ token }) => {
+// Token Logo component with fallback - MEMOIZED
+const TokenLogo = React.memo<{ token: Token }>(({ token }) => {
   const [failed, setFailed] = useState(false);
 
   if (!token.logo || failed) {
@@ -80,7 +81,136 @@ const TokenLogo: React.FC<{ token: Token }> = ({ token }) => {
       onError={() => setFailed(true)}
     />
   );
-};
+});
+
+// Memoized Token Item component for holdings tab
+interface TokenItemProps {
+  token: Token;
+  onPress: () => void;
+  getTokenPercentage: (value: number) => number;
+}
+
+const TokenItem = React.memo<TokenItemProps>(({ token, onPress, getTokenPercentage }) => {
+  return (
+    <Pressable
+      style={styles.tokenItem}
+      onPress={onPress}
+    >
+      <View style={styles.tokenRow}>
+        <View style={styles.tokenLogoContainer}>
+          <TokenLogo token={token} />
+        </View>
+        <View style={styles.tokenInfo}>
+          <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+          <Text style={styles.tokenPrice}>
+            ${token.price < 0.01 ? token.price.toFixed(6) : token.price.toFixed(2)}
+          </Text>
+          <Text style={[
+            styles.tokenChange,
+            { color: token.change24h >= 0 ? COLORS.success : COLORS.error }
+          ]}>
+            {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.tokenValue}>
+        <Text style={styles.tokenValueText}>${token.value.toLocaleString()}</Text>
+        <Text style={styles.tokenPercentage}>
+          ({getTokenPercentage(token.value).toFixed(0)}%)
+        </Text>
+      </View>
+    </Pressable>
+  );
+}, (prev, next) => {
+  // Custom comparison for React.memo
+  return (
+    prev.token.id === next.token.id &&
+    prev.token.usdValue === next.token.usdValue &&
+    prev.token.change24h === next.token.change24h &&
+    prev.token.price === next.token.price
+  );
+});
+
+// Memoized Watchlist Token Item
+interface WatchlistItemProps {
+  token: {
+    symbol: string;
+    name: string;
+    logo?: string;
+    price: number;
+    change24h: number;
+    contractAddress?: string;
+    banner?: string;
+    marketCap?: number;
+    volume24h?: number;
+    liquidity?: number;
+  };
+  onPress: () => void;
+  onRemove: () => void;
+}
+
+const WatchlistItem = React.memo<WatchlistItemProps>(({ token, onPress, onRemove }) => {
+  return (
+    <Pressable
+      style={styles.tokenItem}
+      onPress={onPress}
+    >
+      <View style={styles.tokenRow}>
+        <View style={styles.tokenLogoContainer}>
+          {token.logo ? (
+            <Image source={{ uri: token.logo }} style={styles.tokenLogo} />
+          ) : (
+            <View style={styles.tokenLogoPlaceholder}>
+              <Text style={styles.tokenLogoText}>{token.symbol.charAt(0)}</Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.tokenInfo}>
+          <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+          <Text style={styles.tokenPrice}>
+            ${token.price < 0.01 ? token.price.toFixed(6) : token.price.toFixed(2)}
+          </Text>
+          <Text style={[
+            styles.tokenChange,
+            { color: token.change24h >= 0 ? COLORS.success : COLORS.error }
+          ]}>
+            {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
+          </Text>
+        </View>
+      </View>
+      <View style={styles.tokenValue}>
+        <Text style={styles.tokenValueText}>
+          {token.volume24h && token.volume24h > 0
+            ? `Vol: $${token.volume24h >= 1000000
+              ? (token.volume24h / 1000000).toFixed(1) + 'M'
+              : token.volume24h >= 1000
+                ? (token.volume24h / 1000).toFixed(1) + 'K'
+                : token.volume24h.toFixed(0)}`
+            : '—'}
+        </Text>
+        <Text style={styles.tokenPercentage}>24h</Text>
+      </View>
+      {/* Remove from watchlist button - small X at top right */}
+      <Pressable
+        style={styles.removeWatchlistButton}
+        onPress={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+      >
+        <X size={14} color={COLORS.textSecondary} />
+      </Pressable>
+    </Pressable>
+  );
+}, (prev, next) => {
+  return (
+    prev.token.symbol === next.token.symbol &&
+    prev.token.price === next.token.price &&
+    prev.token.change24h === next.token.change24h
+  );
+});
 
 export default function PortfolioScreen() {
   const router = useRouter();
@@ -96,13 +226,25 @@ export default function PortfolioScreen() {
   const [isCopyWalletActionLoading, setIsCopyWalletActionLoading] = useState(false);
   const [isCopyLoading, setIsCopyLoading] = useState(false);
 
+  // NEW: Positions state for earnings calculation
+  const [iBuyPositions, setIBuyPositions] = useState<IBuyPosition[]>([]);
+  const [copyPositions, setCopyPositions] = useState<CopyPosition[]>([]);
+
+  // Abort controller refs for cleanup
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Fetch copy trading config from backend
-  const loadCopyConfig = useCallback(async () => {
+  const loadCopyConfig = useCallback(async (signal?: AbortSignal) => {
     try {
+      if (signal?.aborted) return;
       setIsCopyLoading(true);
       const token = await SecureStore.getItemAsync('token');
       if (!token) return;
+      if (signal?.aborted) return;
+      
       const result = await fetchCopyConfig(token);
+      if (signal?.aborted) return;
+      
       if (result.success && result.config) {
         const cfg = result.config;
         setCopiedWallets([{
@@ -129,16 +271,20 @@ export default function PortfolioScreen() {
     }
   }, []);
 
-  const loadCopyWallet = useCallback(async () => {
+  const loadCopyWallet = useCallback(async (signal?: AbortSignal) => {
     try {
+      if (signal?.aborted) return;
       setIsCopyWalletLoading(true);
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
         setCopyWallet(null);
         return;
       }
+      if (signal?.aborted) return;
 
       const walletResult = await fetchCopyWallet(token);
+      if (signal?.aborted) return;
+      
       if (walletResult.success) {
         setCopyWallet(walletResult.wallet || null);
       } else {
@@ -148,6 +294,38 @@ export default function PortfolioScreen() {
       setCopyWallet(null);
     } finally {
       setIsCopyWalletLoading(false);
+    }
+  }, []);
+
+  // NEW: Load iBuy and Copy Trading positions
+  const loadPositions = useCallback(async (signal?: AbortSignal) => {
+    try {
+      if (signal?.aborted) return;
+      
+      const token = await SecureStore.getItemAsync('token');
+      if (!token) {
+        setIBuyPositions([]);
+        setCopyPositions([]);
+        return;
+      }
+      if (signal?.aborted) return;
+
+      // Fetch both position types in parallel
+      const [iBuyRes, copyRes] = await Promise.all([
+        getMyIBuyBag(),
+        fetchCopyPositions(token)
+      ]);
+      
+      if (signal?.aborted) return;
+
+      if (iBuyRes.success) {
+        setIBuyPositions(iBuyRes.positions || []);
+      }
+      if (copyRes.success) {
+        setCopyPositions(copyRes.positions || []);
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('Failed to load positions', e);
     }
   }, []);
 
@@ -280,53 +458,69 @@ export default function PortfolioScreen() {
   const [totalBalance, setTotalBalance] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Calculate daily PnL based on 24h price changes
-  const dailyPnl = React.useMemo(() => {
+  // FIXED: Calculate 24h market movement (not user PnL - that requires cost basis tracking)
+  const marketMovement24h = React.useMemo(() => {
     return tokens.reduce((total, token) => {
       if (token.change24h && token.usdValue) {
-        // PnL = USD Value * (change24h / 100)
+        // Market movement = USD Value * (change24h / 100)
         return total + (token.usdValue * (token.change24h / 100));
       }
       return total;
     }, 0);
   }, [tokens]);
 
+  // NEW: Calculate actual earnings from positions
+  const copyTradeValue = React.useMemo(() => {
+    return copyPositions.reduce((sum, p) => sum + (p.tokenAmount * (p.entryPrice || 0)), 0);
+  }, [copyPositions]);
+
+  const iBuyValue = React.useMemo(() => {
+    return iBuyPositions.reduce((sum, p) => sum + (p.currentValue || 0), 0);
+  }, [iBuyPositions]);
+
+  const totalPositionsValue = copyTradeValue + iBuyValue;
+
   // Fetch user profile from backend
-  const fetchUserProfile = useCallback(async () => {
+  const fetchUserProfile = useCallback(async (signal?: AbortSignal) => {
     try {
+      if (signal?.aborted) return;
       const token = await SecureStore.getItemAsync('token');
       if (!token) return;
+      if (signal?.aborted) return;
 
       const data = await api.get<{ user: unknown }>('/me');
+      if (signal?.aborted) return;
       setUser(data.user || data);
     } catch {
     }
   }, []);
 
-  // Fetch wallet data from backend
-  const fetchWalletData = useCallback(async (isRefresh = false) => {
+  // Fetch wallet data from backend - with AbortController support
+  const fetchWalletData = useCallback(async (isRefresh = false, signal?: AbortSignal) => {
     try {
+      if (signal?.aborted) return;
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
         if (__DEV__) console.log('No auth token found');
         return;
       }
+      if (signal?.aborted) return;
 
       // Check if wallet exists locally
       const hasLocal = await hasLocalWallet();
       let localPubkey: string | null = null;
       if (hasLocal) {
         localPubkey = await getLocalPublicKey();
+        if (signal?.aborted) return;
         setSolanaPublicKey(localPubkey);
-
-      } else {
       }
+      if (signal?.aborted) return;
 
       // Fetch balances from backend (works even if no local wallet)
-
       const portfolio = await fetchBalances(token);
+      if (signal?.aborted) return;
+      
       if (portfolio) {
-
         setTotalBalance(portfolio.totalUsdValue);
         // Use public key from backend if not available locally
         if (localPubkey) {
@@ -334,7 +528,6 @@ export default function PortfolioScreen() {
         } else if (portfolio.publicKey) {
           setSolanaPublicKey(portfolio.publicKey);
         }
-
 
         // Transform holdings to Token type with real price data
         setTokens(portfolio.holdings.map((h: Holding, i: number) => ({
@@ -353,6 +546,7 @@ export default function PortfolioScreen() {
         if (__DEV__) console.log('No portfolio data received');
       }
     } catch (err: any) {
+      if (signal?.aborted) return;
       if (__DEV__) console.warn('Failed to fetch wallet data:', err);
       // If wallet not linked error, try to link it
       if (err.message?.includes('No wallet linked') || err.message?.includes('404')) {
@@ -365,7 +559,7 @@ export default function PortfolioScreen() {
               await api.post('/wallet/link', { publicKey: pubkey });
               if (__DEV__) console.log('Wallet linked, retrying fetch...');
               // Retry fetch
-              fetchWalletData(isRefresh);
+              fetchWalletData(isRefresh, signal);
               return;
             } catch (linkErr) {
               if (__DEV__) console.warn('Failed to link wallet:', linkErr);
@@ -378,11 +572,14 @@ export default function PortfolioScreen() {
         showAlert('Error', 'Failed to fetch wallet data. Please try again.');
       }
     }
-  }, []);
+  }, [showAlert]);
 
   // Refetch function for pull-to-refresh
-  const refetch = useCallback(async () => {
-    await Promise.all([fetchUserProfile(), fetchWalletData(true)]);
+  const refetch = useCallback(async (signal?: AbortSignal) => {
+    await Promise.all([
+      fetchUserProfile(signal),
+      fetchWalletData(true, signal)
+    ]);
   }, [fetchUserProfile, fetchWalletData]);
 
   // Validate session on mount
@@ -398,18 +595,46 @@ export default function PortfolioScreen() {
   const [editTP, setEditTP] = useState('');
   const [editSlippage, setEditSlippage] = useState('');
 
-  // Refresh when tab becomes focused
+  // FIXED: Reset modal state when closing
+  const handleCloseModal = useCallback(() => {
+    setSelectedWallet(null);
+    setEditAmount('');
+    setEditAmountPerTrade('');
+    setEditSL('');
+    setEditTP('');
+    setEditSlippage('');
+  }, []);
+
+  // Refresh when tab becomes focused - with AbortController
   useFocusEffect(
     useCallback(() => {
       // Skip refresh when edit modal is open to prevent input flickering
       if (selectedWallet) return;
+      
+      // Create new abort controller for this focus session
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+      
       const loadAll = async () => {
         setIsLoading(true);
-        await Promise.all([fetchUserProfile(), fetchWalletData(), loadCopyConfig(), loadCopyWallet()]);
-        setIsLoading(false);
+        await Promise.all([
+          fetchUserProfile(signal),
+          fetchWalletData(false, signal),
+          loadCopyConfig(signal),
+          loadCopyWallet(signal),
+          loadPositions(signal)
+        ]);
+        if (!signal.aborted) {
+          setIsLoading(false);
+        }
       };
       loadAll();
-    }, [fetchWalletData, fetchUserProfile, loadCopyConfig, loadCopyWallet, selectedWallet])
+
+      // Cleanup: abort pending requests when unfocusing
+      return () => {
+        abortControllerRef.current?.abort();
+      };
+    }, [fetchWalletData, fetchUserProfile, loadCopyConfig, loadCopyWallet, loadPositions, selectedWallet])
   );
 
   const [isUpdatingCopyTrade, setIsUpdatingCopyTrade] = useState(false);
@@ -457,7 +682,7 @@ export default function PortfolioScreen() {
       if (result.success) {
         showAlert('Stopped', 'Copy trading has been stopped');
         setCopiedWallets([]);
-        setSelectedWallet(null);
+        handleCloseModal();
         await loadCopyConfig();
       } else {
         showAlert('Error', result.error || 'Failed to stop copy trading');
@@ -466,9 +691,6 @@ export default function PortfolioScreen() {
       showAlert('Error', e.message || 'Failed to stop');
     }
   };
-
-  // Mock open positions query - coming soon
-  const openPositionsQuery = { data: [] as any[], isLoading: false, refetch: async () => ({}) };
 
   // Loading state for skeleton
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -508,11 +730,11 @@ export default function PortfolioScreen() {
   const [chartType, setChartType] = useState<ChartType>('line');
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1d' | '7d' | '30d' | '1y'>('1d');
 
-  // Wallet creation/import is handled by /solana-setup page
-
-  const loadWatchlist = useCallback(async () => {
+  const loadWatchlist = useCallback(async (signal?: AbortSignal) => {
     try {
+      if (signal?.aborted) return;
       const raw = await AsyncStorage.getItem('watchlist_tokens');
+      if (signal?.aborted) return;
       const list = raw ? JSON.parse(raw) : [];
       if (Array.isArray(list)) {
         // Handle both old string format and new object format
@@ -550,26 +772,78 @@ export default function PortfolioScreen() {
     }
   }, [watchlistTokens]);
 
+  // FIXED: Pull-to-refresh with AbortController and proper error handling
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
-    await openPositionsQuery.refetch();
-    await loadWatchlist();
-    await loadCopyConfig();
-    await loadCopyWallet();
-    setRefreshing(false);
-  }, [loadCopyWallet, loadWatchlist, refetch]);
+    
+    // Create abort controller for refresh
+    const controller = new AbortController();
+    const signal = controller.signal;
+    
+    try {
+      await Promise.all([
+        refetch(signal),
+        loadPositions(signal),
+        loadWatchlist(signal),
+        loadCopyConfig(signal),
+        loadCopyWallet(signal)
+      ]);
+    } catch (err) {
+      if (__DEV__) console.warn('Refresh error:', err);
+      // Don't show alert on refresh - just let the data be stale
+    } finally {
+      if (!signal.aborted) {
+        setRefreshing(false);
+      }
+    }
+  }, [loadCopyConfig, loadCopyWallet, loadWatchlist, loadPositions, refetch]);
 
   useEffect(() => {
     void loadWatchlist();
   }, [loadWatchlist]);
 
-  // Removed auto-hide header behavior on scroll
-
   // Calculate percentages for token allocation
-  const getTokenPercentage = (value: number) => {
+  const getTokenPercentage = useCallback((value: number) => {
     return totalBalance > 0 ? (value / totalBalance) * 100 : 0;
-  };
+  }, [totalBalance]);
+
+  // Token press handler - memoized
+  const handleTokenPress = useCallback((token: Token) => {
+    router.push({
+      pathname: `/coin/${token.symbol.toLowerCase()}`,
+      params: {
+        symbol: token.symbol,
+        name: token.name,
+        logo: token.logo || '',
+        price: String(token.price || 0),
+        change: String(token.change24h || 0),
+        contractAddress: token.contractAddress || '',
+        banner: '',
+        marketCap: '0',
+        volume24h: '0',
+        liquidity: '0',
+      }
+    } as any);
+  }, [router]);
+
+  // Watchlist token press handler
+  const handleWatchlistPress = useCallback((watchToken: typeof watchlistTokens[0]) => {
+    router.push({
+      pathname: `/coin/${watchToken.symbol.toLowerCase()}`,
+      params: {
+        symbol: watchToken.symbol,
+        name: watchToken.name || watchToken.symbol,
+        logo: watchToken.logo || '',
+        price: String(watchToken.price || 0),
+        change: String(watchToken.change24h || 0),
+        contractAddress: watchToken.contractAddress || '',
+        banner: watchToken.banner || '',
+        marketCap: String(watchToken.marketCap || 0),
+        volume24h: String(watchToken.volume24h || 0),
+        liquidity: String(watchToken.liquidity || 0),
+      }
+    } as any);
+  }, [router]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -645,15 +919,15 @@ export default function PortfolioScreen() {
                   <View style={styles.pnlContainer}>
                     <Text style={[
                       styles.pnlValue,
-                      { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
+                      { color: marketMovement24h >= 0 ? COLORS.success : COLORS.error }
                     ]}>
-                      {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString()}
+                      {marketMovement24h >= 0 ? '+' : ''}${marketMovement24h.toLocaleString()}
                     </Text>
                     <Text style={[
                       styles.pnlPercentage,
-                      { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
+                      { color: marketMovement24h >= 0 ? COLORS.success : COLORS.error }
                     ]}>
-                      ({dailyPnl >= 0 ? '+' : ''}{totalBalance > dailyPnl ? ((dailyPnl / (totalBalance - dailyPnl) * 100) || 0).toFixed(2) : '0.00'}%)
+                      ({marketMovement24h >= 0 ? '+' : ''}{totalBalance > marketMovement24h ? ((marketMovement24h / (totalBalance - marketMovement24h) * 100) || 0).toFixed(2) : '0.00'}%)
                     </Text>
                   </View>
                 </View>
@@ -662,12 +936,12 @@ export default function PortfolioScreen() {
               <View style={styles.earningsContainer}>
                 <View style={styles.earningCard}>
                   <Text style={styles.earningLabel}>Copy Trade</Text>
-                  <Text style={styles.earningValue}>${((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)).toLocaleString()}</Text>
+                  <Text style={styles.earningValue}>${totalPositionsValue.toLocaleString()}</Text>
                 </View>
 
                 <View style={styles.earningCard}>
                   <Text style={styles.earningLabel}>Self</Text>
-                  <Text style={styles.earningValue}>${(Math.max(0, totalBalance - ((openPositionsQuery.data || []).reduce((sum: number, p: any) => sum + (p.currentValue || 0), 0)))).toLocaleString()}</Text>
+                  <Text style={styles.earningValue}>${Math.max(0, totalBalance - totalPositionsValue).toLocaleString()}</Text>
                 </View>
               </View>
 
@@ -733,53 +1007,12 @@ export default function PortfolioScreen() {
                     </View>
                   )}
                   {tokens.map(token => (
-                    <Pressable
+                    <TokenItem
                       key={token.id}
-                      style={styles.tokenItem}
-                      onPress={() => {
-                        // Navigate to token details page like market tab
-                        router.push({
-                          pathname: `/coin/${token.symbol.toLowerCase()}`,
-                          params: {
-                            symbol: token.symbol,
-                            name: token.name,
-                            logo: token.logo || '',
-                            price: String(token.price || 0),
-                            change: String(token.change24h || 0),
-                            contractAddress: token.contractAddress || '',
-                            banner: '',
-                            marketCap: '0',
-                            volume24h: '0',
-                            liquidity: '0',
-                          }
-                        } as any);
-                      }}
-                    >
-                      <View style={styles.tokenRow}>
-                        <View style={styles.tokenLogoContainer}>
-                          <TokenLogo token={token} />
-                        </View>
-                        <View style={styles.tokenInfo}>
-                          <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                          <Text style={styles.tokenPrice}>
-                            ${token.price < 0.01 ? token.price.toFixed(6) : token.price.toFixed(2)}
-                          </Text>
-                          <Text style={[
-                            styles.tokenChange,
-                            { color: token.change24h >= 0 ? COLORS.success : COLORS.error }
-                          ]}>
-                            {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
-                          </Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.tokenValue}>
-                        <Text style={styles.tokenValueText}>${token.value.toLocaleString()}</Text>
-                        <Text style={styles.tokenPercentage}>
-                          ({getTokenPercentage(token.value).toFixed(0)}%)
-                        </Text>
-                      </View>
-                    </Pressable>
+                      token={token}
+                      onPress={() => handleTokenPress(token)}
+                      getTokenPercentage={getTokenPercentage}
+                    />
                   ))}
                 </View>
               )}
@@ -930,75 +1163,12 @@ export default function PortfolioScreen() {
                     </View>
                   ) : (
                     watchlistTokens.map((watchToken) => (
-                      <Pressable
+                      <WatchlistItem
                         key={watchToken.symbol}
-                        style={styles.tokenItem}
-                        onPress={() => {
-                          // Navigate with full token data as params
-                          router.push({
-                            pathname: `/coin/${watchToken.symbol.toLowerCase()}`,
-                            params: {
-                              symbol: watchToken.symbol,
-                              name: watchToken.name || watchToken.symbol,
-                              logo: watchToken.logo || '',
-                              price: String(watchToken.price || 0),
-                              change: String(watchToken.change24h || 0),
-                              contractAddress: watchToken.contractAddress || '',
-                              banner: watchToken.banner || '',
-                              marketCap: String(watchToken.marketCap || 0),
-                              volume24h: String(watchToken.volume24h || 0),
-                              liquidity: String(watchToken.liquidity || 0),
-                            }
-                          } as any);
-                        }}
-                      >
-                        <View style={styles.tokenRow}>
-                          <View style={styles.tokenLogoContainer}>
-                            {watchToken.logo ? (
-                              <Image source={{ uri: watchToken.logo }} style={styles.tokenLogo} />
-                            ) : (
-                              <View style={styles.tokenLogoPlaceholder}>
-                                <Text style={styles.tokenLogoText}>{watchToken.symbol.charAt(0)}</Text>
-                              </View>
-                            )}
-                          </View>
-                          <View style={styles.tokenInfo}>
-                            <Text style={styles.tokenSymbol}>{watchToken.symbol}</Text>
-                            <Text style={styles.tokenPrice}>
-                              ${watchToken.price < 0.01 ? watchToken.price.toFixed(6) : watchToken.price.toFixed(2)}
-                            </Text>
-                            <Text style={[
-                              styles.tokenChange,
-                              { color: watchToken.change24h >= 0 ? COLORS.success : COLORS.error }
-                            ]}>
-                              {watchToken.change24h >= 0 ? '+' : ''}{watchToken.change24h.toFixed(1)}%
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.tokenValue}>
-                          <Text style={styles.tokenValueText}>
-                            {watchToken.volume24h && watchToken.volume24h > 0
-                              ? `Vol: $${watchToken.volume24h >= 1000000
-                                ? (watchToken.volume24h / 1000000).toFixed(1) + 'M'
-                                : watchToken.volume24h >= 1000
-                                  ? (watchToken.volume24h / 1000).toFixed(1) + 'K'
-                                  : watchToken.volume24h.toFixed(0)}`
-                              : '—'}
-                          </Text>
-                          <Text style={styles.tokenPercentage}>24h</Text>
-                        </View>
-                        {/* Remove from watchlist button - small X at top right */}
-                        <Pressable
-                          style={styles.removeWatchlistButton}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            removeFromWatchlist(watchToken.symbol);
-                          }}
-                          hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
-                        >
-                          <X size={14} color={COLORS.textSecondary} />
-                        </Pressable>
-                      </Pressable>
+                        token={watchToken}
+                        onPress={() => handleWatchlistPress(watchToken)}
+                        onRemove={() => removeFromWatchlist(watchToken.symbol)}
+                      />
                     ))
                   )}
                 </View>
@@ -1058,9 +1228,9 @@ export default function PortfolioScreen() {
                   </Text>
                   <Text style={[
                     styles.chartPlaceholderSubtext,
-                    { color: dailyPnl >= 0 ? COLORS.success : COLORS.error }
+                    { color: marketMovement24h >= 0 ? COLORS.success : COLORS.error }
                   ]}>
-                    {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString()} ({chartPeriod})
+                    {marketMovement24h >= 0 ? '+' : ''}${marketMovement24h.toLocaleString()} ({chartPeriod})
                   </Text>
                 </View>
               </View>
@@ -1090,7 +1260,7 @@ export default function PortfolioScreen() {
         visible={selectedWallet !== null}
         animationType="fade"
         transparent={true}
-        onRequestClose={() => setSelectedWallet(null)}
+        onRequestClose={handleCloseModal}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -1100,7 +1270,7 @@ export default function PortfolioScreen() {
             {/* Tappable backdrop area to dismiss */}
             <Pressable
               style={StyleSheet.absoluteFill}
-              onPress={() => setSelectedWallet(null)}
+              onPress={handleCloseModal}
             />
             {/* Modal content — regular View so it doesn't steal touches from TextInput */}
             <View
@@ -1115,7 +1285,7 @@ export default function PortfolioScreen() {
             >
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Edit Copy Trading</Text>
-                <Pressable onPress={() => setSelectedWallet(null)}>
+                <Pressable onPress={handleCloseModal}>
                   <X size={24} color={COLORS.textPrimary} />
                 </Pressable>
               </View>
@@ -1231,7 +1401,7 @@ export default function PortfolioScreen() {
                         const success = await updateCopiedWallet(selectedWallet.id, updates);
                         if (success) {
                           showAlert('Success', 'Copy trade settings updated');
-                          setSelectedWallet(null);
+                          handleCloseModal();
                         }
                       }
                     }}
@@ -1998,63 +2168,34 @@ const styles = StyleSheet.create({
   },
   checkmark: {
     color: COLORS.background,
-    fontSize: 14,
-    fontWeight: 'bold' as const
+    fontSize: 12,
+    fontWeight: 'bold'
   },
-  checkboxText: {
+  checkboxLabel: {
     ...FONTS.sfProRegular,
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    flex: 1
-  },
-  createActions: {
-    flexDirection: 'row',
-    gap: SPACING.m
-  },
-  createButton: {
-    flex: 1,
-    paddingVertical: SPACING.m,
-    borderRadius: BORDER_RADIUS.medium,
-    alignItems: 'center'
-  },
-  createConfirmButton: {
-    backgroundColor: COLORS.solana
-  },
-  createConfirmButtonDisabled: {
-    backgroundColor: COLORS.textSecondary + '30'
-  },
-  createConfirmButtonText: {
-    ...FONTS.orbitronMedium,
-    color: COLORS.background,
+    color: COLORS.textSecondary,
     fontSize: 14
   },
-  createConfirmButtonTextDisabled: {
-    color: COLORS.textSecondary
-  },
   editInputSection: {
-    marginBottom: SPACING.m,
+    marginBottom: SPACING.m
   },
   editInputLabel: {
     ...FONTS.sfProMedium,
     color: COLORS.textSecondary,
-    fontSize: 13,
-    marginBottom: 6,
+    fontSize: 14,
+    marginBottom: SPACING.s
   },
   editInputContainer: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
     backgroundColor: COLORS.cardBackground,
     borderRadius: BORDER_RADIUS.medium,
     borderWidth: 1,
-    borderColor: COLORS.textSecondary + '40',
-    paddingHorizontal: SPACING.m,
-    height: 48,
+    borderColor: COLORS.solana + '30',
+    padding: SPACING.m
   },
   editInput: {
-    ...FONTS.sfProRegular,
-    flex: 1,
+    ...FONTS.monospace,
     color: COLORS.textPrimary,
     fontSize: 16,
+    padding: 0
   }
 });
-
