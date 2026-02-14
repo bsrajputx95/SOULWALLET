@@ -1,7 +1,5 @@
 import prisma from '../db';
 import axios from 'axios';
-import { getConnection } from '../utils/solana';
-import { PublicKey } from '@solana/web3.js';
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_ULTRA_API = 'https://api.jup.ag/ultra/v1';
@@ -14,6 +12,8 @@ interface JupiterQuote {
   slippageBps: number;
   priceImpactPct: string;
   routePlan: any[];
+  otherAmountThreshold?: string;
+  swapMode?: string;
   swapTransaction?: string;
 }
 
