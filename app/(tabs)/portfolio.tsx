@@ -1203,14 +1203,23 @@ export default function PortfolioScreen() {
                             <Text style={styles.walletStatLabel}>Per Trade</Text>
                             <Text style={[styles.walletStatValue, { color: COLORS.textPrimary }]}>◎{wallet.amountPerTrade?.toFixed(2) || '0'}</Text>
                           </View>
-                          <View style={styles.walletStat}>
-                            <Text style={styles.walletStatLabel}>SL</Text>
-                            <Text style={[styles.walletStatValue, { color: COLORS.error }]}>{wallet.stopLoss}%</Text>
-                          </View>
-                          <View style={styles.walletStat}>
-                            <Text style={styles.walletStatLabel}>TP</Text>
-                            <Text style={[styles.walletStatValue, { color: COLORS.success }]}>{wallet.takeProfit}%</Text>
-                          </View>
+                          {wallet.exitWithTrader ? (
+                            <View style={styles.walletStat}>
+                              <Text style={styles.walletStatLabel}>Strategy</Text>
+                              <Text style={[styles.walletStatValue, { color: COLORS.solana }]}>Exit with Trader</Text>
+                            </View>
+                          ) : (
+                            <>
+                              <View style={styles.walletStat}>
+                                <Text style={styles.walletStatLabel}>SL</Text>
+                                <Text style={[styles.walletStatValue, { color: COLORS.error }]}>{wallet.stopLoss}%</Text>
+                              </View>
+                              <View style={styles.walletStat}>
+                                <Text style={styles.walletStatLabel}>TP</Text>
+                                <Text style={[styles.walletStatValue, { color: COLORS.success }]}>{wallet.takeProfit}%</Text>
+                              </View>
+                            </>
+                          )}
                         </View>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: SPACING.xs, gap: 6 }}>
