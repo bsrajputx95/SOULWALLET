@@ -1659,8 +1659,8 @@ const copyConfigSchema = z.object({
     traderAddress: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address'),
     totalInvestment: z.number().positive().max(10000, 'Max $10,000 allowed'),
     perTradeAmount: z.number().positive(),
-    stopLossPercent: z.number().min(1).max(50).default(10),
-    takeProfitPercent: z.number().min(5).max(1000).default(30),
+    stopLossPercent: z.number().min(0).max(50).default(10),  // Allow 0 when exitWithTrader is true
+    takeProfitPercent: z.number().min(0).max(1000).default(30), // Allow 0 when exitWithTrader is true
     exitWithTrader: z.boolean().default(true)
 }).refine(data => data.perTradeAmount <= data.totalInvestment, {
     message: 'Per-trade amount cannot exceed total investment',
@@ -3832,14 +3832,18 @@ app.post('/trigger/createOrder', authMiddleware, async (req: Request, res: Respo
         });
 
         res.json({
-            orderId: response.data.orderId,
+            orderId: response.data.order,
             transaction: response.data.transaction
         });
     } catch (error: any) {
         console.error('[Trigger] Create order failed:', error.response?.data || error.message);
-        res.status(500).json({
-            error: 'Failed to create limit order',
-            details: error.response?.data?.error || error.message
+        // Forward Jupiter's status code if available (e.g., 400 for validation errors)
+        const statusCode = error.response?.status || 500;
+        const errorMessage = error.response?.data?.error || 'Failed to create limit order';
+        const errorCause = error.response?.data?.cause || error.message;
+        res.status(statusCode).json({
+            error: errorMessage,
+            details: errorCause
         });
     }
 });

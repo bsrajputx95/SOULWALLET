@@ -7,31 +7,19 @@ import {
   ScrollView,
   RefreshControl,
   Modal,
-  TextInput,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronDown, UserPlus, UserMinus, X, Zap, Copy } from 'lucide-react-native';
+import { ChevronDown, UserPlus, UserMinus, Zap, Copy } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
-import { SocialPost, NeonCard, GlowingText } from '@/components';
+import { SocialPost, NeonCard, GlowingText, CopyTradingModal } from '@/components';
 import { fetchUserProfile, toggleFollow, fetchUserPosts, Post } from '@/services/social';
 import { useAlert } from '@/contexts/AlertContext';
 
-// Mock hooks for local-only mode
-const useMockMutation = <T,>(alertFn: (title: string, message: string) => void, _options: { onSuccess?: () => void; onError?: (e: any) => void }) => ({
-  mutate: (_params: any) => {
-    // Simulate success for demo
-    alertFn('Coming Soon', 'This feature is not available yet.');
-  },
-  mutateAsync: async (_params: any) => {
-    alertFn('Coming Soon', 'This feature is not available yet.');
-    return {} as T;
-  },
-  isPending: false,
-});
+
 
 // Profile data type
 interface ProfileData {
@@ -75,13 +63,7 @@ export default function UserProfileScreen() {
 
   const [showTimeFilterModal, setShowTimeFilterModal] = useState(false);
   const [showCopyModal, setShowCopyModal] = useState(false);
-  const [copyAmount, setCopyAmount] = useState('1000');
-  const [amountPerTrade, setAmountPerTrade] = useState('100');
-  const [stopLoss, setStopLoss] = useState('10');
-  const [takeProfit, setTakeProfit] = useState('30');
-  const [maxSlippage, setMaxSlippage] = useState('0.5');
-  const [exitWithTrader, setExitWithTrader] = useState(false);
-  const [totpCode, setTotpCode] = useState('');
+  const [selectedTrader, setSelectedTrader] = useState<{ username: string; walletAddress: string; profileImage?: string } | null>(null);
 
   // Load profile on mount
   useEffect(() => {
@@ -115,17 +97,20 @@ export default function UserProfileScreen() {
     setPostsLoading(false);
   };
 
-  // Mock copy trading mutation - coming soon
-  const startCopyingMutation = useMockMutation(showAlert, {
-    onSuccess: () => {
-      showAlert('Success', `Now copying @${username}! Check your copy trades in the Home tab.`);
-      setShowCopyModal(false);
-      setTotpCode('');
-    },
-    onError: (error: any) => {
-      showAlert('Error', error.message || 'Failed to start copy trading.');
-    },
-  });
+  // Handle copy trader button press
+  const handleCopyTraderPress = () => {
+    if (!userProfile?.walletAddress) {
+      showAlert('Error', 'Trader wallet address not found. This user may not have a wallet set up.');
+      return;
+    }
+    
+    setSelectedTrader({
+      username: userProfile.username,
+      walletAddress: userProfile.walletAddress,
+      ...(userProfile.profileImage ? { profileImage: userProfile.profileImage } : {}),
+    });
+    setShowCopyModal(true);
+  };
 
   const handleFollowPress = async () => {
     if (!profile) return;
@@ -382,7 +367,7 @@ export default function UserProfileScreen() {
 
           <TouchableOpacity
             style={styles.copyButton}
-            onPress={() => setShowCopyModal(true)}
+            onPress={handleCopyTraderPress}
           >
             <Zap size={20} color={COLORS.success} />
             <Text style={styles.copyButtonText}>Copy this trader</Text>
@@ -530,179 +515,15 @@ export default function UserProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Copy Trading Modal */}
-      <Modal
+      {/* Copy Trading Modal - Using the same component as Home tab */}
+      <CopyTradingModal
         visible={showCopyModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowCopyModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.copyModalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Copy @{userProfile.username}</Text>
-              <TouchableOpacity onPress={() => setShowCopyModal(false)}>
-                <X size={24} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalDescription}>
-                Set up copy trading parameters for @{userProfile.username}
-              </Text>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Total Amount (USDC)</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputPrefix}>$</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="1000"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={copyAmount}
-                    onChangeText={setCopyAmount}
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Amount per Trade (USDC)</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputPrefix}>$</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="100"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={amountPerTrade}
-                    onChangeText={setAmountPerTrade}
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Stop Loss (%)</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="10"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={stopLoss}
-                    onChangeText={setStopLoss}
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.inputSuffix}>%</Text>
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Take Profit (%)</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="30"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={takeProfit}
-                    onChangeText={setTakeProfit}
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.inputSuffix}>%</Text>
-                </View>
-              </View>
-
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Max Slippage (%)</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="0.5"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={maxSlippage}
-                    onChangeText={setMaxSlippage}
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.inputSuffix}>%</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.exitWithTraderButton, exitWithTrader && styles.exitWithTraderButtonActive]}
-                onPress={() => setExitWithTrader(prev => !prev)}
-              >
-                <Text style={[styles.exitWithTraderText, exitWithTrader && styles.exitWithTraderTextActive]}>Exit with Trader</Text>
-                <Text style={styles.exitWithTraderSubtext}>Automatically exit when trader exits</Text>
-              </TouchableOpacity>
-
-              {/* Fee disclosure */}
-              <View style={styles.feeDisclosure}>
-                <Text style={styles.feeDisclosureText}>
-                  💡 5% of your profits will be shared with this trader when positions close in profit.
-                </Text>
-              </View>
-
-              {/* 2FA Code Input - Required for copy trading */}
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>2FA Code (Required)</Text>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter 6-digit code"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={totpCode}
-                    onChangeText={setTotpCode}
-                    keyboardType="numeric"
-                    maxLength={6}
-                  />
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.startCopyButton,
-                  (startCopyingMutation.isPending || totpCode.length !== 6) && styles.startCopyButtonDisabled
-                ]}
-                disabled={startCopyingMutation.isPending || totpCode.length !== 6}
-                onPress={async () => {
-                  // Validate inputs
-                  const totalBudget = parseFloat(copyAmount) || 1000;
-                  const perTrade = parseFloat(amountPerTrade) || 100;
-
-                  if (perTrade > totalBudget) {
-                    showAlert('Error', 'Amount per trade cannot exceed total budget');
-                    return;
-                  }
-
-                  // Get the actual wallet address
-                  const traderWallet = (userProfile as any)?.walletAddress;
-                  if (!traderWallet) {
-                    showAlert('Error', 'Trader wallet address not found. This user may not have a wallet set up.');
-                    return;
-                  }
-
-                  try {
-                    await startCopyingMutation.mutateAsync({
-                      walletAddress: traderWallet,
-                      totalBudget,
-                      amountPerTrade: perTrade,
-                      stopLoss: stopLoss ? -Math.abs(parseFloat(stopLoss)) : undefined,
-                      takeProfit: takeProfit ? Math.abs(parseFloat(takeProfit)) : undefined,
-                      maxSlippage: maxSlippage ? Math.abs(parseFloat(maxSlippage)) : 0.5,
-                      exitWithTrader,
-                      totpCode,
-                    });
-                  } catch {
-                  }
-                }}
-              >
-                <Text style={styles.startCopyText}>
-                  {startCopyingMutation.isPending ? 'Starting...' : 'Start Copying'}
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => {
+          setShowCopyModal(false);
+          setSelectedTrader(null);
+        }}
+        trader={selectedTrader}
+      />
     </SafeAreaView>
   );
 }
@@ -1100,124 +921,5 @@ const styles = StyleSheet.create({
     color: COLORS.success,
     fontSize: 16,
     marginLeft: SPACING.xs,
-  },
-  copyModalContainer: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.l,
-    width: '90%',
-    maxWidth: 420,
-    maxHeight: '90%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.m,
-  },
-  modalContent: {
-    maxHeight: '80%',
-  },
-  modalDescription: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    marginBottom: SPACING.m,
-  },
-  inputSection: {
-    marginBottom: SPACING.m,
-  },
-  inputLabel: {
-    ...FONTS.phantomMedium,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    marginBottom: SPACING.xs,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: BORDER_RADIUS.medium,
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-  },
-  inputPrefix: {
-    ...FONTS.phantomBold,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-    marginRight: SPACING.s,
-  },
-  input: {
-    ...FONTS.phantomRegular,
-    flex: 1,
-    color: COLORS.textPrimary,
-    fontSize: 16,
-  },
-  inputSuffix: {
-    ...FONTS.phantomBold,
-    color: COLORS.textSecondary,
-    fontSize: 16,
-    marginLeft: SPACING.s,
-  },
-  exitWithTraderButton: {
-    backgroundColor: COLORS.solana + '10',
-    borderRadius: BORDER_RADIUS.medium,
-    paddingHorizontal: SPACING.m,
-    paddingVertical: SPACING.s,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-    marginBottom: SPACING.m,
-  },
-  exitWithTraderButtonActive: {
-    backgroundColor: COLORS.solana + '20',
-    borderColor: COLORS.solana + '30',
-  },
-  exitWithTraderText: {
-    ...FONTS.phantomBold,
-    color: COLORS.textSecondary,
-    fontSize: 14,
-  },
-  exitWithTraderTextActive: {
-    color: COLORS.solana,
-  },
-  exitWithTraderSubtext: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-  },
-  startCopyButton: {
-    backgroundColor: COLORS.success + '20',
-    borderRadius: BORDER_RADIUS.medium,
-    paddingVertical: SPACING.m,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.success + '30',
-    marginBottom: SPACING.s,
-  },
-  startCopyButtonDisabled: {
-    backgroundColor: COLORS.cardBackground,
-    borderColor: COLORS.textSecondary + '30',
-    opacity: 0.6,
-  },
-  startCopyText: {
-    ...FONTS.phantomBold,
-    color: COLORS.success,
-    fontSize: 16,
-  },
-  feeDisclosure: {
-    backgroundColor: COLORS.solana + '10',
-    borderRadius: BORDER_RADIUS.medium,
-    padding: SPACING.m,
-    marginBottom: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana + '20',
-  },
-  feeDisclosureText: {
-    ...FONTS.phantomRegular,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
   },
 });

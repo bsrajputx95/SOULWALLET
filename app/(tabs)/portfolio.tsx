@@ -56,6 +56,7 @@ type CopiedWallet = {
   stopLoss?: number;
   takeProfit?: number;
   slippage?: number;
+  exitWithTrader?: boolean;
   roi: number;
 };
 
@@ -264,6 +265,7 @@ export default function PortfolioScreen() {
           amountPerTrade: cfg.perTradeAmount,
           stopLoss: cfg.stopLossPercent,
           takeProfit: cfg.takeProfitPercent,
+          exitWithTrader: cfg.exitWithTrader,
           roi: 0,
         }]);
       } else {
@@ -646,6 +648,7 @@ export default function PortfolioScreen() {
   const [editSL, setEditSL] = useState('');
   const [editTP, setEditTP] = useState('');
   const [editSlippage, setEditSlippage] = useState('');
+  const [editExitWithTrader, setEditExitWithTrader] = useState(false);
 
   // FIXED: Reset modal state when closing
   const handleCloseModal = useCallback(() => {
@@ -655,6 +658,7 @@ export default function PortfolioScreen() {
     setEditSL('');
     setEditTP('');
     setEditSlippage('');
+    setEditExitWithTrader(false);
   }, []);
 
   // Refresh when tab becomes focused - with AbortController
@@ -708,7 +712,7 @@ export default function PortfolioScreen() {
         perTradeAmount: updates.amountPerTrade ?? wallet.amountPerTrade ?? 100,
         stopLossPercent: updates.stopLoss ?? wallet.stopLoss ?? 10,
         takeProfitPercent: updates.takeProfit ?? wallet.takeProfit ?? 30,
-        exitWithTrader: true,
+        exitWithTrader: updates.exitWithTrader ?? wallet.exitWithTrader ?? true,
       }, token);
 
       if (result.success) {
@@ -1167,6 +1171,7 @@ export default function PortfolioScreen() {
                                 setEditSL(wallet.stopLoss ? Math.abs(wallet.stopLoss).toString() : '10');
                                 setEditTP(wallet.takeProfit?.toString() || '30');
                                 setEditSlippage(wallet.slippage?.toString() || '1');
+                                setEditExitWithTrader(wallet.exitWithTrader ?? false);
                               }}
                             >
                               <Text style={styles.editButtonText}>Edit</Text>
@@ -1501,7 +1506,28 @@ export default function PortfolioScreen() {
                   </View>
                 </View>
 
-
+                {/* Exit with Trader Toggle */}
+                <Pressable
+                  style={[styles.exitWithTraderButton, editExitWithTrader && styles.exitWithTraderButtonActive]}
+                  onPress={() => {
+                    const next = !editExitWithTrader;
+                    setEditExitWithTrader(next);
+                    if (next) {
+                      // Clear TP/SL when enabling exit-with-trader
+                      setEditSL('');
+                      setEditTP('');
+                    }
+                  }}
+                >
+                  <Text style={[styles.exitWithTraderText, editExitWithTrader && styles.exitWithTraderTextActive]}>
+                    {editExitWithTrader ? '✓ ' : ''}Exit with Trader
+                  </Text>
+                  <Text style={styles.exitWithTraderSubtext}>
+                    {editExitWithTrader
+                      ? 'Will exit when trader exits (no custom TP/SL)'
+                      : 'Automatically exit when trader exits'}
+                  </Text>
+                </Pressable>
 
                 <View style={styles.editActions}>
                   <NeonButton
@@ -1529,6 +1555,7 @@ export default function PortfolioScreen() {
                         if (!isNaN(stopLossVal)) updates.stopLoss = stopLossVal;
                         if (!isNaN(takeProfitVal)) updates.takeProfit = takeProfitVal;
                         if (!isNaN(slippageVal)) updates.slippage = slippageVal;
+                        updates.exitWithTrader = editExitWithTrader;
 
                         const success = await updateCopiedWallet(selectedWallet.id, updates);
                         if (success) {
@@ -2105,6 +2132,32 @@ const styles = StyleSheet.create({
   editActionButton: {
     flex: 1,
     marginHorizontal: SPACING.xs
+  },
+  exitWithTraderButton: {
+    backgroundColor: COLORS.solana + '10',
+    borderRadius: BORDER_RADIUS.medium,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
+    borderWidth: 1,
+    borderColor: COLORS.solana + '20',
+    marginBottom: SPACING.m,
+  },
+  exitWithTraderButtonActive: {
+    backgroundColor: COLORS.solana + '20',
+    borderColor: COLORS.solana + '30',
+  },
+  exitWithTraderText: {
+    ...FONTS.phantomBold,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  exitWithTraderTextActive: {
+    color: COLORS.solana,
+  },
+  exitWithTraderSubtext: {
+    ...FONTS.phantomRegular,
+    color: COLORS.textSecondary,
+    fontSize: 12,
   },
 
   // Wallet Connection Modal Styles
