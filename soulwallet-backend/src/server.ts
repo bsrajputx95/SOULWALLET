@@ -2372,7 +2372,7 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
                         if (cappedOutputAmount <= 0) return Promise.resolve();
                         const proportionalInputAmount = cappedOutputAmount / priceRatio;
                         if (!Number.isFinite(proportionalInputAmount) || proportionalInputAmount < 0) return Promise.resolve();
-                        
+
                         return queueCopyTrade({
                             userId: config.userId,
                             configId: config.id,
@@ -2392,7 +2392,7 @@ app.post('/webhooks/helius', async (req: Request, res: Response): Promise<void> 
                 // Process in batches of BATCH_SIZE concurrently
                 for (let i = 0; i < configs.length; i += BATCH_SIZE) {
                     const batch = configs.slice(i, i + BATCH_SIZE);
-                    
+
                     await Promise.all(batch.map(async (config) => {
                         // Cap the spend to user's perTradeAmount
                         const cappedOutputAmount = Math.min(config.perTradeAmount, inputAmount);
@@ -3636,7 +3636,7 @@ app.post('/ibuy/sell/execute', authMiddleware, async (req: AuthRequest, res: Res
         // Calculate P&L
         const costBasis = pending.sellAmount * position.entryPrice;
         const profit = solReceived - costBasis;
-        
+
         // Minimum $10 profit (~0.067 SOL at $150/SOL) before sharing
         const MIN_PROFIT_SOL = 0.067;
         const creatorShare = (profit > MIN_PROFIT_SOL) ? profit * 0.05 : 0;
@@ -3794,6 +3794,14 @@ app.get('/ibuy/creator-earnings', authMiddleware, async (req: AuthRequest, res: 
 // ============================================
 
 const JUPITER_TRIGGER_API = 'https://api.jup.ag/trigger/v1';
+const JUPITER_API_KEY = process.env.JUPITER_API_KEY || '';
+
+// Helper to build Jupiter API headers
+const jupiterHeaders = (extra?: Record<string, string>) => ({
+    'Content-Type': 'application/json',
+    ...(JUPITER_API_KEY ? { 'x-api-key': JUPITER_API_KEY } : {}),
+    ...extra,
+});
 
 // POST /trigger/createOrder - Create a limit order
 app.post('/trigger/createOrder', authMiddleware, async (req: Request, res: Response): Promise<void> => {
@@ -3812,14 +3820,15 @@ app.post('/trigger/createOrder', authMiddleware, async (req: Request, res: Respo
             outputMint,
             maker,
             payer,
-            makingAmount: makingAmount.toString(),
-            takingAmount: takingAmount.toString(),
-            slippageBps: slippageBps || 0,
+            params: {
+                makingAmount: makingAmount.toString(),
+                takingAmount: takingAmount.toString(),
+                ...(slippageBps ? { slippageBps: slippageBps.toString() } : {}),
+            },
+            computeUnitPrice: 'auto',
         }, {
             timeout: 15000,
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: jupiterHeaders(),
         });
 
         res.json({
@@ -3852,9 +3861,7 @@ app.post('/trigger/execute', authMiddleware, async (req: Request, res: Response)
             orderId
         }, {
             timeout: 30000,
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: jupiterHeaders(),
         });
 
         res.json({
@@ -3886,9 +3893,7 @@ app.post('/trigger/cancelOrder', authMiddleware, async (req: Request, res: Respo
             orderId
         }, {
             timeout: 15000,
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: jupiterHeaders(),
         });
 
         res.json({
@@ -3922,7 +3927,8 @@ app.get('/trigger/orders', authMiddleware, async (req: Request, res: Response): 
         console.log(`[Trigger] Fetching orders for: ${user}`);
 
         const response = await axios.get(`${JUPITER_TRIGGER_API}/getTriggerOrders?${params}`, {
-            timeout: 10000
+            timeout: 10000,
+            headers: jupiterHeaders(),
         });
 
         res.json({
@@ -3930,9 +3936,9 @@ app.get('/trigger/orders', authMiddleware, async (req: Request, res: Response): 
         });
     } catch (error: any) {
         console.error('[Trigger] Get orders failed:', error.response?.data || error.message);
-        res.status(500).json({
-            error: 'Failed to fetch orders',
-            details: error.response?.data?.error || error.message
+        // Return empty orders on failure instead of 500 to avoid noisy client errors
+        res.json({
+            orders: []
         });
     }
 });

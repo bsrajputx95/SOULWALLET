@@ -119,8 +119,8 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                 traderAddress: effectiveWalletAddress!,
                 totalInvestment: totalBudget,
                 perTradeAmount: perTrade,
-                stopLossPercent: parseFloat(stopLoss) || 10,
-                takeProfitPercent: parseFloat(takeProfit) || 30,
+                stopLossPercent: exitWithTrader ? 0 : (parseFloat(stopLoss) || 10),
+                takeProfitPercent: exitWithTrader ? 0 : (parseFloat(takeProfit) || 30),
                 exitWithTrader
             }, authToken);
 
@@ -258,45 +258,65 @@ export function CopyTradingModal({ visible, onClose, trader }: CopyTradingModalP
                             </View>
                         </View>
 
-                        <View style={styles.inputSection}>
-                            <Text style={styles.inputLabel}>Stop Loss (%)</Text>
-                            <View style={styles.inputContainer}>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="10"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                    value={stopLoss}
-                                    onChangeText={setStopLoss}
-                                    keyboardType="numeric"
-                                />
-                                <Text style={styles.inputSuffix}>%</Text>
-                            </View>
-                        </View>
+                        {!exitWithTrader && (
+                            <>
+                                <View style={styles.inputSection}>
+                                    <Text style={styles.inputLabel}>Stop Loss (%)</Text>
+                                    <View style={styles.inputContainer}>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="10"
+                                            placeholderTextColor={COLORS.textSecondary}
+                                            value={stopLoss}
+                                            onChangeText={(val) => {
+                                                setStopLoss(val);
+                                                if (val.trim()) setExitWithTrader(false);
+                                            }}
+                                            keyboardType="numeric"
+                                        />
+                                        <Text style={styles.inputSuffix}>%</Text>
+                                    </View>
+                                </View>
 
-                        <View style={styles.inputSection}>
-                            <Text style={styles.inputLabel}>Take Profit (%)</Text>
-                            <View style={styles.inputContainer}>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="30"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                    value={takeProfit}
-                                    onChangeText={setTakeProfit}
-                                    keyboardType="numeric"
-                                />
-                                <Text style={styles.inputSuffix}>%</Text>
-                            </View>
-                        </View>
+                                <View style={styles.inputSection}>
+                                    <Text style={styles.inputLabel}>Take Profit (%)</Text>
+                                    <View style={styles.inputContainer}>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="30"
+                                            placeholderTextColor={COLORS.textSecondary}
+                                            value={takeProfit}
+                                            onChangeText={(val) => {
+                                                setTakeProfit(val);
+                                                if (val.trim()) setExitWithTrader(false);
+                                            }}
+                                            keyboardType="numeric"
+                                        />
+                                        <Text style={styles.inputSuffix}>%</Text>
+                                    </View>
+                                </View>
+                            </>
+                        )}
 
                         <TouchableOpacity
                             style={[styles.exitWithTraderButton, exitWithTrader && styles.exitWithTraderButtonActive]}
-                            onPress={() => setExitWithTrader(prev => !prev)}
+                            onPress={() => {
+                                const next = !exitWithTrader;
+                                setExitWithTrader(next);
+                                if (next) {
+                                    // Clear TP/SL when enabling exit-with-trader
+                                    setStopLoss('');
+                                    setTakeProfit('');
+                                }
+                            }}
                         >
                             <Text style={[styles.exitWithTraderText, exitWithTrader && styles.exitWithTraderTextActive]}>
-                                Exit with Trader
+                                {exitWithTrader ? '✓ ' : ''}Exit with Trader
                             </Text>
                             <Text style={styles.exitWithTraderSubtext}>
-                                Automatically exit when trader exits
+                                {exitWithTrader
+                                    ? 'Will exit when trader exits (no custom TP/SL)'
+                                    : 'Automatically exit when trader exits'}
                             </Text>
                         </TouchableOpacity>
                     </ScrollView>

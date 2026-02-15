@@ -100,13 +100,15 @@ export async function getTriggerOrders(status?: 'open' | 'completed' | 'cancelle
 
         const params = new URLSearchParams({ user: publicKey });
         if (status) {
-            params.append('orderStatus', status);
+            // Map frontend status to Jupiter Trigger API expected values
+            const jupiterStatus = status === 'open' ? 'active' : 'history';
+            params.append('orderStatus', jupiterStatus);
         }
 
         const response = await api.get<{ orders: TriggerOrder[] }>(`/trigger/orders?${params}`);
         return response.orders || [];
     } catch (error) {
-        console.error('[Trigger] Failed to get orders:', error);
+        if (__DEV__) console.warn('[Trigger] Failed to get orders:', error);
         return [];
     }
 }

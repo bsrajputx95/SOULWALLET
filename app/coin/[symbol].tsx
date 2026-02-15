@@ -31,7 +31,7 @@ import { SimpleCandlestickChart } from '@/components/SimpleCandlestickChart';
 import { COLORS, BORDER_RADIUS, FONTS, SPACING } from '@/constants';
 import { NeonCard, NeonButton, GlowingText } from '@/components';
 import { formatSubscriptPrice, formatLargeNumber as formatLargeNum, showErrorToast, showSuccessToast } from '@/utils';
-import { getQuote, executeSwap, getTokenDecimals, JupiterToken } from '@/services/swap';
+import { getQuote, executeSwap, getTokenDecimals } from '@/services/swap';
 import { createTriggerOrder, executeTriggerOrder } from '@/services/trigger';
 import { getLocalPublicKey } from '@/services/wallet';
 import { useAlert } from '@/contexts/AlertContext';
@@ -353,7 +353,7 @@ export default function CoinDetailsScreen() {
   const [tradeAmount, setTradeAmount] = useState<string>('');
   const [tradePriceType, setTradePriceType] = useState<'market' | 'target'>('market');
   const [tradeTargetPrice, setTradeTargetPrice] = useState<string>('');
-  const [tradeSlippage, setTradeSlippage] = useState<string>('0.5');
+  const [tradeSlippage, setTradeSlippage] = useState<string>('1.0');
   const [isTrading, setIsTrading] = useState(false);
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [solBalance, setSolBalance] = useState<number>(0);
@@ -367,7 +367,7 @@ export default function CoinDetailsScreen() {
     setTradeAmount('');
     setTradePriceType('market');
     setTradeTargetPrice('');
-    setTradeSlippage('0.5');
+    setTradeSlippage('1.0');
     setTradeModalVisible(true);
 
     // Fetch balances when opening modal
@@ -387,9 +387,6 @@ export default function CoinDetailsScreen() {
 
       // Fetch balances from backend
       const { fetchBalances: fetchWalletBalances } = await import('@/services/wallet');
-      const token = await import('@/services/api').then(m => m.api).then(api =>
-        import('expo-secure-store').then(s => s.getItemAsync('token'))
-      );
 
       // Get token from SecureStore
       const authToken = await import('expo-secure-store').then(s => s.getItemAsync('token'));
@@ -500,7 +497,16 @@ export default function CoinDetailsScreen() {
       );
     } catch (error: any) {
       if (__DEV__) console.error('[Trade] Market order failed:', error);
-      showErrorToast(error.message || 'Swap failed');
+      const msg = error?.message || 'Swap failed';
+      if (msg.includes('slippage') || msg.includes('Slippage') || msg.includes('Price changed')) {
+        // Auto-bump slippage and notify user
+        const currentSlippage = parseFloat(tradeSlippage || '1.0');
+        const newSlippage = Math.min(currentSlippage * 2, 5).toFixed(1);
+        setTradeSlippage(newSlippage);
+        showErrorToast(`Price moved too fast. Slippage increased to ${newSlippage}% — please retry.`);
+      } else {
+        showErrorToast(msg);
+      }
       setIsTrading(false);
     }
   };
@@ -605,7 +611,7 @@ export default function CoinDetailsScreen() {
         // For buy: targetPrice is in USD per token
         // We need to calculate how many tokens we get for our SOL
         // Use token's current price for calculations
-        const solPriceUsd = tokenInfo?.priceUsd ? parseFloat(tokenInfo.priceUsd) : 150;
+        const solPriceUsd = coinData?.price || 150;
         const solValueUsd = amount * solPriceUsd;
         const expectedTokens = solValueUsd / targetPrice;
         takingAmount = Math.floor(expectedTokens * Math.pow(10, outputDecimals)).toString();
@@ -620,7 +626,7 @@ export default function CoinDetailsScreen() {
         // For sell: targetPrice is in USD per token
         const tokenValueUsd = amount * targetPrice;
         // Use token's current price for calculations
-        const solPriceUsd = tokenInfo?.priceUsd ? parseFloat(tokenInfo.priceUsd) : 150;
+        const solPriceUsd = coinData?.price || 150;
         const expectedSol = tokenValueUsd / solPriceUsd;
         takingAmount = Math.floor(expectedSol * Math.pow(10, outputDecimals)).toString();
       }
