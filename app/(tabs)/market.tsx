@@ -7,18 +7,31 @@ import {
   ScrollView,
   RefreshControl,
   useWindowDimensions,
+  Modal,
+  TouchableOpacity,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ShoppingCart } from 'lucide-react-native';
+import { ShoppingCart, ChevronDown, RefreshCw, Maximize2, X } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { TokenCard, ErrorBoundary, MarketSkeleton, QuickBuyModal } from '@/components';
 import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
 import { fetchMarketTokens, MarketToken } from '@/services/market';
 
-type MarketTab = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
+type MarketPlatform = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
+
+const PLATFORM_OPTIONS: { value: MarketPlatform; label: string }[] = [
+  { value: 'soulmarket', label: 'SoulMarket' },
+  { value: 'dexscreener', label: 'DexScreener' },
+  { value: 'raydium', label: 'Raydium' },
+  { value: 'bonk', label: 'Bonk' },
+  { value: 'pumpfun', label: 'Pump.fun' },
+  { value: 'orca', label: 'Orca' },
+];
 
 export default function MarketScreen() {
   const router = useRouter();
@@ -35,8 +48,11 @@ export default function MarketScreen() {
   const responsivePadding = isSmallScreen ? SPACING.xs : isLargeScreen ? SPACING.m : SPACING.s;
 
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<MarketTab>('soulmarket');
+  const [selectedPlatform, setSelectedPlatform] = useState<MarketPlatform>('soulmarket');
+  const [showDropdown, setShowDropdown] = useState(false);
   const [showQuickBuyModal, setShowQuickBuyModal] = useState(false);
+  const [webViewKey, setWebViewKey] = useState(0); // For forcing WebView reload
+  const [isFullScreen, setIsFullScreen] = useState(false); // Full-screen mode state
 
   // Loading state for skeleton - only show on initial cold start
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -196,7 +212,7 @@ export default function MarketScreen() {
 
   // Poll prices every 5 minutes for market tokens
   useEffect(() => {
-    if (tokens.length === 0 || activeTab !== 'soulmarket') return;
+    if (tokens.length === 0 || selectedPlatform !== 'soulmarket') return;
 
     const pollPrices = async () => {
       try {
@@ -211,7 +227,7 @@ export default function MarketScreen() {
 
     const interval = setInterval(pollPrices, 5 * 60 * 1000); // 5 minutes
     return () => clearInterval(interval);
-  }, [tokens.length, activeTab]);
+  }, [tokens.length, selectedPlatform]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -222,8 +238,40 @@ export default function MarketScreen() {
   // Show up to 50 tokens
   const visibleTokens = tokens.slice(0, 50);
 
-  // Check if current tab requires WebView (non-scrollable container)
-  const isWebViewTab = activeTab !== 'soulmarket';
+  // Check if current selection requires WebView
+  const isWebViewPlatform = selectedPlatform !== 'soulmarket';
+
+  // Handle platform change
+  const handlePlatformChange = (platform: MarketPlatform) => {
+    setSelectedPlatform(platform);
+    setShowDropdown(false);
+    if (platform !== 'soulmarket') {
+      setWebViewKey(prev => prev + 1); // Force WebView refresh on platform change
+    }
+  };
+
+  // Handle refresh for WebView
+  const handleWebViewRefresh = () => {
+    setWebViewKey(prev => prev + 1);
+  };
+
+  // Enter full-screen mode
+  const enterFullScreen = async () => {
+    setIsFullScreen(true);
+    // Lock to landscape orientation
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    // Hide status bar
+    StatusBar.setHidden(true);
+  };
+
+  // Exit full-screen mode
+  const exitFullScreen = async () => {
+    setIsFullScreen(false);
+    // Reset to portrait orientation
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    // Show status bar
+    StatusBar.setHidden(false);
+  };
 
   const renderSoulMarketContent = () => {
     return (
@@ -292,98 +340,136 @@ export default function MarketScreen() {
     );
   };
 
-  const renderWebViewTab = () => {
-    switch (activeTab) {
-      case 'dexscreener':
-        return <ExternalPlatformWebView platform="dexscreener" />;
-      case 'raydium':
-        return <ExternalPlatformWebView platform="raydium" />;
-      case 'bonk':
-        return <ExternalPlatformWebView platform="bonk" />;
-      case 'pumpfun':
-        return <ExternalPlatformWebView platform="pumpfun" />;
-      case 'orca':
-        return <ExternalPlatformWebView platform="orca" />;
-      default:
-        return null;
-    }
+  const renderWebViewContent = () => {
+    return (
+      <ExternalPlatformWebView
+        key={webViewKey}
+        platform={selectedPlatform as 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca'}
+      />
+    );
   };
+
+  // Header with dropdown
+  const renderPlatformHeader = () => (
+    <View style={styles.platformHeader}>
+      <TouchableOpacity
+        style={styles.dropdownButton}
+        onPress={() => setShowDropdown(true)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.dropdownButtonText}>
+          {PLATFORM_OPTIONS.find(p => p.value === selectedPlatform)?.label}
+        </Text>
+        <ChevronDown size={20} color={COLORS.textPrimary} />
+      </TouchableOpacity>
+
+      {isWebViewPlatform && (
+        <View style={styles.headerButtons}>
+          {/* Full-screen button */}
+          <TouchableOpacity style={styles.iconButton} onPress={enterFullScreen}>
+            <Maximize2 size={18} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+          {/* Reload button */}
+          <TouchableOpacity style={styles.iconButton} onPress={handleWebViewRefresh}>
+            <RefreshCw size={18} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Dropdown Modal */}
+      <Modal
+        visible={showDropdown}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDropdown(false)}
+      >
+        <TouchableOpacity
+          style={styles.dropdownOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDropdown(false)}
+        >
+          <View style={styles.dropdownContainer}>
+            {PLATFORM_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.dropdownItem,
+                  selectedPlatform === option.value && styles.dropdownItemActive,
+                ]}
+                onPress={() => handlePlatformChange(option.value)}
+              >
+                <Text
+                  style={[
+                    styles.dropdownItemText,
+                    selectedPlatform === option.value && styles.dropdownItemTextActive,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </View>
+  );
+
+  // Full-screen mode UI
+  if (isFullScreen) {
+    return (
+      <View style={styles.fullScreenContainer}>
+        {/* Exit button at top-right corner */}
+        <TouchableOpacity style={styles.exitFullScreenButton} onPress={exitFullScreen}>
+          <X size={24} color={COLORS.textPrimary} />
+        </TouchableOpacity>
+
+        {/* Full-screen WebView with zoom enabled */}
+        <ExternalPlatformWebView
+          key={webViewKey}
+          platform={selectedPlatform as 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca'}
+          fullScreen={true}
+        />
+
+        {/* Quick Buy button in full-screen mode */}
+        <Pressable
+          style={styles.fullScreenQuickBuyButton}
+          onPress={() => setShowQuickBuyModal(true)}
+        >
+          <LinearGradient
+            colors={[COLORS.solana, COLORS.solana + '80']}
+            style={styles.fullScreenQuickBuyGradient}
+          >
+            <ShoppingCart size={24} color={COLORS.textPrimary} />
+          </LinearGradient>
+        </Pressable>
+
+        {/* Quick Buy Modal */}
+        <QuickBuyModal
+          visible={showQuickBuyModal}
+          onClose={() => setShowQuickBuyModal(false)}
+          onSuccess={() => {
+            loadTokens();
+          }}
+        />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Platform Dropdown Header */}
       <View style={[styles.header, { paddingHorizontal: responsivePadding }]}>
-        {/* Tabs Section */}
-        <View style={styles.tabsContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tabsScroll}
-          >
-            <Pressable
-              style={[styles.tab, activeTab === 'soulmarket' && styles.activeTab]}
-              onPress={() => setActiveTab('soulmarket')}
-            >
-              <Text style={[styles.tabText, activeTab === 'soulmarket' && styles.activeTabText]}>
-                SoulMarket
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.tab, activeTab === 'dexscreener' && styles.activeTab]}
-              onPress={() => setActiveTab('dexscreener')}
-            >
-              <Text style={[styles.tabText, activeTab === 'dexscreener' && styles.activeTabText]}>
-                DexScreener
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.tab, activeTab === 'raydium' && styles.activeTab]}
-              onPress={() => setActiveTab('raydium')}
-            >
-              <Text style={[styles.tabText, activeTab === 'raydium' && styles.activeTabText]}>
-                Raydium
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.tab, activeTab === 'bonk' && styles.activeTab]}
-              onPress={() => setActiveTab('bonk')}
-            >
-              <Text style={[styles.tabText, activeTab === 'bonk' && styles.activeTabText]}>
-                Bonk
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.tab, activeTab === 'pumpfun' && styles.activeTab]}
-              onPress={() => setActiveTab('pumpfun')}
-            >
-              <Text style={[styles.tabText, activeTab === 'pumpfun' && styles.activeTabText]}>
-                Pump.fun
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.tab, activeTab === 'orca' && styles.activeTab]}
-              onPress={() => setActiveTab('orca')}
-            >
-              <Text style={[styles.tabText, activeTab === 'orca' && styles.activeTabText]}>
-                Orca
-              </Text>
-            </Pressable>
-          </ScrollView>
-        </View>
+        {renderPlatformHeader()}
       </View>
 
       <ErrorBoundary>
-        {isWebViewTab ? (
-          /* WebView tabs need a flex container, not ScrollView */
+        {isWebViewPlatform ? (
+          /* WebView platforms */
           <View style={styles.webViewContainer}>
-            {renderWebViewTab()}
+            {renderWebViewContent()}
           </View>
         ) : (
-          /* SoulMarket tab uses ScrollView for scrollable content */
+          /* SoulMarket uses ScrollView for scrollable content */
           <ScrollView
             style={styles.content}
             contentContainerStyle={[
@@ -434,33 +520,110 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingVertical: SPACING.xs,
   },
-  tabsContainer: {
-    marginBottom: 0,
-  },
-  tabsScroll: {
-    paddingHorizontal: 0,
-  },
-  tab: {
-    paddingVertical: SPACING.s,
-    paddingHorizontal: SPACING.m,
-    marginRight: SPACING.s,
-    borderRadius: BORDER_RADIUS.medium,
+  platformHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    paddingHorizontal: SPACING.m,
+    paddingVertical: SPACING.s,
   },
-  activeTab: {
+  dropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    flex: 1,
+  },
+  dropdownButtonText: {
+    ...FONTS.orbitronBold,
+    fontSize: 16,
+    color: COLORS.textPrimary,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  iconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dropdownOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+    paddingTop: 100,
+    paddingHorizontal: SPACING.m,
+  },
+  dropdownContainer: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: BORDER_RADIUS.medium,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  dropdownItem: {
+    paddingVertical: SPACING.m,
+    paddingHorizontal: SPACING.m,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  dropdownItemActive: {
     backgroundColor: COLORS.solana + '20',
   },
-  tabText: {
+  dropdownItemText: {
     ...FONTS.orbitronMedium,
-    color: COLORS.textSecondary,
     fontSize: 14,
+    color: COLORS.textPrimary,
   },
-  activeTabText: {
+  dropdownItemTextActive: {
     color: COLORS.solana,
   },
   webViewContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  // Full-screen mode styles
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  exitFullScreenButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 100,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.cardBackground + 'CC',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenQuickBuyButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    zIndex: 100,
+    borderRadius: 30,
+    overflow: 'hidden',
+    shadowColor: COLORS.solana,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  fullScreenQuickBuyGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   content: {
     flex: 1,

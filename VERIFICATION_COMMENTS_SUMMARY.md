@@ -161,3 +161,6 @@ useEffect(() => {
 - [ ] Self profile loads real user data
 - [ ] Post tabs filter correctly (public/followers/vip)
 - [ ] Delete post works and removes from list
+
+
+

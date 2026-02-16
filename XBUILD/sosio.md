@@ -953,4 +953,4 @@ This implementation adds a complete social feed to SoulWallet with:
 - **Frontend service** using existing `api` client
 - **UI integration** by replacing dummy data
 
-Total code: ~880 lines across 8 files. No new dependencies. Beta-ready with room to scale.
+Total code: ~880 lines across 8 files. No new dependencies. Beta-ready with room to scale

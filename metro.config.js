@@ -1,6 +1,8 @@
+const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
+const emptyModule = path.resolve(__dirname, 'lib', 'empty-module.js');
 
 // Production optimizations
 config.transformer = {
@@ -66,8 +68,16 @@ config.resolver = {
             };
         }
 
-        // Let Metro handle other modules normally
-        return context.resolveRequest(context, moduleName, platform);
+        // Resolve normally first, then check if it hits the problematic infinity.js
+        const resolved = context.resolveRequest(context, moduleName, platform);
+
+        // Redirect lucide infinity icon to empty stub — it declares "const Infinity"
+        // which shadows the global and crashes Hermes
+        if (resolved && resolved.filePath && resolved.filePath.replace(/\\/g, '/').includes('lucide-react-native/dist/esm/icons/infinity.js')) {
+            return { filePath: emptyModule, type: 'sourceFile' };
+        }
+
+        return resolved;
     },
 };
 

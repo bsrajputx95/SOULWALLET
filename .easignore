@@ -19,3 +19,7 @@ scripts/restore-database.sh
 .env.production.example
 .env.production.generated
 test-api.js
+soulwallet-backend/
+XBUILD/
+convo.txt
+dist/

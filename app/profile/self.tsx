@@ -20,7 +20,7 @@ import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { NeonCard, SocialPost } from '@/components';
 import { fetchUserProfile, fetchMe, fetchUserPosts, deletePost, Post } from '@/services/social';
 import { getCreatorEarnings } from '@/services/ibuy';
-import * as SecureStore from 'expo-secure-store';
+
 import { useAlert } from '@/contexts/AlertContext';
 
 export default function SelfProfileScreen() {

@@ -386,7 +386,6 @@ export default function PostDetailScreen() {
         {post.tokenAddress && tokenInfo && (
           <TokenCard
             symbol={tokenInfo.symbol}
-            name={tokenInfo.name}
             price={tokenInfo.price}
             change={tokenInfo.change24h}
             logo={tokenInfo.logo || ''}

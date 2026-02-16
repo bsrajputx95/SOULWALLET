@@ -50,7 +50,7 @@ export default function SettingsScreen() {
   // State for user profile and wallet
   const [user, setUser] = useState<UserProfile | null>(null);
   const [solanaPublicKey, setSolanaPublicKey] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [_isLoading, setIsLoading] = useState(true);
   const [walletLoading, setWalletLoading] = useState(false);
 
   const [showPrivateKey, setShowPrivateKey] = useState(false);

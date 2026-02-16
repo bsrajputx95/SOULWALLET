@@ -111,8 +111,7 @@ export default function AccountScreen() {
       setIsProcessingImage(true);
 
       // Send base64 image to backend
-      const token = await SecureStore.getItemAsync('token');
-      const response = await api.put('/profile', {
+      const response = await api.put<{ success: boolean; user: UserProfile }>('/profile', {
         profileImage: `data:${mimeType};base64,${base64}`
       });
 

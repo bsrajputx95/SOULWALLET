@@ -20,10 +20,11 @@
         "gradleCommand": ":app:assembleRelease"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
+        "EXPO_PUBLIC_API_URL": "https://soulwallet-production-9adb.up.railway.app",
         "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
         "EXPO_PUBLIC_DEV_MODE": "false",
-        "EXPO_PUBLIC_LOG_LEVEL": "warn"
+        "EXPO_PUBLIC_LOG_LEVEL": "warn",
+        "NODE_OPTIONS": "--max-old-space-size=4096"
       }
     },
     "production": {
@@ -35,7 +36,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://soulwallet-production.up.railway.app",
+        "EXPO_PUBLIC_API_URL": "https://soulwallet-production-9adb.up.railway.app",
         "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.mainnet-beta.solana.com",
         "EXPO_PUBLIC_DEV_MODE": "false",
         "EXPO_PUBLIC_LOG_LEVEL": "warn"

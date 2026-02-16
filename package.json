@@ -13,7 +13,7 @@
     "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "rm -rf node_modules dist .expo android/build",
-    "postinstall": "npx patch-package"
+    "postinstall": "npx patch-package || true"
   },
   "dependencies": {
     "@craftzdog/react-native-buffer": "^6.1.0",
@@ -51,6 +51,7 @@
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",
     "expo-router": "~6.0.21",
+    "expo-screen-orientation": "^9.0.8",
     "expo-secure-store": "~15.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",

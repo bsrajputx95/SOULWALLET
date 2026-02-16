@@ -4,7 +4,7 @@
  * Displays external DEX platforms in optimized WebView
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { RefreshCw, AlertTriangle, Globe } from 'lucide-react-native';
+import { AlertTriangle, Globe, RefreshCw } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
@@ -38,21 +38,15 @@ const PLATFORM_NAMES: Record<string, string> = {
 
 interface ExternalPlatformWebViewProps {
   platform: 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
+  fullScreen?: boolean;
 }
 
-export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({ platform }) => {
+export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({ platform, fullScreen = false }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const webViewRef = useRef<WebView>(null);
 
   const platformUrl = PLATFORM_URLS[platform] || '';
   const platformName = PLATFORM_NAMES[platform] || platform;
-
-  const handleRefresh = () => {
-    setError(null);
-    setLoading(true);
-    webViewRef.current?.reload();
-  };
 
   // Error state
   if (error) {
@@ -62,7 +56,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
           <AlertTriangle size={48} color={COLORS.error} />
           <Text style={styles.errorTitle}>Platform Unavailable</Text>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => { setError(null); setLoading(true); }}>
             <RefreshCw size={16} color={COLORS.textPrimary} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
@@ -93,27 +87,18 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
   // Native WebView - Optimized
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.platformTitle}>{platformName}</Text>
-        <TouchableOpacity style={styles.refreshBtn} onPress={handleRefresh}>
-          <RefreshCw size={18} color={COLORS.textSecondary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Loading */}
+      {/* Loading - simplified without platform name */}
       {loading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={COLORS.solana} />
-          <Text style={styles.loadingText}>Loading {platformName}...</Text>
+          <Text style={styles.loadingText}>Loading...</Text>
         </View>
       )}
 
       {/* WebView - Performance Optimized */}
       <WebView
-        ref={webViewRef}
         source={{ uri: platformUrl }}
-        style={styles.webView}
+        style={[styles.webView, fullScreen && styles.webViewFullScreen]}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
         onError={(e) => setError(e.nativeEvent.description || 'Failed to load')}
@@ -134,6 +119,10 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         thirdPartyCookiesEnabled={true}
         // Mixed content for older sites
         mixedContentMode="compatibility"
+        // Full-screen zoom settings
+        scalesPageToFit={fullScreen}
+        setBuiltInZoomControls={fullScreen}
+        setDisplayZoomControls={fullScreen}
       />
     </View>
   );
@@ -218,24 +207,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginLeft: SPACING.xs,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.s,
-    paddingVertical: SPACING.xs,
-    backgroundColor: COLORS.cardBackground,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  refreshBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+
   loadingOverlay: {
     position: 'absolute',
     top: 50,
@@ -255,6 +227,10 @@ const styles = StyleSheet.create({
   },
   webView: {
     flex: 1,
+  },
+  webViewFullScreen: {
+    // Full-screen WebView takes entire space
+    backgroundColor: COLORS.background,
   },
 });
 
