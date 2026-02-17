@@ -9,6 +9,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "jsEngine": "hermes",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/39377c11-1e45-436d-95c7-267e708b6b86"
+    },
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "cover",
@@ -34,7 +40,8 @@
       ]
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-updates"
     ],
     "experiments": {
       "typedRoutes": true

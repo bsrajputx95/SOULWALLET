@@ -5,6 +5,7 @@
   },
   "build": {
     "development": {
+      "channel": "development",
       "developmentClient": false,
       "distribution": "internal",
       "node": "22.11.0",
@@ -20,6 +21,7 @@
       }
     },
     "beta-apk": {
+      "channel": "beta",
       "distribution": "internal",
       "node": "22.11.0",
       "android": {
@@ -35,6 +37,7 @@
       }
     },
     "production": {
+      "channel": "production",
       "distribution": "store",
       "autoIncrement": true,
       "credentialsSource": "remote",
