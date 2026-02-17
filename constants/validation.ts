@@ -15,8 +15,9 @@ export const VALIDATION = {
   MAX_SLIPPAGE_BPS: 500,
   PIN: {
     MIN_LENGTH: 4,
-    MAX_LENGTH: 6,
-    PATTERN: /^\d+$/,
+    MAX_LENGTH: 4,
+    PATTERN: /^\d{4}$/,
+    EXACT_LENGTH: 4,
   },
   SOLANA_ADDRESS: {
     PATTERN: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,

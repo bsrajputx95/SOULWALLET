@@ -65,20 +65,20 @@ export default function SolanaSetupScreen() {
   const handleCreateWallet = async () => {
     try {
       if (!walletPassword || walletPassword !== confirmWalletPassword) {
-        showAlert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
+        showAlert('Error', 'Please enter and confirm your 4-digit wallet PIN');
         return;
       }
       // Numeric-only check
       if (!VALIDATION.PIN.PATTERN.test(walletPassword)) {
-        showAlert('Error', 'PIN must contain only digits (0-9)');
+        showAlert('Error', 'PIN must be exactly 4 digits (0-9)');
         return;
       }
       if (walletPassword.length < VALIDATION.PIN.MIN_LENGTH) {
-        showAlert('Error', `PIN must be at least ${VALIDATION.PIN.MIN_LENGTH} digits`);
+        showAlert('Error', 'PIN must be exactly 4 digits');
         return;
       }
       if (walletPassword.length > VALIDATION.PIN.MAX_LENGTH) {
-        showAlert('Error', `PIN must not exceed ${VALIDATION.PIN.MAX_LENGTH} digits`);
+        showAlert('Error', 'PIN must be exactly 4 digits');
         return;
       }
 
@@ -148,16 +148,12 @@ export default function SolanaSetupScreen() {
       return;
     }
     if (!walletPassword || walletPassword !== confirmWalletPassword) {
-      showAlert('Error', 'Please enter and confirm your wallet PIN (4-6 digits)');
+      showAlert('Error', 'Please enter and confirm your 4-digit wallet PIN');
       return;
     }
-    // Numeric-only check
-    if (!/^\d+$/.test(walletPassword)) {
-      showAlert('Error', 'PIN must contain only digits (0-9)');
-      return;
-    }
-    if (walletPassword.length < 4 || walletPassword.length > 6) {
-      showAlert('Error', 'PIN must be 4-6 digits');
+    // Numeric-only and exactly 4 digits check
+    if (!/^\d{4}$/.test(walletPassword)) {
+      showAlert('Error', 'PIN must be exactly 4 digits (0-9)');
       return;
     }
 
@@ -237,11 +233,13 @@ export default function SolanaSetupScreen() {
           </View>
 
           <View style={styles.inputSection}>
-            <Text style={styles.inputLabel}>Wallet Password</Text>
+            <Text style={styles.inputLabel}>Wallet Password (4 digit)</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
-                placeholder="Enter a strong password"
+                placeholder="Enter 4 digit PIN"
+                maxLength={4}
+                keyboardType="numeric"
                 placeholderTextColor={COLORS.textSecondary}
                 value={walletPassword}
                 onChangeText={setWalletPassword}
@@ -260,11 +258,13 @@ export default function SolanaSetupScreen() {
                 )}
               </TouchableOpacity>
             </View>
-            <Text style={styles.inputLabel}>Confirm Password</Text>
+            <Text style={styles.inputLabel}>Confirm Password (4 digit)</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
-                placeholder="Re-enter password"
+                placeholder="Re-enter 4 digit PIN"
+                maxLength={4}
+                keyboardType="numeric"
                 placeholderTextColor={COLORS.textSecondary}
                 value={confirmWalletPassword}
                 onChangeText={setConfirmWalletPassword}
@@ -475,17 +475,19 @@ export default function SolanaSetupScreen() {
                 )}
               </TouchableOpacity>
             </View>
-            <Text style={styles.inputLabel}>Wallet Password</Text>
+            <Text style={styles.inputLabel}>Wallet Password (4 digit)</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
-                placeholder="Enter a strong password"
+                placeholder="Enter 4 digit PIN"
                 placeholderTextColor={COLORS.textSecondary}
                 value={walletPassword}
                 onChangeText={setWalletPassword}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
                 autoCorrect={false}
+                maxLength={4}
+                keyboardType="numeric"
               />
               <TouchableOpacity
                 style={styles.eyeButton}
@@ -498,17 +500,19 @@ export default function SolanaSetupScreen() {
                 )}
               </TouchableOpacity>
             </View>
-            <Text style={styles.inputLabel}>Confirm Password</Text>
+            <Text style={styles.inputLabel}>Confirm Password (4 digit)</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
-                placeholder="Re-enter password"
+                placeholder="Re-enter 4 digit PIN"
                 placeholderTextColor={COLORS.textSecondary}
                 value={confirmWalletPassword}
                 onChangeText={setConfirmWalletPassword}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
                 autoCorrect={false}
+                maxLength={4}
+                keyboardType="numeric"
               />
             </View>
           </View>

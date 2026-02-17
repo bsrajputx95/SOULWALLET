@@ -12,7 +12,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { ShoppingCart, ChevronDown, RefreshCw, Maximize2, X } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -35,6 +35,7 @@ const PLATFORM_OPTIONS: { value: MarketPlatform; label: string }[] = [
 
 export default function MarketScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { width } = useWindowDimensions();
 
   // Real market data from API
@@ -228,6 +229,16 @@ export default function MarketScreen() {
     const interval = setInterval(pollPrices, 5 * 60 * 1000); // 5 minutes
     return () => clearInterval(interval);
   }, [tokens.length, selectedPlatform]);
+
+  // Update tab bar visibility when fullscreen state changes
+  useEffect(() => {
+    navigation.setOptions({
+      tabBarStyle: isFullScreen ? { display: 'none' } : {
+        backgroundColor: COLORS.cardBackground,
+        borderTopColor: COLORS.solana + '30',
+      },
+    });
+  }, [isFullScreen, navigation]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
     StyleSheet,
     View,
@@ -13,7 +13,7 @@ import {
     KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, Mail, Lock, UserPlus, Eye, EyeOff } from 'lucide-react-native';
+import { User, Mail, Lock, UserPlus, Eye, EyeOff, AlertCircle, Check } from 'lucide-react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -24,8 +24,22 @@ import { useAuth } from '@/contexts/AuthContext';
 import { persistAuthSession } from '@/utils/session';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
-const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
+const USERNAME_REGEX = /^[a-z0-9_]+$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Validation types
+type ValidationError = {
+    message: string;
+    isError: boolean;
+};
+
+type FieldErrors = {
+    username: ValidationError | null;
+    email: ValidationError | null;
+    password: ValidationError | null;
+    confirmPassword: ValidationError | null;
+    general: string | null;
+};
 
 export default function SignupNewScreen() {
     const router = useRouter();
@@ -38,12 +52,170 @@ export default function SignupNewScreen() {
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [errors, setErrors] = useState<FieldErrors>({
+        username: null,
+        email: null,
+        password: null,
+        confirmPassword: null,
+        general: null,
+    });
+    const [touched, setTouched] = useState<Record<string, boolean>>({});
     const [tosAccepted, setTosAccepted] = useState(false);
 
     const emailInputRef = useRef<TextInput>(null);
     const passwordInputRef = useRef<TextInput>(null);
     const confirmPasswordInputRef = useRef<TextInput>(null);
+
+    // Real-time validation functions
+    const validateUsername = useCallback((value: string): ValidationError | null => {
+        const trimmed = value.trim();
+        
+        if (!trimmed) {
+            return { message: 'Username is required', isError: true };
+        }
+        
+        if (trimmed.length < 3) {
+            return { message: 'Username must be at least 3 characters', isError: true };
+        }
+        
+        if (trimmed.length > 30) {
+            return { message: 'Username must be at most 30 characters', isError: true };
+        }
+        
+        // Check for uppercase letters
+        if (/[A-Z]/.test(trimmed)) {
+            return { message: 'Use lowercase letters only (no capitals)', isError: true };
+        }
+        
+        // Check for spaces
+        if (/\s/.test(trimmed)) {
+            return { message: 'Username cannot contain spaces', isError: true };
+        }
+        
+        if (!USERNAME_REGEX.test(trimmed)) {
+            return { message: 'Only letters, numbers, and underscores allowed', isError: true };
+        }
+        
+        return { message: 'Username looks good!', isError: false };
+    }, []);
+
+    const validateEmail = useCallback((value: string): ValidationError | null => {
+        const trimmed = value.trim();
+        
+        if (!trimmed) {
+            return { message: 'Email is required', isError: true };
+        }
+        
+        if (!EMAIL_REGEX.test(trimmed)) {
+            return { message: 'Please enter a valid email address', isError: true };
+        }
+        
+        return { message: 'Email looks good!', isError: false };
+    }, []);
+
+    const validatePassword = useCallback((value: string): ValidationError | null => {
+        if (!value) {
+            return { message: 'Password is required', isError: true };
+        }
+        
+        if (value.length < 6) {
+            return { message: 'Password must be at least 6 characters', isError: true };
+        }
+        
+        if (value.length > 100) {
+            return { message: 'Password is too long', isError: true };
+        }
+        
+        return { message: 'Password is strong', isError: false };
+    }, []);
+
+    const validateConfirmPassword = useCallback((value: string, pass: string): ValidationError | null => {
+        if (!value) {
+            return { message: 'Please confirm your password', isError: true };
+        }
+        
+        if (value !== pass) {
+            return { message: 'Passwords do not match', isError: true };
+        }
+        
+        return { message: 'Passwords match', isError: false };
+    }, []);
+
+    // Handle input changes with real-time validation
+    const handleUsernameChange = (text: string) => {
+        setUsername(text);
+        if (touched.username) {
+            const validation = validateUsername(text);
+            setErrors(prev => ({ ...prev, username: validation }));
+        }
+        // Clear general error when user starts typing
+        if (errors.general) {
+            setErrors(prev => ({ ...prev, general: null }));
+        }
+    };
+
+    const handleEmailChange = (text: string) => {
+        setEmail(text);
+        if (touched.email) {
+            const validation = validateEmail(text);
+            setErrors(prev => ({ ...prev, email: validation }));
+        }
+        if (errors.general) {
+            setErrors(prev => ({ ...prev, general: null }));
+        }
+    };
+
+    const handlePasswordChange = (text: string) => {
+        setPassword(text);
+        if (touched.password) {
+            const validation = validatePassword(text);
+            setErrors(prev => ({ ...prev, password: validation }));
+        }
+        // Also validate confirm password if it has a value
+        if (confirmPassword && touched.confirmPassword) {
+            const confirmValidation = validateConfirmPassword(confirmPassword, text);
+            setErrors(prev => ({ ...prev, confirmPassword: confirmValidation }));
+        }
+        if (errors.general) {
+            setErrors(prev => ({ ...prev, general: null }));
+        }
+    };
+
+    const handleConfirmPasswordChange = (text: string) => {
+        setConfirmPassword(text);
+        if (touched.confirmPassword) {
+            const validation = validateConfirmPassword(text, password);
+            setErrors(prev => ({ ...prev, confirmPassword: validation }));
+        }
+        if (errors.general) {
+            setErrors(prev => ({ ...prev, general: null }));
+        }
+    };
+
+    // Handle field blur (validation)
+    const handleUsernameBlur = () => {
+        setTouched(prev => ({ ...prev, username: true }));
+        const validation = validateUsername(username);
+        setErrors(prev => ({ ...prev, username: validation }));
+    };
+
+    const handleEmailBlur = () => {
+        setTouched(prev => ({ ...prev, email: true }));
+        const validation = validateEmail(email);
+        setErrors(prev => ({ ...prev, email: validation }));
+    };
+
+    const handlePasswordBlur = () => {
+        setTouched(prev => ({ ...prev, password: true }));
+        const validation = validatePassword(password);
+        setErrors(prev => ({ ...prev, password: validation }));
+    };
+
+    const handleConfirmPasswordBlur = () => {
+        setTouched(prev => ({ ...prev, confirmPassword: true }));
+        const validation = validateConfirmPassword(confirmPassword, password);
+        setErrors(prev => ({ ...prev, confirmPassword: validation }));
+    };
 
     const getSignupErrorMessage = (error: unknown): string => {
         if (!(error instanceof Error)) {
@@ -54,8 +226,20 @@ export default function SignupNewScreen() {
             return 'Network error. Please check your connection.';
         }
 
-        if (error.message.includes('Too many authentication attempts')) {
+        if (error.message.includes('Too many registration attempts')) {
             return 'Too many attempts. Please wait a bit and try again.';
+        }
+
+        if (error.message.includes('Username already exists')) {
+            return 'This username is already taken. Please choose another.';
+        }
+
+        if (error.message.includes('Email already exists')) {
+            return 'This email is already registered. Try logging in instead.';
+        }
+
+        if (error.message.includes('User already exists')) {
+            return 'An account with this username or email already exists.';
         }
 
         return error.message || 'Signup failed. Please try again.';
@@ -66,35 +250,37 @@ export default function SignupNewScreen() {
             return;
         }
         Keyboard.dismiss();
-        const normalizedUsername = username.trim();
-        const normalizedEmail = email.trim().toLowerCase();
 
-        if (!normalizedUsername) {
-            setErrorMessage('Username is required');
+        // Mark all fields as touched
+        setTouched({ username: true, email: true, password: true, confirmPassword: true });
+
+        // Validate all fields
+        const usernameValidation = validateUsername(username);
+        const emailValidation = validateEmail(email);
+        const passwordValidation = validatePassword(password);
+        const confirmPasswordValidation = validateConfirmPassword(confirmPassword, password);
+
+        setErrors({
+            username: usernameValidation,
+            email: emailValidation,
+            password: passwordValidation,
+            confirmPassword: confirmPasswordValidation,
+            general: null,
+        });
+
+        // Check if any validation failed
+        if (usernameValidation?.isError || 
+            emailValidation?.isError || 
+            passwordValidation?.isError || 
+            confirmPasswordValidation?.isError) {
+            if (Platform.OS !== 'web') {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
             return;
         }
-        if (normalizedUsername.length < 3 || normalizedUsername.length > 30 || !USERNAME_REGEX.test(normalizedUsername)) {
-            setErrorMessage('Username must be 3-30 chars and use letters, numbers, or underscores');
-            return;
-        }
-        if (!normalizedEmail) {
-            setErrorMessage('Email is required');
-            return;
-        }
-        if (!EMAIL_REGEX.test(normalizedEmail)) {
-            setErrorMessage('Please enter a valid email address');
-            return;
-        }
-        if (!password || password.length < 6) {
-            setErrorMessage('Password must be at least 6 characters');
-            return;
-        }
-        if (password !== confirmPassword) {
-            setErrorMessage('Passwords do not match');
-            return;
-        }
+
         if (!tosAccepted) {
-            setErrorMessage('Please accept Terms of Service to continue');
+            setErrors(prev => ({ ...prev, general: 'Please accept Terms of Service to continue' }));
             return;
         }
 
@@ -103,7 +289,7 @@ export default function SignupNewScreen() {
         }
 
         setIsLoading(true);
-        setErrorMessage(null);
+        setErrors(prev => ({ ...prev, general: null }));
 
         try {
             const data = await api.post<{
@@ -111,8 +297,8 @@ export default function SignupNewScreen() {
                 user: unknown;
                 error?: string;
             }>('/register', {
-                username: normalizedUsername,
-                email: normalizedEmail,
+                username: username.trim(),
+                email: email.trim().toLowerCase(),
                 password,
                 confirmPassword,
             });
@@ -125,13 +311,51 @@ export default function SignupNewScreen() {
             // Navigate to main app on success
             router.replace('/(tabs)');
         } catch (error: unknown) {
-            setErrorMessage(getSignupErrorMessage(error));
+            setErrors(prev => ({ ...prev, general: getSignupErrorMessage(error) }));
+            if (Platform.OS !== 'web') {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
         } finally {
             setIsLoading(false);
         }
     };
 
+    // Helper to render validation indicator
+    const renderValidationIndicator = (error: ValidationError | null, isTouched: boolean) => {
+        if (!isTouched || !error) return null;
+        
+        return (
+            <View style={styles.validationIndicator}>
+                {error.isError ? (
+                    <AlertCircle size={18} color={COLORS.error} />
+                ) : (
+                    <Check size={18} color={COLORS.success} />
+                )}
+            </View>
+        );
+    };
 
+    // Helper to render helper text
+    const renderHelperText = (error: ValidationError | null, isTouched: boolean) => {
+        if (!isTouched || !error) {
+            return null;
+        }
+        
+        return (
+            <Text style={[
+                styles.helperText,
+                error.isError ? styles.helperTextError : styles.helperTextSuccess
+            ]}>
+                {error.message}
+            </Text>
+        );
+    };
+
+    // Get input border color based on validation state
+    const getInputBorderColor = (error: ValidationError | null, isTouched: boolean) => {
+        if (!isTouched || !error) return COLORS.textSecondary + '50';
+        return error.isError ? COLORS.error : COLORS.success;
+    };
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -159,36 +383,51 @@ export default function SignupNewScreen() {
                             <Text style={styles.subtitle}>Join Soul Wallet today</Text>
                         </View>
 
-                        {/* Error Message */}
-                        {errorMessage && (
+                        {/* General Error Message */}
+                        {errors.general && (
                             <View style={styles.errorContainer}>
-                                <Text style={styles.errorText}>{errorMessage}</Text>
+                                <AlertCircle size={18} color={COLORS.error} style={styles.errorIcon} />
+                                <Text style={styles.errorText}>{errors.general}</Text>
                             </View>
                         )}
 
                         {/* Username Input */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.label}>Username</Text>
-                            <View style={styles.inputWrapper}>
+                            <View style={[
+                                styles.inputWrapper,
+                                { borderColor: getInputBorderColor(errors.username, touched.username) }
+                            ]}>
                                 <User size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
                                     style={styles.input}
                                     placeholder="Choose a username"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={username}
-                                    onChangeText={setUsername}
+                                    onChangeText={handleUsernameChange}
+                                    onBlur={handleUsernameBlur}
                                     autoCapitalize="none"
                                     autoCorrect={false}
                                     returnKeyType="next"
                                     onSubmitEditing={() => emailInputRef.current?.focus()}
                                 />
+                                {renderValidationIndicator(errors.username, touched.username)}
                             </View>
+                            {renderHelperText(errors.username, touched.username)}
+                            {!touched.username && (
+                                <Text style={styles.inputHint}>
+                                    3-30 characters, lowercase letters, numbers, underscores only
+                                </Text>
+                            )}
                         </View>
 
                         {/* Email Input */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.label}>Email</Text>
-                            <View style={styles.inputWrapper}>
+                            <View style={[
+                                styles.inputWrapper,
+                                { borderColor: getInputBorderColor(errors.email, touched.email) }
+                            ]}>
                                 <Mail size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
                                     ref={emailInputRef}
@@ -196,20 +435,26 @@ export default function SignupNewScreen() {
                                     placeholder="Enter your email"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={email}
-                                    onChangeText={setEmail}
+                                    onChangeText={handleEmailChange}
+                                    onBlur={handleEmailBlur}
                                     autoCapitalize="none"
                                     autoCorrect={false}
                                     keyboardType="email-address"
                                     returnKeyType="next"
                                     onSubmitEditing={() => passwordInputRef.current?.focus()}
                                 />
+                                {renderValidationIndicator(errors.email, touched.email)}
                             </View>
+                            {renderHelperText(errors.email, touched.email)}
                         </View>
 
                         {/* Password Input */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.label}>Password</Text>
-                            <View style={styles.inputWrapper}>
+                            <View style={[
+                                styles.inputWrapper,
+                                { borderColor: getInputBorderColor(errors.password, touched.password) }
+                            ]}>
                                 <Lock size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
                                     ref={passwordInputRef}
@@ -217,7 +462,8 @@ export default function SignupNewScreen() {
                                     placeholder="Create a password"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={password}
-                                    onChangeText={setPassword}
+                                    onChangeText={handlePasswordChange}
+                                    onBlur={handlePasswordBlur}
                                     secureTextEntry={!showPassword}
                                     returnKeyType="next"
                                     onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
@@ -233,15 +479,21 @@ export default function SignupNewScreen() {
                                     )}
                                 </TouchableOpacity>
                             </View>
-                            <Text style={styles.passwordHint}>
-                                Minimum 6 characters
-                            </Text>
+                            {renderHelperText(errors.password, touched.password)}
+                            {!touched.password && (
+                                <Text style={styles.inputHint}>
+                                    Minimum 6 characters
+                                </Text>
+                            )}
                         </View>
 
                         {/* Confirm Password Input */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.label}>Confirm Password</Text>
-                            <View style={styles.inputWrapper}>
+                            <View style={[
+                                styles.inputWrapper,
+                                { borderColor: getInputBorderColor(errors.confirmPassword, touched.confirmPassword) }
+                            ]}>
                                 <Lock size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
                                     ref={confirmPasswordInputRef}
@@ -249,7 +501,8 @@ export default function SignupNewScreen() {
                                     placeholder="Confirm your password"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={confirmPassword}
-                                    onChangeText={setConfirmPassword}
+                                    onChangeText={handleConfirmPasswordChange}
+                                    onBlur={handleConfirmPasswordBlur}
                                     secureTextEntry={!showConfirmPassword}
                                     returnKeyType="done"
                                     onSubmitEditing={handleSignup}
@@ -265,6 +518,7 @@ export default function SignupNewScreen() {
                                     )}
                                 </TouchableOpacity>
                             </View>
+                            {renderHelperText(errors.confirmPassword, touched.confirmPassword)}
                         </View>
 
                         {/* Terms of Service Checkbox */}
@@ -294,8 +548,6 @@ export default function SignupNewScreen() {
                             fullWidth
                             style={[styles.signupButton, !tosAccepted && { opacity: 0.5 }]}
                         />
-
-
 
                         {/* Login Link */}
                         <View style={styles.loginContainer}>
@@ -359,6 +611,8 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
     },
     errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
         backgroundColor: COLORS.error + '20',
         borderWidth: 1,
         borderColor: COLORS.error,
@@ -366,12 +620,16 @@ const styles = StyleSheet.create({
         padding: 12,
         marginBottom: 16,
     },
+    errorIcon: {
+        marginRight: 8,
+    },
     errorText: {
+        flex: 1,
         color: COLORS.error,
         fontSize: 14,
     },
     inputContainer: {
-        marginBottom: 16,
+        marginBottom: 12,
     },
     label: {
         color: COLORS.textPrimary,
@@ -383,7 +641,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: COLORS.textSecondary + '50',
         borderRadius: 12,
         backgroundColor: COLORS.cardBackground,
         paddingHorizontal: 16,
@@ -400,8 +657,29 @@ const styles = StyleSheet.create({
     eyeIcon: {
         padding: 8,
     },
+    validationIndicator: {
+        marginLeft: 8,
+    },
+    helperText: {
+        fontSize: 12,
+        marginTop: 4,
+        marginLeft: 4,
+    },
+    helperTextError: {
+        color: COLORS.error,
+    },
+    helperTextSuccess: {
+        color: COLORS.success,
+    },
+    inputHint: {
+        color: COLORS.textSecondary,
+        fontSize: 11,
+        marginTop: 4,
+        marginLeft: 4,
+    },
     signupButton: {
         marginBottom: 24,
+        marginTop: 8,
     },
     tosContainer: {
         flexDirection: 'row',
@@ -454,11 +732,6 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
     },
-    passwordHint: {
-        color: COLORS.textSecondary,
-        fontSize: 11,
-        marginTop: 4,
-    },
     bottomGlow: {
         position: 'absolute',
         bottom: 0,
@@ -468,4 +741,3 @@ const styles = StyleSheet.create({
         opacity: 0.1,
     },
 });
-

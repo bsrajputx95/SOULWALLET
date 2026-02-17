@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
     StyleSheet,
     View,
@@ -13,17 +13,29 @@ import {
     KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Mail, Lock, LogIn, Eye, EyeOff } from 'lucide-react-native';
+import { Mail, Lock, LogIn, Eye, EyeOff, AlertCircle } from 'lucide-react-native';
 import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { COLORS } from '@/constants';
+import { COLORS, FONTS } from '@/constants';
 import { NeonButton, GlowingText } from '@/components';
 import { api } from '@/services';
 import { useAuth } from '@/contexts/AuthContext';
 import { persistAuthSession } from '@/utils/session';
 
 const logoImage = require('../../assets/images/icon-rounded.png');
+
+// Validation types
+type ValidationError = {
+    message: string;
+    isError: boolean;
+};
+
+type FieldErrors = {
+    email: ValidationError | null;
+    password: ValidationError | null;
+    general: string | null;
+};
 
 export default function LoginNewScreen() {
     const router = useRouter();
@@ -33,9 +45,97 @@ export default function LoginNewScreen() {
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [errors, setErrors] = useState<FieldErrors>({
+        email: null,
+        password: null,
+        general: null,
+    });
+    const [touched, setTouched] = useState<Record<string, boolean>>({});
+    const [betaAcknowledged, setBetaAcknowledged] = useState(false);
 
     const passwordInputRef = useRef<TextInput>(null);
+
+    // Real-time validation functions
+    const validateEmail = useCallback((value: string): ValidationError | null => {
+        const trimmed = value.trim();
+        
+        if (!trimmed) {
+            return { message: 'Email or username is required', isError: true };
+        }
+        
+        // Check if it looks like an email
+        if (trimmed.includes('@')) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(trimmed)) {
+                return { message: 'Please enter a valid email address', isError: true };
+            }
+        } else {
+            // It's a username - check for valid characters
+            if (trimmed.length < 3) {
+                return { message: 'Username must be at least 3 characters', isError: true };
+            }
+            if (/[A-Z]/.test(trimmed)) {
+                return { message: 'Use lowercase letters only (no capitals)', isError: true };
+            }
+            if (/\s/.test(trimmed)) {
+                return { message: 'Username cannot contain spaces', isError: true };
+            }
+            if (!/^[a-z0-9_]+$/.test(trimmed)) {
+                return { message: 'Only letters, numbers, and underscores allowed', isError: true };
+            }
+        }
+        
+        return null; // No validation message for valid input
+    }, []);
+
+    const validatePassword = useCallback((value: string): ValidationError | null => {
+        if (!value) {
+            return { message: 'Password is required', isError: true };
+        }
+        
+        if (value.length < 6) {
+            return { message: 'Password must be at least 6 characters', isError: true };
+        }
+        
+        return null;
+    }, []);
+
+    // Handle input changes with real-time validation
+    const handleEmailChange = (text: string) => {
+        setEmail(text);
+        if (touched.email) {
+            const validation = validateEmail(text);
+            setErrors(prev => ({ ...prev, email: validation }));
+        }
+        // Clear general error when user starts typing
+        if (errors.general) {
+            setErrors(prev => ({ ...prev, general: null }));
+        }
+    };
+
+    const handlePasswordChange = (text: string) => {
+        setPassword(text);
+        if (touched.password) {
+            const validation = validatePassword(text);
+            setErrors(prev => ({ ...prev, password: validation }));
+        }
+        if (errors.general) {
+            setErrors(prev => ({ ...prev, general: null }));
+        }
+    };
+
+    // Handle field blur (validation)
+    const handleEmailBlur = () => {
+        setTouched(prev => ({ ...prev, email: true }));
+        const validation = validateEmail(email);
+        setErrors(prev => ({ ...prev, email: validation }));
+    };
+
+    const handlePasswordBlur = () => {
+        setTouched(prev => ({ ...prev, password: true }));
+        const validation = validatePassword(password);
+        setErrors(prev => ({ ...prev, password: validation }));
+    };
 
     const getLoginErrorMessage = (error: unknown): string => {
         if (!(error instanceof Error)) {
@@ -50,6 +150,10 @@ export default function LoginNewScreen() {
             return 'Too many attempts. Please wait a bit and try again.';
         }
 
+        if (error.message.includes('Invalid credentials')) {
+            return 'Invalid email/username or password. Please try again.';
+        }
+
         return error.message || 'Login failed. Please try again.';
     };
 
@@ -58,14 +162,25 @@ export default function LoginNewScreen() {
             return;
         }
         Keyboard.dismiss();
-        const emailOrUsername = email.trim();
 
-        if (!emailOrUsername) {
-            setErrorMessage('Email or username is required');
-            return;
-        }
-        if (!password) {
-            setErrorMessage('Password is required');
+        // Mark all fields as touched
+        setTouched({ email: true, password: true });
+
+        // Validate all fields
+        const emailValidation = validateEmail(email);
+        const passwordValidation = validatePassword(password);
+
+        setErrors({
+            email: emailValidation,
+            password: passwordValidation,
+            general: null,
+        });
+
+        // Check if any validation failed
+        if (emailValidation?.isError || passwordValidation?.isError) {
+            if (Platform.OS !== 'web') {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
             return;
         }
 
@@ -74,7 +189,7 @@ export default function LoginNewScreen() {
         }
 
         setIsLoading(true);
-        setErrorMessage(null);
+        setErrors(prev => ({ ...prev, general: null }));
 
         try {
             const data = await api.post<{
@@ -82,7 +197,7 @@ export default function LoginNewScreen() {
                 user: unknown;
                 error?: string;
             }>('/login', {
-                emailOrUsername,
+                emailOrUsername: email.trim(),
                 password,
             });
 
@@ -95,13 +210,33 @@ export default function LoginNewScreen() {
             // Navigate to main app on success
             router.replace('/(tabs)');
         } catch (error: unknown) {
-            setErrorMessage(getLoginErrorMessage(error));
+            setErrors(prev => ({ ...prev, general: getLoginErrorMessage(error) }));
+            if (Platform.OS !== 'web') {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
         } finally {
             setIsLoading(false);
         }
     };
 
+    // Get input border color based on validation state
+    const getInputBorderColor = (error: ValidationError | null, isTouched: boolean) => {
+        if (!isTouched || !error) return COLORS.textSecondary + '50';
+        return error.isError ? COLORS.error : COLORS.textSecondary + '50';
+    };
 
+    // Helper to render helper text
+    const renderHelperText = (error: ValidationError | null, isTouched: boolean) => {
+        if (!isTouched || !error || !error.isError) {
+            return null;
+        }
+        
+        return (
+            <Text style={styles.helperTextError}>
+                {error.message}
+            </Text>
+        );
+    };
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -129,24 +264,29 @@ export default function LoginNewScreen() {
                             <Text style={styles.subtitle}>Log in to continue</Text>
                         </View>
 
-                        {/* Error Message */}
-                        {errorMessage && (
+                        {/* General Error Message */}
+                        {errors.general && (
                             <View style={styles.errorContainer}>
-                                <Text style={styles.errorText}>{errorMessage}</Text>
+                                <AlertCircle size={18} color={COLORS.error} style={styles.errorIcon} />
+                                <Text style={styles.errorText}>{errors.general}</Text>
                             </View>
                         )}
 
                         {/* Email Input */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.label}>Username/Email</Text>
-                            <View style={styles.inputWrapper}>
+                            <View style={[
+                                styles.inputWrapper,
+                                { borderColor: getInputBorderColor(errors.email, touched.email) }
+                            ]}>
                                 <Mail size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
                                     style={styles.input}
                                     placeholder="Enter your username or email"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={email}
-                                    onChangeText={setEmail}
+                                    onChangeText={handleEmailChange}
+                                    onBlur={handleEmailBlur}
                                     autoCapitalize="none"
                                     autoCorrect={false}
                                     keyboardType="default"
@@ -154,12 +294,16 @@ export default function LoginNewScreen() {
                                     onSubmitEditing={() => passwordInputRef.current?.focus()}
                                 />
                             </View>
+                            {renderHelperText(errors.email, touched.email)}
                         </View>
 
                         {/* Password Input */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.label}>Password</Text>
-                            <View style={styles.inputWrapper}>
+                            <View style={[
+                                styles.inputWrapper,
+                                { borderColor: getInputBorderColor(errors.password, touched.password) }
+                            ]}>
                                 <Lock size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
                                     ref={passwordInputRef}
@@ -167,7 +311,8 @@ export default function LoginNewScreen() {
                                     placeholder="Enter your password"
                                     placeholderTextColor={COLORS.textSecondary}
                                     value={password}
-                                    onChangeText={setPassword}
+                                    onChangeText={handlePasswordChange}
+                                    onBlur={handlePasswordBlur}
                                     secureTextEntry={!showPassword}
                                     returnKeyType="done"
                                     onSubmitEditing={handleLogin}
@@ -183,6 +328,7 @@ export default function LoginNewScreen() {
                                     )}
                                 </TouchableOpacity>
                             </View>
+                            {renderHelperText(errors.password, touched.password)}
                         </View>
 
                         {/* Forgot Password Link */}
@@ -194,6 +340,19 @@ export default function LoginNewScreen() {
                             </Link>
                         </View>
 
+                        {/* Beta Warning Checkbox */}
+                        <TouchableOpacity
+                            style={styles.betaContainer}
+                            onPress={() => setBetaAcknowledged(!betaAcknowledged)}
+                            activeOpacity={0.7}
+                        >
+                            <View style={[styles.betaCheckbox, betaAcknowledged && styles.betaCheckboxChecked]}>
+                                {betaAcknowledged && <Text style={styles.betaCheckmark}>✓</Text>}
+                            </View>
+                            <Text style={styles.betaText}>
+                                <Text style={styles.betaWarning}>⚠️ Beta Notice:</Text> Please don't add huge funds, this is a beta test version
+                            </Text>
+                        </TouchableOpacity>
 
                         {/* Login Button */}
                         <NeonButton
@@ -201,12 +360,10 @@ export default function LoginNewScreen() {
                             icon={<LogIn size={20} color={COLORS.textPrimary} />}
                             onPress={handleLogin}
                             loading={isLoading}
-                            disabled={isLoading}
+                            disabled={isLoading || !betaAcknowledged}
                             fullWidth
-                            style={styles.loginButton}
+                            style={[styles.loginButton, !betaAcknowledged && { opacity: 0.5 }]}
                         />
-
-
 
                         {/* Sign Up Link */}
                         <View style={styles.signupContainer}>
@@ -270,6 +427,8 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
     },
     errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
         backgroundColor: COLORS.error + '20',
         borderWidth: 1,
         borderColor: COLORS.error,
@@ -277,12 +436,16 @@ const styles = StyleSheet.create({
         padding: 12,
         marginBottom: 16,
     },
+    errorIcon: {
+        marginRight: 8,
+    },
     errorText: {
+        flex: 1,
         color: COLORS.error,
         fontSize: 14,
     },
     inputContainer: {
-        marginBottom: 16,
+        marginBottom: 12,
     },
     label: {
         color: COLORS.textPrimary,
@@ -294,7 +457,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: COLORS.textSecondary + '50',
         borderRadius: 12,
         backgroundColor: COLORS.cardBackground,
         paddingHorizontal: 16,
@@ -311,13 +473,18 @@ const styles = StyleSheet.create({
     eyeIcon: {
         padding: 8,
     },
+    helperTextError: {
+        fontSize: 12,
+        marginTop: 4,
+        marginLeft: 4,
+        color: COLORS.error,
+    },
     forgotPasswordContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 24,
     },
-
     forgotPasswordText: {
         color: COLORS.usdc,
         fontSize: 14,
@@ -349,5 +516,46 @@ const styles = StyleSheet.create({
         height: 100,
         opacity: 0.1,
     },
+    betaContainer: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: COLORS.warning + '15',
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: COLORS.warning + '40',
+    },
+    betaCheckbox: {
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: COLORS.warning,
+        backgroundColor: 'transparent',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        marginTop: 2,
+    },
+    betaCheckboxChecked: {
+        borderColor: COLORS.warning,
+        backgroundColor: COLORS.warning + '30',
+    },
+    betaCheckmark: {
+        color: COLORS.warning,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    betaText: {
+        flex: 1,
+        ...FONTS.phantomRegular,
+        fontSize: 13,
+        color: COLORS.textSecondary,
+        lineHeight: 18,
+    },
+    betaWarning: {
+        color: COLORS.warning,
+        fontWeight: '600',
+    },
 });
-
