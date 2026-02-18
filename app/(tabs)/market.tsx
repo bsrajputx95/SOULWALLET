@@ -11,16 +11,16 @@ import {
   TouchableOpacity,
   StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useNavigation } from 'expo-router';
-import { ShoppingCart, ChevronDown, RefreshCw, Maximize2, X } from 'lucide-react-native';
+import { ShoppingCart, ChevronDown, RefreshCw, Monitor, X } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as ScreenOrientation from 'expo-screen-orientation';
 
 import { COLORS, FONTS, SPACING, BORDER_RADIUS } from '@/constants';
 import { TokenCard, ErrorBoundary, MarketSkeleton, QuickBuyModal } from '@/components';
 import { ExternalPlatformWebView } from '../../components/market/ExternalPlatformWebView';
 import { fetchMarketTokens, MarketToken } from '@/services/market';
+import { useTabBar } from '@/contexts/TabBarContext';
 
 type MarketPlatform = 'soulmarket' | 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
 
@@ -37,6 +37,8 @@ export default function MarketScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { setTabBarVisible } = useTabBar();
 
   // Real market data from API
   const [tokens, setTokens] = useState<MarketToken[]>([]);
@@ -53,7 +55,7 @@ export default function MarketScreen() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showQuickBuyModal, setShowQuickBuyModal] = useState(false);
   const [webViewKey, setWebViewKey] = useState(0); // For forcing WebView reload
-  const [isFullScreen, setIsFullScreen] = useState(false); // Full-screen mode state
+  const [isDesktopView, setIsDesktopView] = useState(false); // Desktop view mode state
 
   // Loading state for skeleton - only show on initial cold start
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -230,15 +232,20 @@ export default function MarketScreen() {
     return () => clearInterval(interval);
   }, [tokens.length, selectedPlatform]);
 
-  // Update tab bar visibility when fullscreen state changes
+  // Update tab bar visibility when desktop view state changes
   useEffect(() => {
-    navigation.setOptions({
-      tabBarStyle: isFullScreen ? { display: 'none' } : {
-        backgroundColor: COLORS.cardBackground,
-        borderTopColor: COLORS.solana + '30',
-      },
-    });
-  }, [isFullScreen, navigation]);
+    setTabBarVisible(!isDesktopView);
+    // Also update status bar
+    if (isDesktopView) {
+      StatusBar.setHidden(true);
+    } else {
+      StatusBar.setHidden(false);
+    }
+    return () => {
+      setTabBarVisible(true);
+      StatusBar.setHidden(false);
+    };
+  }, [isDesktopView, setTabBarVisible]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -266,22 +273,10 @@ export default function MarketScreen() {
     setWebViewKey(prev => prev + 1);
   };
 
-  // Enter full-screen mode
-  const enterFullScreen = async () => {
-    setIsFullScreen(true);
-    // Lock to landscape orientation
-    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-    // Hide status bar
-    StatusBar.setHidden(true);
-  };
-
-  // Exit full-screen mode
-  const exitFullScreen = async () => {
-    setIsFullScreen(false);
-    // Reset to portrait orientation
-    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    // Show status bar
-    StatusBar.setHidden(false);
+  // Toggle desktop view mode
+  const toggleDesktopView = () => {
+    setIsDesktopView(prev => !prev);
+    setWebViewKey(prev => prev + 1); // Force WebView reload with new user agent
   };
 
   const renderSoulMarketContent = () => {
@@ -356,6 +351,7 @@ export default function MarketScreen() {
       <ExternalPlatformWebView
         key={webViewKey}
         platform={selectedPlatform as 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca'}
+        desktopMode={isDesktopView}
       />
     );
   };
@@ -376,9 +372,12 @@ export default function MarketScreen() {
 
       {isWebViewPlatform && (
         <View style={styles.headerButtons}>
-          {/* Full-screen button */}
-          <TouchableOpacity style={styles.iconButton} onPress={enterFullScreen}>
-            <Maximize2 size={18} color={COLORS.textSecondary} />
+          {/* Desktop View Toggle Button */}
+          <TouchableOpacity 
+            style={[styles.iconButton, isDesktopView && styles.iconButtonActive]} 
+            onPress={toggleDesktopView}
+          >
+            <Monitor size={18} color={isDesktopView ? COLORS.solana : COLORS.textSecondary} />
           </TouchableOpacity>
           {/* Reload button */}
           <TouchableOpacity style={styles.iconButton} onPress={handleWebViewRefresh}>
@@ -425,30 +424,35 @@ export default function MarketScreen() {
     </View>
   );
 
-  // Full-screen mode UI
-  if (isFullScreen) {
+  // Desktop View Mode UI - Full screen WebView with exit button
+  if (isDesktopView && isWebViewPlatform) {
     return (
-      <View style={styles.fullScreenContainer}>
-        {/* Exit button at top-right corner */}
-        <TouchableOpacity style={styles.exitFullScreenButton} onPress={exitFullScreen}>
+      <View style={[styles.desktopViewContainer, { paddingTop: insets.top }]}>
+        {/* Exit Desktop View button at top-right corner - below notch */}
+        <TouchableOpacity 
+          style={[styles.exitDesktopViewButton, { top: insets.top + 10 }]} 
+          onPress={toggleDesktopView}
+        >
           <X size={24} color={COLORS.textPrimary} />
         </TouchableOpacity>
 
-        {/* Full-screen WebView with zoom enabled */}
-        <ExternalPlatformWebView
-          key={webViewKey}
-          platform={selectedPlatform as 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca'}
-          fullScreen={true}
-        />
+        {/* Desktop WebView fills entire screen */}
+        <View style={styles.desktopWebViewWrapper}>
+          <ExternalPlatformWebView
+            key={webViewKey}
+            platform={selectedPlatform as 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca'}
+            desktopMode={true}
+          />
+        </View>
 
-        {/* Quick Buy button in full-screen mode */}
+        {/* Quick Buy button in desktop view mode - above bottom safe area */}
         <Pressable
-          style={styles.fullScreenQuickBuyButton}
+          style={[styles.desktopViewQuickBuyButton, { bottom: Math.max(insets.bottom, 20) + 20 }]}
           onPress={() => setShowQuickBuyModal(true)}
         >
           <LinearGradient
             colors={[COLORS.solana, COLORS.solana + '80']}
-            style={styles.fullScreenQuickBuyGradient}
+            style={styles.desktopViewQuickBuyGradient}
           >
             <ShoppingCart size={24} color={COLORS.textPrimary} />
           </LinearGradient>
@@ -564,6 +568,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  iconButtonActive: {
+    backgroundColor: COLORS.solana + '20',
+  },
   dropdownOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -599,14 +606,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  // Full-screen mode styles
-  fullScreenContainer: {
+  // Desktop View mode styles
+  desktopViewContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  exitFullScreenButton: {
+  desktopWebViewWrapper: {
+    flex: 1,
+  },
+  exitDesktopViewButton: {
     position: 'absolute',
-    top: 10,
     right: 10,
     zIndex: 100,
     width: 40,
@@ -616,9 +625,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  fullScreenQuickBuyButton: {
+  desktopViewQuickBuyButton: {
     position: 'absolute',
-    bottom: 20,
     right: 20,
     zIndex: 100,
     borderRadius: 30,
@@ -629,7 +637,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  fullScreenQuickBuyGradient: {
+  desktopViewQuickBuyGradient: {
     width: 56,
     height: 56,
     borderRadius: 28,

@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../constants/colors';
 import { BORDER_RADIUS, FONTS, SPACING } from '../constants/theme';
 import { NotificationTabBadge } from './NotificationBadge';
+import { useTabBar } from '../contexts/TabBarContext';
 
 type TabBarProps = {
   state: any;
@@ -14,6 +15,12 @@ type TabBarProps = {
 
 export const TabBar: React.FC<TabBarProps> = (props) => {
   const { state, descriptors, navigation } = props;
+  const { isTabBarVisible } = useTabBar();
+
+  // Hide tab bar when not visible
+  if (!isTabBarVisible) {
+    return null;
+  }
 
   // Static dummy data - pure UI mode (no hooks)
   const badgeCount = 0;

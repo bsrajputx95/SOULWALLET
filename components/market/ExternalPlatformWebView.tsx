@@ -3,7 +3,6 @@
  * 
  * Displays external DEX platforms in optimized WebView with:
  * - Aggressive caching for instant loads
- * - Full zoom control (zoom out to 25%, zoom in to 300%)
  * - Desktop mode rendering for more content visibility
  * - Preloading and connection reuse
  * - Lazy loading of heavy elements
@@ -17,14 +16,17 @@ import {
   Text,
   TouchableOpacity,
   ActivityIndicator,
-  Platform,
+  Dimensions,
   AppState,
 } from 'react-native';
 import { WebView, WebViewNavigation } from 'react-native-webview';
-import { AlertTriangle, Globe, RefreshCw, ZoomIn, ZoomOut, Wifi, WifiOff } from 'lucide-react-native';
+import { AlertTriangle, Globe, RefreshCw, WifiOff } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
+
+// Get screen dimensions
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -32,7 +34,7 @@ const isExpoGo = Constants.appOwnership === 'expo';
 const PLATFORM_URLS: Record<string, { main: string; lite?: string }> = {
   dexscreener: { 
     main: 'https://dexscreener.com/solana',
-    lite: 'https://dexscreener.com/solana' // DexScreener is already optimized
+    lite: 'https://dexscreener.com/solana'
   },
   raydium: { 
     main: 'https://raydium.io/swap/',
@@ -61,7 +63,7 @@ const PLATFORM_NAMES: Record<string, string> = {
 
 interface ExternalPlatformWebViewProps {
   platform: 'dexscreener' | 'raydium' | 'bonk' | 'pumpfun' | 'orca';
-  fullScreen?: boolean;
+  desktopMode?: boolean;
 }
 
 // Desktop Chrome user agent for desktop mode rendering
@@ -71,37 +73,18 @@ const MOBILE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/5
 // Lite mode user agent (simpler, faster)
 const LITE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36 Mobile-Optimized/1.0';
 
-// CSS to inject for faster loading (hides heavy elements initially)
-const FAST_LOAD_CSS = `
-  <style>
-    /* Hide heavy elements during initial load */
-    * { animation: none !important; transition: none !important; }
-    
-    /* Lazy load images */
-    img { loading: lazy !important; }
-    
-    /* Reduce repaints */
-    * { will-change: auto !important; }
-    
-    /* Hide non-essential elements initially */
-    .ad, .advertisement, .banner, .popup, .modal:not(:target) {
-      display: none !important;
-    }
-  </style>
-`;
-
-export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({ platform, fullScreen = false }) => {
+export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({ platform, desktopMode = false }) => {
   const [loading, setLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [zoomScale, setZoomScale] = useState(1);
-  const [useDesktopMode, setUseDesktopMode] = useState(fullScreen);
+  const [zoomScale, setZoomScale] = useState(desktopMode ? 0.5 : 1);
+  const [useDesktopMode, setUseDesktopMode] = useState(desktopMode);
   const [useLiteMode, setUseLiteMode] = useState(false);
   const [loadTimeout, setLoadTimeout] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const webViewRef = useRef<WebView>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const platformUrls = PLATFORM_URLS[platform] || { main: '' };
   const platformUrl = useLiteMode && platformUrls.lite ? platformUrls.lite : platformUrls.main;
@@ -117,20 +100,19 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
 
   // Reset states when platform changes
   useEffect(() => {
-    setZoomScale(1);
-    setUseDesktopMode(fullScreen);
+    setZoomScale(desktopMode ? 0.5 : 1);
+    setUseDesktopMode(desktopMode);
     setUseLiteMode(false);
     setLoadTimeout(false);
     setIsOffline(false);
     setLoadingProgress(0);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-  }, [platform, fullScreen]);
+  }, [platform, desktopMode]);
 
   // Monitor network state
   useEffect(() => {
     const unsubscribe = AppState.addEventListener('change', () => {
-      // Check connectivity when app comes to foreground
       if (AppState.currentState === 'active') {
         // WebView will handle reconnection
       }
@@ -143,7 +125,6 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     setLoadTimeout(false);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     
-    // Set timeout for 15 seconds
     timeoutRef.current = setTimeout(() => {
       if (loading) {
         setLoadTimeout(true);
@@ -158,7 +139,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     
     progressIntervalRef.current = setInterval(() => {
       setLoadingProgress(prev => {
-        if (prev >= 90) return prev; // Hold at 90% until actually loaded
+        if (prev >= 90) return prev;
         return prev + Math.random() * 15;
       });
     }, 300);
@@ -173,51 +154,101 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     setLoadingProgress(100);
   }, []);
 
-  // Inject JavaScript to control zoom
-  const getZoomScript = (scale: number) => `
+  // Calculate scale to fit desktop site to screen width
+  const getDesktopScale = () => {
+    const desktopDesignWidth = 1280;
+    return Math.max(0.25, Math.min(1, SCREEN_WIDTH / desktopDesignWidth));
+  };
+
+  // Inject JavaScript to control zoom and viewport for desktop mode
+  const getViewportScript = (isDesktop: boolean, _scale: number) => {
+    const desktopScale = getDesktopScale();
+    return `
     (function() {
-      const viewport = document.querySelector('meta[name=viewport]');
-      if (viewport) {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=${scale}, minimum-scale=0.25, maximum-scale=3.0, user-scalable=yes');
-      } else {
+      function applyDesktopMode() {
+        // Force desktop viewport
+        const existingViewport = document.querySelector('meta[name=viewport]');
+        if (existingViewport) {
+          existingViewport.remove();
+        }
+        
         const meta = document.createElement('meta');
         meta.name = 'viewport';
-        meta.content = 'width=device-width, initial-scale=${scale}, minimum-scale=0.25, maximum-scale=3.0, user-scalable=yes';
+        
+        if (${isDesktop}) {
+          // Critical: Use device-width but set initial-scale to zoom out
+          // This makes the desktop site fit the screen width
+          meta.content = 'width=device-width, initial-scale=' + ${desktopScale} + ', minimum-scale=0.1, maximum-scale=5.0, user-scalable=yes';
+          
+          // Apply comprehensive desktop scaling CSS
+          const desktopStyle = document.createElement('style');
+          desktopStyle.id = 'desktop-mode-style';
+          desktopStyle.textContent = 
+            'html { width: 100% !important; min-width: 100% !important; zoom: ' + ${desktopScale} + ' !important; transform-origin: top left !important; }' +
+            'body { width: 100% !important; min-width: 100% !important; zoom: ' + ${desktopScale} + ' !important; transform-origin: top left !important; margin: 0 !important; padding: 0 !important; }' +
+            '#root, #app, #__next, .app, .container { width: 100% !important; max-width: none !important; }' +
+            '* { box-sizing: border-box !important; }';
+          
+          const existingStyle = document.getElementById('desktop-mode-style');
+          if (existingStyle) existingStyle.remove();
+          
+          document.head.appendChild(desktopStyle);
+          
+          // Also try to scale the root element if it exists
+          const rootEl = document.getElementById('root') || document.getElementById('app') || document.body;
+          if (rootEl) {
+            rootEl.style.zoom = '${desktopScale}';
+            rootEl.style.transformOrigin = 'top left';
+          }
+        } else {
+          meta.content = 'width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=3.0, user-scalable=yes';
+          
+          const existingStyle = document.getElementById('desktop-mode-style');
+          if (existingStyle) existingStyle.remove();
+        }
+        
         document.head.appendChild(meta);
       }
-      document.body.style.zoom = '${scale}';
-      document.documentElement.style.zoom = '${scale}';
+      
+      // Apply immediately
+      applyDesktopMode();
+      
+      // Re-apply after a short delay to override any site scripts
+      setTimeout(applyDesktopMode, 100);
+      setTimeout(applyDesktopMode, 500);
+      setTimeout(applyDesktopMode, 1000);
+      
+      // Watch for viewport changes and re-apply
+      const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          if (mutation.type === 'attributes' && mutation.attributeName === 'content') {
+            const vp = document.querySelector('meta[name=viewport]');
+            if (vp && ${isDesktop} && !vp.content.includes('initial-scale=' + ${desktopScale})) {
+              applyDesktopMode();
+            }
+          }
+        });
+      });
+      
+      const viewportMeta = document.querySelector('meta[name=viewport]');
+      if (viewportMeta) {
+        observer.observe(viewportMeta, { attributes: true });
+      }
+      
+      true;
     })();
     true;
   `;
+  };
 
-  // Apply zoom when scale changes
+  // Apply viewport settings when desktop mode changes or page loads
   useEffect(() => {
     if (webViewRef.current && !loading && !error) {
-      webViewRef.current.injectJavaScript(getZoomScript(zoomScale));
+      webViewRef.current.injectJavaScript(getViewportScript(useDesktopMode, zoomScale));
     }
-  }, [zoomScale, loading, error]);
+  }, [zoomScale, loading, error, useDesktopMode]);
 
-  const handleZoomIn = () => {
-    setZoomScale(prev => Math.min(prev + 0.25, 3.0));
-  };
-
-  const handleZoomOut = () => {
-    setZoomScale(prev => Math.max(prev - 0.25, 0.25));
-  };
-
-  const handleResetZoom = () => {
-    setZoomScale(1);
-  };
-
-  const toggleDesktopMode = () => {
-    setUseDesktopMode(prev => !prev);
-    setLoading(true);
-    setError(null);
-    startProgressSimulation();
-    startLoadTimeout();
-  };
-
+  // Toggle lite mode for faster loading
   const toggleLiteMode = () => {
     setUseLiteMode(prev => !prev);
     setLoading(true);
@@ -322,40 +353,6 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         </View>
       )}
 
-      {/* Zoom Controls - Only in fullscreen */}
-      {fullScreen && !loading && (
-        <View style={styles.zoomControls}>
-          <TouchableOpacity style={styles.zoomButton} onPress={handleZoomOut}>
-            <ZoomOut size={20} color={COLORS.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.zoomTextButton} onPress={handleResetZoom}>
-            <Text style={styles.zoomText}>{Math.round(zoomScale * 100)}%</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.zoomButton} onPress={handleZoomIn}>
-            <ZoomIn size={20} color={COLORS.textPrimary} />
-          </TouchableOpacity>
-          <View style={styles.zoomDivider} />
-          <TouchableOpacity 
-            style={[styles.modeButton, useDesktopMode && styles.modeButtonActive]} 
-            onPress={toggleDesktopMode}
-          >
-            <Text style={[styles.modeText, useDesktopMode && styles.modeTextActive]}>
-              {useDesktopMode ? 'Desktop' : 'Mobile'}
-            </Text>
-          </TouchableOpacity>
-          {platformUrls.lite && (
-            <TouchableOpacity 
-              style={[styles.modeButton, useLiteMode && styles.modeButtonActive]} 
-              onPress={toggleLiteMode}
-            >
-              <Text style={[styles.modeText, useLiteMode && styles.modeTextActive]}>
-                {useLiteMode ? 'Lite ✓' : 'Lite'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
       {/* Connection status indicator */}
       {isOffline && (
         <View style={styles.offlineBanner}>
@@ -379,7 +376,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             'Cache-Control': 'max-age=3600',
           }
         }}
-        style={[styles.webView, fullScreen && styles.webViewFullScreen]}
+        style={[styles.webView, desktopMode ? styles.webViewDesktopMode : null]}
         onLoadStart={() => {
           setLoading(true);
           startProgressSimulation();
@@ -411,71 +408,26 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
             setError(`Server error (${e.nativeEvent.statusCode}). Please try again later.`);
           }
         }}
-        // Core functionality
         javaScriptEnabled={true}
         domStorageEnabled={true}
-        // Caching - MOST AGGRESSIVE FOR SPEED
         cacheEnabled={true}
         cacheMode="LOAD_CACHE_ELSE_NETWORK"
-        // Use appropriate user agent
         userAgent={getUserAgent()}
-        // Performance tweaks
         bounces={false}
         overScrollMode="never"
-        // Security
         setSupportMultipleWindows={false}
-        // Third party cookies (DEXs need this)
         thirdPartyCookiesEnabled={true}
-        // Mixed content for older sites
         mixedContentMode="compatibility"
-        // ZOOM SETTINGS - Enable full zoom control
         scalesPageToFit={true}
         setBuiltInZoomControls={true}
         setDisplayZoomControls={false}
-        // Hardware acceleration - CRITICAL FOR SPEED
-        androidHardwareAccelerationDisabled={false}
-        // Preload and optimization
         startInLoadingState={true}
-        // Text zoom for accessibility
         textZoom={useLiteMode ? 90 : 100}
-        // Connection pooling and reuse
         sharedCookiesEnabled={true}
-        // Media playback
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
-        // Loading timeout
         androidLayerType="hardware"
-        // Inject JavaScript for performance
-        injectedJavaScript={`
-          (function() {
-            // Optimize viewport for zooming
-            let viewport = document.querySelector('meta[name=viewport]');
-            if (!viewport) {
-              viewport = document.createElement('meta');
-              viewport.name = 'viewport';
-              document.head.appendChild(viewport);
-            }
-            viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=3.0, user-scalable=yes');
-            
-            // Disable heavy animations during load
-            const style = document.createElement('style');
-            style.textContent = '* { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }';
-            document.head.appendChild(style);
-            
-            // Lazy load images
-            const images = document.querySelectorAll('img');
-            images.forEach(img => {
-              img.setAttribute('loading', 'lazy');
-            });
-            
-            // Remove animation blocking after 2 seconds
-            setTimeout(() => {
-              style.remove();
-            }, 2000);
-          })();
-          true;
-        `}
-        // Handle navigation
+        injectedJavaScript={getViewportScript(useDesktopMode, zoomScale)}
         onNavigationStateChange={(navState: WebViewNavigation) => {
           if (navState.loading) {
             setLoading(true);
@@ -483,11 +435,18 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
           } else {
             setLoading(false);
             stopProgressSimulation();
+            // Re-apply desktop mode after page fully loads
+            if (useDesktopMode && webViewRef.current) {
+              setTimeout(() => {
+                webViewRef.current?.injectJavaScript(getViewportScript(useDesktopMode, zoomScale));
+              }, 500);
+              setTimeout(() => {
+                webViewRef.current?.injectJavaScript(getViewportScript(useDesktopMode, zoomScale));
+              }, 1500);
+            }
           }
         }}
-        // Render faster by not waiting for all resources
         originWhitelist={['*']}
-        // Allow file access for caching
         allowFileAccess={true}
         allowFileAccessFromFileURLs={true}
         allowUniversalAccessFromFileURLs={true}
@@ -642,71 +601,6 @@ const styles = StyleSheet.create({
     color: COLORS.solana,
     textDecorationLine: 'underline',
   },
-  zoomControls: {
-    position: 'absolute',
-    top: 60,
-    right: 10,
-    zIndex: 100,
-    flexDirection: 'row',
-    backgroundColor: COLORS.cardBackground + 'F0',
-    borderRadius: BORDER_RADIUS.medium,
-    padding: 4,
-    shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  zoomButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 2,
-  },
-  zoomTextButton: {
-    width: 60,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 2,
-  },
-  zoomText: {
-    ...FONTS.sfProMedium,
-    fontSize: 12,
-    color: COLORS.textPrimary,
-  },
-  zoomDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: COLORS.border,
-    marginHorizontal: 4,
-    alignSelf: 'center',
-  },
-  modeButton: {
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    marginHorizontal: 2,
-  },
-  modeButtonActive: {
-    backgroundColor: COLORS.solana + '30',
-  },
-  modeText: {
-    ...FONTS.sfProMedium,
-    fontSize: 11,
-    color: COLORS.textSecondary,
-  },
-  modeTextActive: {
-    color: COLORS.solana,
-  },
   offlineBanner: {
     position: 'absolute',
     top: 0,
@@ -727,9 +621,13 @@ const styles = StyleSheet.create({
   },
   webView: {
     flex: 1,
+    width: '100%',
+    height: '100%',
   },
-  webViewFullScreen: {
+  webViewDesktopMode: {
     flex: 1,
+    width: '100%',
+    height: '100%',
     backgroundColor: COLORS.background,
   },
 });

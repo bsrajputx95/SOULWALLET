@@ -3,21 +3,23 @@ import { Tabs } from 'expo-router';
 import { Home, BarChart3, Users, Wallet } from 'lucide-react-native';
 import { COLORS } from '@/constants';
 import { TabBar } from '@/components';
+import { TabBarProvider } from '@/contexts/TabBarContext';
 
 export default function TabLayout() {
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: COLORS.solana,
-        tabBarInactiveTintColor: COLORS.textSecondary,
-        tabBarStyle: {
-          backgroundColor: COLORS.cardBackground,
-          borderTopColor: COLORS.solana + '30',
-        },
-      }}
-      tabBar={props => <TabBar {...props} />}
-    >
+    <TabBarProvider>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: COLORS.solana,
+          tabBarInactiveTintColor: COLORS.textSecondary,
+          tabBarStyle: {
+            backgroundColor: COLORS.cardBackground,
+            borderTopColor: COLORS.solana + '30',
+          },
+        }}
+        tabBar={props => <TabBar {...props} />}
+      >
       <Tabs.Screen
         name="index"
         options={{
@@ -51,6 +53,7 @@ export default function TabLayout() {
           tabBarAccessibilityLabel: 'Portfolio tab, manage your investments and copy trading',
         }}
       />
-    </Tabs>
+      </Tabs>
+    </TabBarProvider>
   );
 }
