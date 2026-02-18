@@ -251,8 +251,16 @@ export default function SignupNewScreen() {
         }
         Keyboard.dismiss();
 
-        // Mark all fields as touched
+        // Mark all fields as touched (including TOS visual feedback)
         setTouched({ username: true, email: true, password: true, confirmPassword: true });
+
+        // Check TOS first for better UX
+        if (!tosAccepted) {
+            if (Platform.OS !== 'web') {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
+            return;
+        }
 
         // Validate all fields
         const usernameValidation = validateUsername(username);
@@ -276,11 +284,6 @@ export default function SignupNewScreen() {
             if (Platform.OS !== 'web') {
                 void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             }
-            return;
-        }
-
-        if (!tosAccepted) {
-            setErrors(prev => ({ ...prev, general: 'Please accept Terms of Service to continue' }));
             return;
         }
 
@@ -538,6 +541,16 @@ export default function SignupNewScreen() {
                             </Text>
                         </TouchableOpacity>
 
+                        {/* TOS Error Message */}
+                        {!tosAccepted && touched.username && (
+                            <View style={styles.tosErrorContainer}>
+                                <AlertCircle size={16} color={COLORS.warning} />
+                                <Text style={styles.tosErrorText}>
+                                    Please accept the Terms of Service to continue
+                                </Text>
+                            </View>
+                        )}
+
                         {/* Signup Button */}
                         <NeonButton
                             title="Create Account"
@@ -546,7 +559,7 @@ export default function SignupNewScreen() {
                             loading={isLoading}
                             disabled={!tosAccepted || isLoading}
                             fullWidth
-                            style={[styles.signupButton, !tosAccepted && { opacity: 0.5 }]}
+                            style={styles.signupButton}
                         />
 
                         {/* Login Link */}
@@ -739,5 +752,16 @@ const styles = StyleSheet.create({
         right: 0,
         height: 100,
         opacity: 0.1,
+    },
+    tosErrorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 12,
+        gap: 6,
+    },
+    tosErrorText: {
+        color: COLORS.warning,
+        fontSize: 13,
     },
 });

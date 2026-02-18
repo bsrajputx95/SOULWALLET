@@ -19,6 +19,7 @@ interface NeonButtonProps extends TouchableOpacityProps {
   icon?: React.ReactNode;
   loading?: boolean;
   fullWidth?: boolean;
+  disabled?: boolean;
 }
 
 export const NeonButton: React.FC<NeonButtonProps> = ({
@@ -28,9 +29,11 @@ export const NeonButton: React.FC<NeonButtonProps> = ({
   icon,
   loading = false,
   fullWidth = false,
+  disabled = false,
   style,
   ...props
 }) => {
+  const isDisabled = disabled || loading;
   const getGradientColors = () => {
     switch (variant) {
       case 'primary':
@@ -74,23 +77,25 @@ export const NeonButton: React.FC<NeonButtonProps> = ({
 
   return (
     <TouchableOpacity
-      activeOpacity={0.8}
-      disabled={loading}
+      activeOpacity={isDisabled ? 1 : 0.8}
+      disabled={isDisabled}
       style={[
         styles.button,
         fullWidth && styles.fullWidth,
+        isDisabled && styles.disabledButton,
         style,
       ]}
       {...props}
     >
       <LinearGradient
-        colors={getGradientColors()}
+        colors={isDisabled ? [COLORS.textSecondary + '40', COLORS.textSecondary + '40'] as const : getGradientColors()}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[
           styles.gradient,
           getButtonSize(),
           variant === 'outline' && styles.outline,
+          isDisabled && styles.disabled,
         ]}
       >
         {loading ? (
@@ -146,5 +151,11 @@ const styles = StyleSheet.create({
   },
   outlineText: {
     color: COLORS.solana,
+  },
+  disabled: {
+    opacity: 0.5,
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
 });

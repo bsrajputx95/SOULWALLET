@@ -55,7 +55,7 @@ class ApiClient {
     return await SecureStore.getItemAsync('token');
   }
 
-  async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  async request<T>(endpoint: string, options: RequestInit & { timeout?: number } = {}): Promise<T> {
     const token = await this.getAuthToken();
     const headers = new Headers(options.headers);
     headers.set('Content-Type', 'application/json');
@@ -63,30 +63,48 @@ class ApiClient {
       headers.set('Authorization', `Bearer ${token}`);
     }
 
-    const response = await fetch(`${API_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    // Default timeout: 15 seconds
+    const timeoutMs = options.timeout || 15000;
+    
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (!response.ok) {
-      const message = await getErrorMessage(response);
-      const err = new Error(message) as ApiError;
-      err.status = response.status;
-      // Handle 401 Unauthorized - clear session and redirect to login
-      if (response.status === 401) {
-        await clearSession();
+    try {
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        const message = await getErrorMessage(response);
+        const err = new Error(message) as ApiError;
+        err.status = response.status;
+        // Handle 401 Unauthorized - clear session and redirect to login
+        if (response.status === 401) {
+          await clearSession();
 
-        if (authLogout) {
-          await authLogout().catch(() => {
-            // Ignore logout callback errors, session is already cleared.
-          });
+          if (authLogout) {
+            await authLogout().catch(() => {
+              // Ignore logout callback errors, session is already cleared.
+            });
+          }
+
+          router.replace('/(auth)/login');
         }
-
-        router.replace('/(auth)/login');
+        throw err;
       }
-      throw err;
+      return parseSuccessResponse<T>(response);
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Request timed out. Please check your internet connection and try again.');
+      }
+      throw error;
     }
-    return parseSuccessResponse<T>(response);
   }
 
   get<T>(endpoint: string) {
