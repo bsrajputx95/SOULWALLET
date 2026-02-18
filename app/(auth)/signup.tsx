@@ -69,47 +69,47 @@ export default function SignupNewScreen() {
     // Real-time validation functions
     const validateUsername = useCallback((value: string): ValidationError | null => {
         const trimmed = value.trim();
-        
+
         if (!trimmed) {
             return { message: 'Username is required', isError: true };
         }
-        
+
         if (trimmed.length < 3) {
             return { message: 'Username must be at least 3 characters', isError: true };
         }
-        
+
         if (trimmed.length > 30) {
             return { message: 'Username must be at most 30 characters', isError: true };
         }
-        
+
         // Check for uppercase letters
         if (/[A-Z]/.test(trimmed)) {
             return { message: 'Use lowercase letters only (no capitals)', isError: true };
         }
-        
+
         // Check for spaces
         if (/\s/.test(trimmed)) {
             return { message: 'Username cannot contain spaces', isError: true };
         }
-        
+
         if (!USERNAME_REGEX.test(trimmed)) {
             return { message: 'Only letters, numbers, and underscores allowed', isError: true };
         }
-        
+
         return { message: 'Username looks good!', isError: false };
     }, []);
 
     const validateEmail = useCallback((value: string): ValidationError | null => {
         const trimmed = value.trim();
-        
+
         if (!trimmed) {
             return { message: 'Email is required', isError: true };
         }
-        
+
         if (!EMAIL_REGEX.test(trimmed)) {
             return { message: 'Please enter a valid email address', isError: true };
         }
-        
+
         return { message: 'Email looks good!', isError: false };
     }, []);
 
@@ -117,15 +117,15 @@ export default function SignupNewScreen() {
         if (!value) {
             return { message: 'Password is required', isError: true };
         }
-        
+
         if (value.length < 6) {
             return { message: 'Password must be at least 6 characters', isError: true };
         }
-        
+
         if (value.length > 100) {
             return { message: 'Password is too long', isError: true };
         }
-        
+
         return { message: 'Password is strong', isError: false };
     }, []);
 
@@ -133,11 +133,11 @@ export default function SignupNewScreen() {
         if (!value) {
             return { message: 'Please confirm your password', isError: true };
         }
-        
+
         if (value !== pass) {
             return { message: 'Passwords do not match', isError: true };
         }
-        
+
         return { message: 'Passwords match', isError: false };
     }, []);
 
@@ -269,9 +269,9 @@ export default function SignupNewScreen() {
         });
 
         // Check if any validation failed
-        if (usernameValidation?.isError || 
-            emailValidation?.isError || 
-            passwordValidation?.isError || 
+        if (usernameValidation?.isError ||
+            emailValidation?.isError ||
+            passwordValidation?.isError ||
             confirmPasswordValidation?.isError) {
             if (Platform.OS !== 'web') {
                 void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -323,7 +323,7 @@ export default function SignupNewScreen() {
     // Helper to render validation indicator
     const renderValidationIndicator = (error: ValidationError | null, isTouched: boolean) => {
         if (!isTouched || !error) return null;
-        
+
         return (
             <View style={styles.validationIndicator}>
                 {error.isError ? (
@@ -340,7 +340,7 @@ export default function SignupNewScreen() {
         if (!isTouched || !error) {
             return null;
         }
-        
+
         return (
             <Text style={[
                 styles.helperText,
@@ -396,7 +396,7 @@ export default function SignupNewScreen() {
                             <Text style={styles.label}>Username</Text>
                             <View style={[
                                 styles.inputWrapper,
-                                { borderColor: getInputBorderColor(errors.username, touched.username) }
+                                { borderColor: getInputBorderColor(errors.username, !!touched.username) }
                             ]}>
                                 <User size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
@@ -411,9 +411,9 @@ export default function SignupNewScreen() {
                                     returnKeyType="next"
                                     onSubmitEditing={() => emailInputRef.current?.focus()}
                                 />
-                                {renderValidationIndicator(errors.username, touched.username)}
+                                {renderValidationIndicator(errors.username, !!touched.username)}
                             </View>
-                            {renderHelperText(errors.username, touched.username)}
+                            {renderHelperText(errors.username, !!touched.username)}
                             {!touched.username && (
                                 <Text style={styles.inputHint}>
                                     3-30 characters, lowercase letters, numbers, underscores only
@@ -426,7 +426,7 @@ export default function SignupNewScreen() {
                             <Text style={styles.label}>Email</Text>
                             <View style={[
                                 styles.inputWrapper,
-                                { borderColor: getInputBorderColor(errors.email, touched.email) }
+                                { borderColor: getInputBorderColor(errors.email, !!touched.email) }
                             ]}>
                                 <Mail size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
@@ -443,9 +443,9 @@ export default function SignupNewScreen() {
                                     returnKeyType="next"
                                     onSubmitEditing={() => passwordInputRef.current?.focus()}
                                 />
-                                {renderValidationIndicator(errors.email, touched.email)}
+                                {renderValidationIndicator(errors.email, !!touched.email)}
                             </View>
-                            {renderHelperText(errors.email, touched.email)}
+                            {renderHelperText(errors.email, !!touched.email)}
                         </View>
 
                         {/* Password Input */}
@@ -453,7 +453,7 @@ export default function SignupNewScreen() {
                             <Text style={styles.label}>Password</Text>
                             <View style={[
                                 styles.inputWrapper,
-                                { borderColor: getInputBorderColor(errors.password, touched.password) }
+                                { borderColor: getInputBorderColor(errors.password, !!touched.password) }
                             ]}>
                                 <Lock size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
@@ -479,7 +479,7 @@ export default function SignupNewScreen() {
                                     )}
                                 </TouchableOpacity>
                             </View>
-                            {renderHelperText(errors.password, touched.password)}
+                            {renderHelperText(errors.password, !!touched.password)}
                             {!touched.password && (
                                 <Text style={styles.inputHint}>
                                     Minimum 6 characters
@@ -492,7 +492,7 @@ export default function SignupNewScreen() {
                             <Text style={styles.label}>Confirm Password</Text>
                             <View style={[
                                 styles.inputWrapper,
-                                { borderColor: getInputBorderColor(errors.confirmPassword, touched.confirmPassword) }
+                                { borderColor: getInputBorderColor(errors.confirmPassword, !!touched.confirmPassword) }
                             ]}>
                                 <Lock size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
@@ -518,7 +518,7 @@ export default function SignupNewScreen() {
                                     )}
                                 </TouchableOpacity>
                             </View>
-                            {renderHelperText(errors.confirmPassword, touched.confirmPassword)}
+                            {renderHelperText(errors.confirmPassword, !!touched.confirmPassword)}
                         </View>
 
                         {/* Terms of Service Checkbox */}

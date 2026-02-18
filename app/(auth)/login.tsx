@@ -58,11 +58,11 @@ export default function LoginNewScreen() {
     // Real-time validation functions
     const validateEmail = useCallback((value: string): ValidationError | null => {
         const trimmed = value.trim();
-        
+
         if (!trimmed) {
             return { message: 'Email or username is required', isError: true };
         }
-        
+
         // Check if it looks like an email
         if (trimmed.includes('@')) {
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -84,7 +84,7 @@ export default function LoginNewScreen() {
                 return { message: 'Only letters, numbers, and underscores allowed', isError: true };
             }
         }
-        
+
         return null; // No validation message for valid input
     }, []);
 
@@ -92,11 +92,11 @@ export default function LoginNewScreen() {
         if (!value) {
             return { message: 'Password is required', isError: true };
         }
-        
+
         if (value.length < 6) {
             return { message: 'Password must be at least 6 characters', isError: true };
         }
-        
+
         return null;
     }, []);
 
@@ -230,7 +230,7 @@ export default function LoginNewScreen() {
         if (!isTouched || !error || !error.isError) {
             return null;
         }
-        
+
         return (
             <Text style={styles.helperTextError}>
                 {error.message}
@@ -277,7 +277,7 @@ export default function LoginNewScreen() {
                             <Text style={styles.label}>Username/Email</Text>
                             <View style={[
                                 styles.inputWrapper,
-                                { borderColor: getInputBorderColor(errors.email, touched.email) }
+                                { borderColor: getInputBorderColor(errors.email, !!touched.email) }
                             ]}>
                                 <Mail size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
@@ -294,7 +294,7 @@ export default function LoginNewScreen() {
                                     onSubmitEditing={() => passwordInputRef.current?.focus()}
                                 />
                             </View>
-                            {renderHelperText(errors.email, touched.email)}
+                            {renderHelperText(errors.email, !!touched.email)}
                         </View>
 
                         {/* Password Input */}
@@ -302,7 +302,7 @@ export default function LoginNewScreen() {
                             <Text style={styles.label}>Password</Text>
                             <View style={[
                                 styles.inputWrapper,
-                                { borderColor: getInputBorderColor(errors.password, touched.password) }
+                                { borderColor: getInputBorderColor(errors.password, !!touched.password) }
                             ]}>
                                 <Lock size={20} color={COLORS.textSecondary} style={styles.icon} />
                                 <TextInput
@@ -328,7 +328,7 @@ export default function LoginNewScreen() {
                                     )}
                                 </TouchableOpacity>
                             </View>
-                            {renderHelperText(errors.password, touched.password)}
+                            {renderHelperText(errors.password, !!touched.password)}
                         </View>
 
                         {/* Forgot Password Link */}
