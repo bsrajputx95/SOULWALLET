@@ -1,12 +1,11 @@
 /**
- * External Platform WebView - Ultra-Fast & Optimized
+ * External Platform WebView - Progressive Loading
  * 
  * Displays external DEX platforms in optimized WebView with:
- * - Aggressive caching for instant loads
+ * - Progressive loading (WebView shown immediately, no full-screen spinner)
+ * - Thin animated progress bar at top while loading
+ * - Aggressive HTTP caching for faster repeat visits
  * - Desktop mode rendering for more content visibility
- * - Preloading and connection reuse
- * - Lazy loading of heavy elements
- * - Timeout handling for slow connections
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -15,8 +14,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
-  Dimensions,
+  Animated,
   AppState,
 } from 'react-native';
 import { WebView, WebViewNavigation } from 'react-native-webview';
@@ -25,32 +23,14 @@ import Constants from 'expo-constants';
 import { COLORS } from '../../constants/colors';
 import { FONTS, SPACING, BORDER_RADIUS } from '../../constants/theme';
 
-// Get screen dimensions
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 const isExpoGo = Constants.appOwnership === 'expo';
 
-// Faster loading URLs (some platforms have lighter versions)
-const PLATFORM_URLS: Record<string, { main: string; lite?: string }> = {
-  dexscreener: { 
-    main: 'https://dexscreener.com/solana',
-    lite: 'https://dexscreener.com/solana'
-  },
-  raydium: { 
-    main: 'https://raydium.io/swap/',
-    lite: 'https://raydium.io/swap/?useOptimized=true'
-  },
-  bonk: { 
-    main: 'https://bonk.fun/',
-  },
-  pumpfun: { 
-    main: 'https://pump.fun/',
-    lite: 'https://pump.fun/board'
-  },
-  orca: { 
-    main: 'https://www.orca.so/',
-    lite: 'https://www.orca.so/swap'
-  },
+const PLATFORM_URLS: Record<string, string> = {
+  dexscreener: 'https://dexscreener.com/solana',
+  raydium: 'https://raydium.io/swap/',
+  bonk: 'https://bonk.fun/',
+  pumpfun: 'https://pump.fun/',
+  orca: 'https://www.orca.so/',
 };
 
 const PLATFORM_NAMES: Record<string, string> = {
@@ -68,46 +48,27 @@ interface ExternalPlatformWebViewProps {
 
 // Desktop Chrome user agent for desktop mode rendering
 const DESKTOP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-// Mobile user agent as fallback
+// Mobile user agent
 const MOBILE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36';
-// Lite mode user agent (simpler, faster)
-const LITE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36 Mobile-Optimized/1.0';
 
 export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = ({ platform, desktopMode = false }) => {
   const [loading, setLoading] = useState(true);
-  const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [zoomScale, setZoomScale] = useState(desktopMode ? 0.5 : 1);
   const [useDesktopMode, setUseDesktopMode] = useState(desktopMode);
-  const [useLiteMode, setUseLiteMode] = useState(false);
-  const [loadTimeout, setLoadTimeout] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const webViewRef = useRef<WebView>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const platformUrls = PLATFORM_URLS[platform] || { main: '' };
-  const platformUrl = useLiteMode && platformUrls.lite ? platformUrls.lite : platformUrls.main;
+  // Animated progress bar
+  const progressAnim = useRef(new Animated.Value(0)).current;
+
+  const platformUrl = PLATFORM_URLS[platform] || '';
   const platformName = PLATFORM_NAMES[platform] || platform;
-
-  // Clear timeouts on unmount
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-    };
-  }, []);
 
   // Reset states when platform changes
   useEffect(() => {
-    setZoomScale(desktopMode ? 0.5 : 1);
     setUseDesktopMode(desktopMode);
-    setUseLiteMode(false);
-    setLoadTimeout(false);
     setIsOffline(false);
-    setLoadingProgress(0);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    progressAnim.setValue(0);
   }, [platform, desktopMode]);
 
   // Monitor network state
@@ -120,53 +81,21 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     return () => unsubscribe.remove();
   }, []);
 
-  // Start loading timeout
-  const startLoadTimeout = useCallback(() => {
-    setLoadTimeout(false);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    
-    timeoutRef.current = setTimeout(() => {
-      if (loading) {
-        setLoadTimeout(true);
-      }
-    }, 15000);
-  }, [loading]);
+  // Animate the progress bar
+  const animateProgress = useCallback((toValue: number, duration: number) => {
+    Animated.timing(progressAnim, {
+      toValue,
+      duration,
+      useNativeDriver: false,
+    }).start();
+  }, [progressAnim]);
 
-  // Simulate progress for better UX
-  const startProgressSimulation = useCallback(() => {
-    setLoadingProgress(0);
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-    
-    progressIntervalRef.current = setInterval(() => {
-      setLoadingProgress(prev => {
-        if (prev >= 90) return prev;
-        return prev + Math.random() * 15;
-      });
-    }, 300);
-  }, []);
-
-  // Stop progress simulation
-  const stopProgressSimulation = useCallback(() => {
-    if (progressIntervalRef.current) {
-      clearInterval(progressIntervalRef.current);
-      progressIntervalRef.current = null;
-    }
-    setLoadingProgress(100);
-  }, []);
-
-  // Calculate scale to fit desktop site to screen width
-  const getDesktopScale = () => {
-    const desktopDesignWidth = 1280;
-    return Math.max(0.25, Math.min(1, SCREEN_WIDTH / desktopDesignWidth));
-  };
-
-  // Inject JavaScript to control zoom and viewport for desktop mode
-  const getViewportScript = (isDesktop: boolean, _scale: number) => {
-    const desktopScale = getDesktopScale();
+  // Inject JavaScript to control viewport for desktop mode
+  const getViewportScript = (isDesktop: boolean) => {
     return `
     (function() {
       function applyDesktopMode() {
-        // Force desktop viewport
+        // Remove any existing viewport meta
         const existingViewport = document.querySelector('meta[name=viewport]');
         if (existingViewport) {
           existingViewport.remove();
@@ -175,57 +104,40 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         const meta = document.createElement('meta');
         meta.name = 'viewport';
         
+        // Remove any previously injected desktop styles
+        const existingStyle = document.getElementById('desktop-mode-style');
+        if (existingStyle) existingStyle.remove();
+        
         if (${isDesktop}) {
-          // Critical: Use device-width but set initial-scale to zoom out
-          // This makes the desktop site fit the screen width
-          meta.content = 'width=device-width, initial-scale=' + ${desktopScale} + ', minimum-scale=0.1, maximum-scale=5.0, user-scalable=yes';
+          // Set viewport width to 1280px (desktop width).
+          // The WebView's scalesPageToFit will scale it down to fit the screen.
+          meta.content = 'width=1280, minimum-scale=0.1, maximum-scale=5.0, user-scalable=yes';
           
-          // Apply comprehensive desktop scaling CSS
+          // Only ensure containers don't cap at a mobile max-width
           const desktopStyle = document.createElement('style');
           desktopStyle.id = 'desktop-mode-style';
           desktopStyle.textContent = 
-            'html { width: 100% !important; min-width: 100% !important; zoom: ' + ${desktopScale} + ' !important; transform-origin: top left !important; }' +
-            'body { width: 100% !important; min-width: 100% !important; zoom: ' + ${desktopScale} + ' !important; transform-origin: top left !important; margin: 0 !important; padding: 0 !important; }' +
-            '#root, #app, #__next, .app, .container { width: 100% !important; max-width: none !important; }' +
+            '#root, #app, #__next, .app, .container { max-width: none !important; }' +
             '* { box-sizing: border-box !important; }';
-          
-          const existingStyle = document.getElementById('desktop-mode-style');
-          if (existingStyle) existingStyle.remove();
-          
           document.head.appendChild(desktopStyle);
-          
-          // Also try to scale the root element if it exists
-          const rootEl = document.getElementById('root') || document.getElementById('app') || document.body;
-          if (rootEl) {
-            rootEl.style.zoom = '${desktopScale}';
-            rootEl.style.transformOrigin = 'top left';
-          }
         } else {
           meta.content = 'width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=3.0, user-scalable=yes';
-          
-          const existingStyle = document.getElementById('desktop-mode-style');
-          if (existingStyle) existingStyle.remove();
         }
         
         document.head.appendChild(meta);
       }
       
-      // Apply immediately
+      // Apply immediately and re-apply to override any site scripts
       applyDesktopMode();
-      
-      // Re-apply after a short delay to override any site scripts
       setTimeout(applyDesktopMode, 100);
       setTimeout(applyDesktopMode, 500);
-      setTimeout(applyDesktopMode, 1000);
+      setTimeout(applyDesktopMode, 1500);
       
       // Watch for viewport changes and re-apply
       const observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
           if (mutation.type === 'attributes' && mutation.attributeName === 'content') {
-            const vp = document.querySelector('meta[name=viewport]');
-            if (vp && ${isDesktop} && !vp.content.includes('initial-scale=' + ${desktopScale})) {
-              applyDesktopMode();
-            }
+            applyDesktopMode();
           }
         });
       });
@@ -244,26 +156,22 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
   // Apply viewport settings when desktop mode changes or page loads
   useEffect(() => {
     if (webViewRef.current && !loading && !error) {
-      webViewRef.current.injectJavaScript(getViewportScript(useDesktopMode, zoomScale));
+      webViewRef.current.injectJavaScript(getViewportScript(useDesktopMode));
     }
-  }, [zoomScale, loading, error, useDesktopMode]);
-
-  // Toggle lite mode for faster loading
-  const toggleLiteMode = () => {
-    setUseLiteMode(prev => !prev);
-    setLoading(true);
-    setError(null);
-    startProgressSimulation();
-    startLoadTimeout();
-  };
+  }, [loading, error, useDesktopMode]);
 
   const handleRetry = () => {
     setError(null);
     setLoading(true);
-    setLoadTimeout(false);
     setIsOffline(false);
-    startProgressSimulation();
-    startLoadTimeout();
+    progressAnim.setValue(0);
+    webViewRef.current?.reload();
+  };
+
+  // Determine user agent based on mode
+  const getUserAgent = () => {
+    if (useDesktopMode) return DESKTOP_USER_AGENT;
+    return MOBILE_USER_AGENT;
   };
 
   // Error state
@@ -274,13 +182,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
           {isOffline ? <WifiOff size={48} color={COLORS.error} /> : <AlertTriangle size={48} color={COLORS.error} />}
           <Text style={styles.errorTitle}>{isOffline ? 'No Connection' : 'Platform Unavailable'}</Text>
           <Text style={styles.errorText}>{error}</Text>
-          
-          {loadTimeout && !useLiteMode && platformUrls.lite && (
-            <TouchableOpacity style={styles.liteModeButton} onPress={toggleLiteMode}>
-              <Text style={styles.liteModeText}>Try Lite Mode</Text>
-            </TouchableOpacity>
-          )}
-          
+
           <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
             <RefreshCw size={16} color={COLORS.textPrimary} />
             <Text style={styles.retryText}>Retry</Text>
@@ -309,47 +211,19 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
     );
   }
 
-  // Determine user agent based on mode
-  const getUserAgent = () => {
-    if (useLiteMode) return LITE_USER_AGENT;
-    if (useDesktopMode) return DESKTOP_USER_AGENT;
-    return MOBILE_USER_AGENT;
-  };
+  // Progress bar width interpolation
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+  });
 
-  // Native WebView - Ultra Performance Optimized
+  // Native WebView - Progressive Loading (WebView shown immediately)
   return (
     <View style={styles.container}>
-      {/* Loading Overlay with Progress */}
+      {/* Thin progress bar at the very top - only visible while loading */}
       {loading && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color={COLORS.solana} />
-          <Text style={styles.loadingText}>
-            {useLiteMode ? `Loading ${platformName} Lite...` : `Loading ${platformName}...`}
-          </Text>
-          
-          {/* Progress bar */}
-          <View style={styles.progressBarContainer}>
-            <View style={[styles.progressBar, { width: `${Math.min(loadingProgress, 100)}%` }]} />
-          </View>
-          
-          <Text style={styles.loadingSubtext}>
-            {loadingProgress < 30 ? 'Connecting...' : 
-             loadingProgress < 60 ? 'Loading content...' : 
-             loadingProgress < 90 ? 'Optimizing...' : 
-             'Almost ready...'}
-          </Text>
-          
-          {loadTimeout && (
-            <TouchableOpacity style={styles.stillLoadingButton} onPress={handleRetry}>
-              <Text style={styles.stillLoadingText}>Taking too long? Tap to retry</Text>
-            </TouchableOpacity>
-          )}
-          
-          {!useLiteMode && platformUrls.lite && (
-            <TouchableOpacity style={styles.liteModeOption} onPress={toggleLiteMode}>
-              <Text style={styles.liteModeOptionText}>Try Lite Mode for faster loading</Text>
-            </TouchableOpacity>
-          )}
+        <View style={styles.progressBarContainer}>
+          <Animated.View style={[styles.progressBar, { width: progressWidth }]} />
         </View>
       )}
 
@@ -361,10 +235,10 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         </View>
       )}
 
-      {/* WebView - Ultra Performance Optimized */}
+      {/* WebView - Shown immediately, content streams in progressively */}
       <WebView
         ref={webViewRef}
-        source={{ 
+        source={{
           uri: platformUrl,
           headers: {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -379,19 +253,18 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         style={[styles.webView, desktopMode ? styles.webViewDesktopMode : null]}
         onLoadStart={() => {
           setLoading(true);
-          startProgressSimulation();
-          startLoadTimeout();
+          // Animate progress to ~85% during load
+          animateProgress(85, 8000);
         }}
         onLoadEnd={() => {
-          setLoading(false);
-          stopProgressSimulation();
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          // Quickly animate to 100% and hide
+          animateProgress(100, 200);
+          setTimeout(() => setLoading(false), 300);
         }}
         onError={(e) => {
           setLoading(false);
-          stopProgressSimulation();
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          
+          progressAnim.setValue(0);
+
           const errorDesc = e.nativeEvent.description || '';
           if (errorDesc.includes('network') || errorDesc.includes('Internet')) {
             setIsOffline(true);
@@ -403,8 +276,7 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         onHttpError={(e) => {
           if (e.nativeEvent.statusCode >= 400) {
             setLoading(false);
-            stopProgressSimulation();
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+            progressAnim.setValue(0);
             setError(`Server error (${e.nativeEvent.statusCode}). Please try again later.`);
           }
         }}
@@ -421,27 +293,28 @@ export const ExternalPlatformWebView: React.FC<ExternalPlatformWebViewProps> = (
         scalesPageToFit={true}
         setBuiltInZoomControls={true}
         setDisplayZoomControls={false}
-        startInLoadingState={true}
-        textZoom={useLiteMode ? 90 : 100}
+        startInLoadingState={false}
+        textZoom={100}
         sharedCookiesEnabled={true}
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
         androidLayerType="hardware"
-        injectedJavaScript={getViewportScript(useDesktopMode, zoomScale)}
+        injectedJavaScript={getViewportScript(useDesktopMode)}
         onNavigationStateChange={(navState: WebViewNavigation) => {
           if (navState.loading) {
             setLoading(true);
-            startProgressSimulation();
+            progressAnim.setValue(0);
+            animateProgress(85, 8000);
           } else {
-            setLoading(false);
-            stopProgressSimulation();
+            animateProgress(100, 200);
+            setTimeout(() => setLoading(false), 300);
             // Re-apply desktop mode after page fully loads
             if (useDesktopMode && webViewRef.current) {
               setTimeout(() => {
-                webViewRef.current?.injectJavaScript(getViewportScript(useDesktopMode, zoomScale));
+                webViewRef.current?.injectJavaScript(getViewportScript(useDesktopMode));
               }, 500);
               setTimeout(() => {
-                webViewRef.current?.injectJavaScript(getViewportScript(useDesktopMode, zoomScale));
+                webViewRef.current?.injectJavaScript(getViewportScript(useDesktopMode));
               }, 1500);
             }
           }
@@ -521,20 +394,6 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.l,
     paddingHorizontal: SPACING.m,
   },
-  liteModeButton: {
-    backgroundColor: COLORS.solana + '30',
-    paddingHorizontal: SPACING.l,
-    paddingVertical: SPACING.s,
-    borderRadius: BORDER_RADIUS.medium,
-    marginBottom: SPACING.m,
-    borderWidth: 1,
-    borderColor: COLORS.solana,
-  },
-  liteModeText: {
-    ...FONTS.sfProMedium,
-    fontSize: 14,
-    color: COLORS.solana,
-  },
   retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -549,57 +408,19 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginLeft: SPACING.xs,
   },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    zIndex: 10,
-  },
-  loadingText: {
-    ...FONTS.orbitronMedium,
-    fontSize: 16,
-    color: COLORS.textPrimary,
-    marginTop: SPACING.m,
-  },
+  // Thin progress bar at the top of the WebView
   progressBarContainer: {
-    width: 200,
-    height: 4,
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: BORDER_RADIUS.full,
-    marginTop: SPACING.m,
-    overflow: 'hidden',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: 'transparent',
+    zIndex: 20,
   },
   progressBar: {
     height: '100%',
     backgroundColor: COLORS.solana,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  loadingSubtext: {
-    ...FONTS.sfProRegular,
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.s,
-  },
-  stillLoadingButton: {
-    marginTop: SPACING.l,
-    padding: SPACING.s,
-  },
-  stillLoadingText: {
-    ...FONTS.sfProMedium,
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    textDecorationLine: 'underline',
-  },
-  liteModeOption: {
-    marginTop: SPACING.m,
-    padding: SPACING.s,
-  },
-  liteModeOptionText: {
-    ...FONTS.sfProMedium,
-    fontSize: 12,
-    color: COLORS.solana,
-    textDecorationLine: 'underline',
   },
   offlineBanner: {
     position: 'absolute',
