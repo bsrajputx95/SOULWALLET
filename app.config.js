@@ -12,7 +12,7 @@ module.exports = {
     // Use static runtime version to avoid platform mismatch issues
     runtimeVersion: '1.0.0',
     updates: {
-      url: 'https://u.expo.dev/39377c11-1e45-436d-95c7-267e708b6b86',
+      url: 'https://u.expo.dev/12a94060-924c-4280-a06f-a522cf7ed700',
       checkAutomatically: 'ON_LOAD',
     },
     splash: {
@@ -46,7 +46,7 @@ module.exports = {
         origin: 'https://rork.com/',
       },
       eas: {
-        projectId: '39377c11-1e45-436d-95c7-267e708b6b86',
+        projectId: '12a94060-924c-4280-a06f-a522cf7ed700',
       },
     },
     owner: 'bhavanisinghx18',
