@@ -65,7 +65,7 @@ class ApiClient {
 
     // Default timeout: 15 seconds
     const timeoutMs = options.timeout || 15000;
-    
+
     // Create abort controller for timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -76,15 +76,17 @@ class ApiClient {
         headers,
         signal: controller.signal,
       });
-      
+
       clearTimeout(timeoutId);
-      
+
       if (!response.ok) {
         const message = await getErrorMessage(response);
         const err = new Error(message) as ApiError;
         err.status = response.status;
         // Handle 401 Unauthorized - clear session and redirect to login
-        if (response.status === 401) {
+        // Skip redirect for auth endpoints (login/register) since user is already on auth page
+        const isAuthEndpoint = endpoint === '/login' || endpoint === '/register';
+        if (response.status === 401 && !isAuthEndpoint) {
           await clearSession();
 
           if (authLogout) {
