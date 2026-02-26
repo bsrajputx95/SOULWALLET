@@ -370,7 +370,7 @@ export default function SignupNewScreen() {
                 <ScrollView
                     style={styles.container}
                     contentContainerStyle={styles.scrollContent}
-                    keyboardShouldPersistTaps="handled"
+                    keyboardShouldPersistTaps="always"
                     showsVerticalScrollIndicator={false}
                     bounces={false}
                 >

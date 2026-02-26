@@ -29,7 +29,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, fetchCopyConfig, fetchCopyPositions, CopyPosition, api } from '@/services';
 import { fetchTrendingTokens } from '@/services/market';
-import { showErrorToast, validateSession } from '@/utils';
+import { showErrorToast } from '@/utils';
 import { useAlert } from '@/contexts/AlertContext';
 
 
@@ -98,7 +98,6 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    void validateSession();
     void fetchUserProfile();
   }, [fetchUserProfile]);
 

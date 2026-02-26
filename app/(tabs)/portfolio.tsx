@@ -27,7 +27,7 @@ import { fetchBalances, hasLocalWallet, getLocalPublicKey, Holding, sendTransact
 import { fetchCopyConfig, createCopyConfig, stopCopyTrading, fetchCopyWallet, createCopyWallet, withdrawCopyWallet, CopyTradingWallet, fetchCopyPositions, CopyPosition } from '@/services/copyTrading';
 import { getMyIBuyBag, IBuyPosition } from '@/services/ibuy';
 import { getTriggerOrders, cancelTriggerOrder, TriggerOrder } from '@/services/trigger';
-import { validateSession } from '@/utils';
+
 import { useAlert } from '@/contexts/AlertContext';
 
 // Static dummy types for pure UI mode
@@ -247,10 +247,10 @@ export default function PortfolioScreen() {
       const token = await SecureStore.getItemAsync('token');
       if (!token) return;
       if (signal?.aborted) return;
-      
+
       const result = await fetchCopyConfig(token);
       if (signal?.aborted) return;
-      
+
       if (result.success && result.config) {
         const cfg = result.config;
         setCopiedWallets([{
@@ -291,7 +291,7 @@ export default function PortfolioScreen() {
 
       const walletResult = await fetchCopyWallet(token);
       if (signal?.aborted) return;
-      
+
       if (walletResult.success) {
         setCopyWallet(walletResult.wallet || null);
       } else {
@@ -308,7 +308,7 @@ export default function PortfolioScreen() {
   const loadPositions = useCallback(async (signal?: AbortSignal) => {
     try {
       if (signal?.aborted) return;
-      
+
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
         setIBuyPositions([]);
@@ -322,7 +322,7 @@ export default function PortfolioScreen() {
         getMyIBuyBag(),
         fetchCopyPositions(token)
       ]);
-      
+
       if (signal?.aborted) return;
 
       if (iBuyRes.success) {
@@ -341,10 +341,10 @@ export default function PortfolioScreen() {
     try {
       if (signal?.aborted) return;
       setIsOrdersLoading(true);
-      
+
       const orders = await getTriggerOrders('open');
       if (signal?.aborted) return;
-      
+
       setTriggerOrders(orders);
     } catch (e) {
       if (__DEV__) console.warn('Failed to load trigger orders', e);
@@ -573,7 +573,7 @@ export default function PortfolioScreen() {
       // Fetch balances from backend (works even if no local wallet)
       const portfolio = await fetchBalances(token);
       if (signal?.aborted) return;
-      
+
       if (portfolio) {
         setTotalBalance(portfolio.totalUsdValue);
         // Use public key from backend if not available locally
@@ -636,10 +636,7 @@ export default function PortfolioScreen() {
     ]);
   }, [fetchUserProfile, fetchWalletData]);
 
-  // Validate session on mount
-  useEffect(() => {
-    void validateSession();
-  }, []);
+
 
   // Edit modal state — declared before useFocusEffect so we can skip refresh when modal is open
   const [selectedWallet, setSelectedWallet] = useState<CopiedWallet | null>(null);
@@ -666,11 +663,11 @@ export default function PortfolioScreen() {
     useCallback(() => {
       // Skip refresh when edit modal is open to prevent input flickering
       if (selectedWallet) return;
-      
+
       // Create new abort controller for this focus session
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
-      
+
       const loadAll = async () => {
         setIsLoading(true);
         await Promise.all([
@@ -831,11 +828,11 @@ export default function PortfolioScreen() {
   // FIXED: Pull-to-refresh with AbortController and proper error handling
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    
+
     // Create abort controller for refresh
     const controller = new AbortController();
     const signal = controller.signal;
-    
+
     try {
       await Promise.all([
         refetch(signal),
@@ -1257,8 +1254,8 @@ export default function PortfolioScreen() {
                         <View style={styles.walletHeader}>
                           <View style={styles.walletInfo}>
                             <Text style={styles.walletUsername}>
-                              {order.inputMint === 'So11111111111111111111111111111111111111112' ? 'SOL' : 'Token'} 
-                              → 
+                              {order.inputMint === 'So11111111111111111111111111111111111111112' ? 'SOL' : 'Token'}
+                              →
                               {order.outputMint === 'So11111111111111111111111111111111111111112' ? 'SOL' : 'Token'}
                             </Text>
                             <Text style={styles.copiedWalletAddress}>
