@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Mail, Lock, LogIn, Eye, EyeOff, AlertCircle } from 'lucide-react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { COLORS, FONTS } from '@/constants';
@@ -38,7 +38,7 @@ type FieldErrors = {
 };
 
 export default function LoginNewScreen() {
-    const router = useRouter();
+
     const { setToken } = useAuth();
 
     const [email, setEmail] = useState('');
@@ -207,9 +207,7 @@ export default function LoginNewScreen() {
             }
             await persistAuthSession(data.token, data.user);
             setToken(data.token);
-
-            // Navigate to main app on success
-            router.replace('/(tabs)');
+            // Navigation is handled automatically by root layout auth redirect
         } catch (error: unknown) {
             setErrors(prev => ({ ...prev, general: getLoginErrorMessage(error) }));
             // Scroll to top so user can see the error message

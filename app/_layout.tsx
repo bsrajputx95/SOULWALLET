@@ -1,4 +1,4 @@
-import { Stack } from "expo-router";
+import { Stack, useSegments, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React from "react";
 import { useEffect, useState } from "react";
@@ -7,7 +7,7 @@ import { useFonts, Orbitron_400Regular, Orbitron_500Medium, Orbitron_700Bold } f
 import { View, StyleSheet, Platform } from "react-native";
 import { COLORS } from "@/constants";
 import { ErrorBoundary, WebPreviewBanner } from "@/components";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AlertProvider } from "@/contexts/AlertContext";
 
 
@@ -16,6 +16,24 @@ import { AlertProvider } from "@/contexts/AlertContext";
 void SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
+  const { token, isLoading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (token && inAuthGroup) {
+      // User is logged in but on auth screen — go to main app
+      router.replace('/(tabs)');
+    } else if (!token && !inAuthGroup) {
+      // User is NOT logged in and on a protected screen — go to login
+      router.replace('/(auth)/login');
+    }
+  }, [token, isLoading, segments]);
+
   return (
     <Stack screenOptions={{
       headerShown: false,
