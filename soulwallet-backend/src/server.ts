@@ -14,6 +14,7 @@ import { getConnection, executeRpcCall, getRpcStatus } from './services/rpcManag
 import NodeCache from 'node-cache';
 import { getFeed } from './services/feedService';
 import { verifyToken } from './services/tokenVerifier';
+import { initBotEngine } from './services/botEngine';
 
 // Load environment variables
 dotenv.config();
@@ -3980,4 +3981,6 @@ setTimeout(() => {
 
 app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
+    // Initialize bot engine (seeds accounts, starts post/like crons)
+    initBotEngine().catch(err => console.error('[BotEngine] Init error:', err));
 });
