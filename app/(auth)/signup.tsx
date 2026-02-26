@@ -65,6 +65,7 @@ export default function SignupNewScreen() {
     const emailInputRef = useRef<TextInput>(null);
     const passwordInputRef = useRef<TextInput>(null);
     const confirmPasswordInputRef = useRef<TextInput>(null);
+    const scrollViewRef = useRef<ScrollView>(null);
 
     // Real-time validation functions
     const validateUsername = useCallback((value: string): ValidationError | null => {
@@ -315,6 +316,8 @@ export default function SignupNewScreen() {
             router.replace('/(tabs)');
         } catch (error: unknown) {
             setErrors(prev => ({ ...prev, general: getSignupErrorMessage(error) }));
+            // Scroll to top so user can see the error message
+            scrollViewRef.current?.scrollTo({ y: 0, animated: true });
             if (Platform.OS !== 'web') {
                 void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             }
@@ -368,6 +371,7 @@ export default function SignupNewScreen() {
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
                 <ScrollView
+                    ref={scrollViewRef}
                     style={styles.container}
                     contentContainerStyle={styles.scrollContent}
                     keyboardShouldPersistTaps="always"
@@ -577,6 +581,7 @@ export default function SignupNewScreen() {
                     <LinearGradient
                         colors={[COLORS.usdc + '20', 'transparent']}
                         style={styles.bottomGlow}
+                        pointerEvents="none"
                     />
                 </ScrollView>
             </KeyboardAvoidingView>
