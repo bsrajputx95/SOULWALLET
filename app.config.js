@@ -49,6 +49,6 @@ module.exports = {
         projectId: '12a94060-924c-4280-a06f-a522cf7ed700',
       },
     },
-    owner: 'bhavanisinghx18',
+    owner: 'bhavanisinghx17',
   },
 };
