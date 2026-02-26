@@ -17,15 +17,24 @@ import {
 // ============================================================
 
 // ── Configuration ──
-const POST_INTERVAL_MS = 30 * 60 * 1000;   // Post check every 30 minutes
-const LIKE_INTERVAL_MS = 5 * 60 * 1000;    // Like drip every 5 minutes
-const MIN_PRICE_CHANGE = 8;                 // Minimum % change to post about
-const MAX_POSTS_PER_RUN = 3;                // Max posts per 30-min run
-const LIKE_BATCH_SIZE = 4;                  // Max likes to add per post per run
+const DATA_FETCH_INTERVAL_MS = 30 * 60 * 1000;  // Fetch new data every 30 minutes
+const POST_DRIP_INTERVAL_MS = 8 * 60 * 1000;    // Check queue every 8 minutes (drip one post)
+const LIKE_INTERVAL_MS = 5 * 60 * 1000;          // Like drip every 5 minutes
+const MIN_PRICE_CHANGE = 8;                       // Minimum % change to post about
+const MAX_QUEUE_SIZE = 15;                        // Max posts queued at once
+const LIKE_BATCH_SIZE = 4;                        // Max likes to add per post per run
+
+// Post queue — posts are queued from data fetch, dripped one at a time
+interface QueuedPost {
+    type: 'token' | 'news';
+    token?: TrendingToken;
+    news?: NewsItem;
+}
+const postQueue: QueuedPost[] = [];
 
 // Track what we've already posted to avoid duplicates
-const recentlyPostedTokens = new Map<string, number>(); // symbol -> timestamp
-const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // Don't re-post same token within 4 hours
+const recentlyPostedTokens = new Map<string, number>();
+const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000;
 
 // ============================================================
 // DATA SOURCES
@@ -224,9 +233,9 @@ async function createBotPost(token: TrendingToken): Promise<boolean> {
                 userId: bot.id,
                 content,
                 visibility: 'public',
-                tokenAddress: token.address || null,
-                tokenSymbol: token.symbol,
-                tokenName: token.name,
+                tokenAddress: null,
+                tokenSymbol: null,
+                tokenName: null,
                 tokenVerified: false,
                 tokenPriceAtPost: null,
             },
@@ -270,8 +279,9 @@ async function createNewsPost(news: NewsItem): Promise<boolean> {
                 userId: bot.id,
                 content,
                 visibility: 'public',
-                tokenSymbol: currency?.code || null,
-                tokenName: currency?.title || null,
+                tokenAddress: null,
+                tokenSymbol: null,
+                tokenName: null,
                 tokenVerified: false,
                 tokenPriceAtPost: null,
             },
@@ -299,34 +309,27 @@ function formatVolume(vol: number): string {
 }
 
 /**
- * Main post engine — runs every 30 minutes.
- * Priority: CryptoPanic news first, then CoinGecko + DexScreener price moves.
+ * Data fetch — runs every 30 min. Fills the post queue.
  */
-async function runPostEngine() {
+async function runDataFetch() {
     try {
-        console.log('[BotEngine] Running post engine...');
+        console.log('[BotEngine] Fetching data...');
 
-        // Fetch from all 3 sources in parallel
         const [news, trending, gainers] = await Promise.all([
             fetchCryptoPanicNews(),
             fetchCoinGeckoTrending(),
             fetchDexScreenerGainers(),
         ]);
 
-        let postCount = 0;
-
-        // 1. Post 1-2 news items (highest priority — real headlines)
+        // Queue news items (highest priority)
         const unseenNews = news.filter(n => !postedNewsIds.has(n.id));
-        const maxNewsPosts = Math.min(2, unseenNews.length);
-        for (let i = 0; i < maxNewsPosts && postCount < MAX_POSTS_PER_RUN; i++) {
-            const posted = await createNewsPost(unseenNews[i]);
-            if (posted) {
-                postCount++;
-                await sleep(2000 + Math.random() * 3000);
+        for (const item of unseenNews.slice(0, 5)) {
+            if (postQueue.length < MAX_QUEUE_SIZE) {
+                postQueue.push({ type: 'news', news: item });
             }
         }
 
-        // 2. Post about trending/gaining tokens (fill remaining slots)
+        // Queue token posts
         const allTokens = [...trending, ...gainers];
         const seen = new Set<string>();
         const unique = allTokens.filter(t => {
@@ -338,20 +341,45 @@ async function runPostEngine() {
         unique.sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h));
 
         for (const token of unique) {
-            if (postCount >= MAX_POSTS_PER_RUN) break;
-            if (Math.abs(token.change24h) < MIN_PRICE_CHANGE && postCount > 0) break;
-
-            const posted = await createBotPost(token);
-            if (posted) {
-                postCount++;
-                await sleep(2000 + Math.random() * 3000);
-            }
+            if (postQueue.length >= MAX_QUEUE_SIZE) break;
+            if (Math.abs(token.change24h) < MIN_PRICE_CHANGE) continue;
+            if (wasRecentlyPosted(token.symbol)) continue;
+            postQueue.push({ type: 'token', token });
         }
 
-        console.log(`[BotEngine] Post engine done: ${postCount} posts (${news.length} news, ${trending.length} trending, ${gainers.length} gainers available)`);
+        console.log(`[BotEngine] Data fetch done: queue has ${postQueue.length} items (${news.length} news, ${trending.length} trending, ${gainers.length} gainers)`);
     } catch (err: any) {
-        console.error('[BotEngine] Post engine error:', err.message);
+        console.error('[BotEngine] Data fetch error:', err.message);
     }
+}
+
+/**
+ * Post drip — runs every 6-10 min. Pops one post from queue and publishes it.
+ * This creates natural staggering between bot posts.
+ */
+async function runPostDrip() {
+    try {
+        if (postQueue.length === 0) return;
+
+        const item = postQueue.shift()!;
+        let posted = false;
+
+        if (item.type === 'news' && item.news) {
+            posted = await createNewsPost(item.news);
+        } else if (item.type === 'token' && item.token) {
+            posted = await createBotPost(item.token);
+        }
+
+        if (posted) {
+            console.log(`[BotEngine] Dripped 1 post (${postQueue.length} remaining in queue)`);
+        }
+    } catch (err: any) {
+        console.error('[BotEngine] Post drip error:', err.message);
+    }
+
+    // Schedule next drip with random 5-15 min jitter for organic feel
+    const jitter = (5 * 60 * 1000) + Math.random() * (10 * 60 * 1000); // 5-15 min
+    setTimeout(() => runPostDrip(), jitter);
 }
 
 // ============================================================
@@ -476,7 +504,7 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-let postInterval: NodeJS.Timeout | null = null;
+let dataFetchInterval: NodeJS.Timeout | null = null;
 let likeInterval: NodeJS.Timeout | null = null;
 let cleanupInterval: NodeJS.Timeout | null = null;
 
@@ -499,16 +527,21 @@ export async function initBotEngine() {
         const { follows } = await seedBotFollows();
         console.log(`[BotEngine] Bot follows: ${follows} new follows created`);
 
-        // Step 3: Start post engine (every 30 min, first run after 1 min)
+        // Step 3: Start data fetch (every 30 min, first run after 1 min)
         setTimeout(() => {
-            runPostEngine();
+            runDataFetch();
         }, 60 * 1000);
 
-        postInterval = setInterval(() => {
-            runPostEngine();
-        }, POST_INTERVAL_MS);
+        dataFetchInterval = setInterval(() => {
+            runDataFetch();
+        }, DATA_FETCH_INTERVAL_MS);
 
-        // Step 4: Start like engine (every 5 min, first run after 2 min)
+        // Step 4: Start post drip (first one after 3 min, then self-scheduling with random gaps)
+        setTimeout(() => {
+            runPostDrip();
+        }, 3 * 60 * 1000);
+
+        // Step 5: Start like engine (every 5 min, first run after 2 min)
         setTimeout(() => {
             runLikeEngine();
         }, 2 * 60 * 1000);
@@ -517,13 +550,14 @@ export async function initBotEngine() {
             runLikeEngine();
         }, LIKE_INTERVAL_MS);
 
-        // Step 5: Cleanup interval (every hour)
+        // Step 6: Cleanup interval (every hour)
         cleanupInterval = setInterval(() => {
             cleanupLikeTargets();
         }, 60 * 60 * 1000);
 
         console.log('[BotEngine] Initialized successfully — 100 bots active');
-        console.log(`[BotEngine] Post engine: every ${POST_INTERVAL_MS / 60000} min | Sources: CryptoPanic (${CRYPTOPANIC_KEYS.length} keys), CoinGecko, DexScreener`);
+        console.log(`[BotEngine] Data fetch: every ${DATA_FETCH_INTERVAL_MS / 60000} min | Sources: CryptoPanic (${CRYPTOPANIC_KEYS.length} keys), CoinGecko, DexScreener`);
+        console.log(`[BotEngine] Post drip: every 5-15 min (random gaps) | Target: 6-10 posts/hr`);
         console.log(`[BotEngine] Like engine: every ${LIKE_INTERVAL_MS / 60000} min`);
     } catch (err: any) {
         console.error('[BotEngine] Initialization failed:', err.message);
@@ -534,7 +568,7 @@ export async function initBotEngine() {
  * Stop the bot engine (for graceful shutdown).
  */
 export function stopBotEngine() {
-    if (postInterval) clearInterval(postInterval);
+    if (dataFetchInterval) clearInterval(dataFetchInterval);
     if (likeInterval) clearInterval(likeInterval);
     if (cleanupInterval) clearInterval(cleanupInterval);
     console.log('[BotEngine] Stopped');

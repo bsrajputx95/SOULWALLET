@@ -222,27 +222,53 @@ export const TRENDING_TEMPLATES: Record<BotTier, string[]> = {
     ],
 };
 
-// ============================================================
-// SEED FUNCTIONS
-// ============================================================
-
-const BOT_PASSWORD_HASH = '$2a$10$BotAccountNoLoginAllowed000000000000000000000000000000';
+/**
+ * Generate a unique profile image URL for a bot.
+ * Uses a mix of avatar services for variety.
+ */
+function getBotProfileImage(username: string, index: number): string {
+    // Mix of different avatar services for variety
+    const sources = [
+        // Realistic portraits (70 unique faces)
+        `https://i.pravatar.cc/300?img=${(index % 70) + 1}`,
+        // Tech/robot avatars (unique per username)
+        `https://robohash.org/${username}.png?size=300x300&set=set4`,
+        // Abstract art avatars
+        `https://robohash.org/${username}.png?size=300x300&set=set2`,
+        // Random high quality photos
+        `https://picsum.photos/seed/${username}/300/300`,
+    ];
+    // Rotate through sources based on index
+    return sources[index % sources.length];
+}
 
 /**
  * Create all 100 bot accounts in the database.
  * Skips any that already exist (by username).
+ * Also updates profile images for existing bots that don't have one.
  */
-export async function seedBotAccounts(): Promise<{ created: number; skipped: number }> {
+export async function seedBotAccounts(): Promise<{ created: number; skipped: number; updated: number }> {
     let created = 0;
     let skipped = 0;
+    let updated = 0;
 
-    // Pre-hash a dummy password (bots never login via API)
     const hashedPassword = await bcrypt.hash('bot_no_login_' + Date.now(), 10);
 
-    for (const bot of BOT_ACCOUNTS) {
+    for (let i = 0; i < BOT_ACCOUNTS.length; i++) {
+        const bot = BOT_ACCOUNTS[i];
+        const profileImage = getBotProfileImage(bot.username, i);
+
         try {
             const existing = await prisma.user.findUnique({ where: { username: bot.username } });
             if (existing) {
+                // Update profile image if missing
+                if (!existing.profileImage) {
+                    await prisma.user.update({
+                        where: { id: existing.id },
+                        data: { profileImage },
+                    });
+                    updated++;
+                }
                 skipped++;
                 continue;
             }
@@ -252,12 +278,11 @@ export async function seedBotAccounts(): Promise<{ created: number; skipped: num
                     username: bot.username,
                     email: `${bot.username}@soulwallet.bot`,
                     password: hashedPassword,
-                    profileImage: null, // No profile image for now
+                    profileImage,
                 },
             });
             created++;
         } catch (err: any) {
-            // Unique constraint violation = already exists
             if (err.code === 'P2002') {
                 skipped++;
             } else {
@@ -266,8 +291,8 @@ export async function seedBotAccounts(): Promise<{ created: number; skipped: num
         }
     }
 
-    console.log(`[BotSeed] Done: ${created} created, ${skipped} skipped`);
-    return { created, skipped };
+    console.log(`[BotSeed] Done: ${created} created, ${skipped} skipped, ${updated} profile pics updated`);
+    return { created, skipped, updated };
 }
 
 /**
